@@ -104,12 +104,12 @@ if [ -z "$input" ]; then
                         WhoisIP $singleip
                 done
                 tput sgr0
-                exit
+                exit 0
         else
                 # Input is an ASN
                 WhoisASN $asn
                 tput sgr0
-                exit
+                exit 0
         fi
 else
         # Input is an IP address
@@ -117,10 +117,10 @@ else
         if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
                 echo -e "\n\e[30m\e[101mError: no data found for $input\e[39m\e[49m"
                 tput sgr0
-                exit
+                exit 0
         fi
         echo -e "\n${green}1 IP address found:\e[39m"
         WhoisIP $input
         tput sgr0
-        exit
+        exit 0
 fi
