@@ -125,8 +125,6 @@ else
         LookupASNAndRouteFromIP $input
         if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
                 PrintErrorAndExit "Error: no data found for $input"
-                tput sgr0
-                exit 1
         fi
         echo -e "\n${green}1 IP address found:\e[39m"
         let longest=${#input}+1
