@@ -28,9 +28,9 @@ LookupASNAndRouteFromIP(){
         found_asn=""
         found_asname=""
         output=$(whois -h whois.cymru.com " -f -p $1" | sed -e 's/\ *|\ */|/g')
-        found_asn=$(echo $output | awk -F'[|]' {'print $1'})
-        found_asname=$(echo $output | awk -F'[|]' {'print $4'})
-        found_route=$(echo $output | awk -F'[|]' {'print $3'})
+        found_asn=$(echo "$output" | awk -F'[|]' {'print $1'})
+        found_asname=$(echo "$output" | awk -F'[|]' {'print $4'})
+        found_route=$(echo "$output" | awk -F'[|]' {'print $3'})
         [[ "$found_asname" == "NA" ]] && found_asname=""
         [[ "$found_route" == "NA" ]] && found_route=""
 }
@@ -82,10 +82,10 @@ if [ -z $(command -v "host") ]; then
         exit 1
 fi
 
-input=$(echo $1 | sed -e 's/\/.*//g' | grep -Eo $ipv4v6regex)
+input=$(echo "$1" | sed -e 's/\/.*//g' | grep -Eo $ipv4v6regex)
 if [ -z "$input" ]; then
         # Input is not an IP Address. Check if it is a number (ASN)
-        asn=$(echo $1 | sed -e 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
+        asn=$(echo "$1" | sed -e 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
         if [ -z "$asn" ]; then
                 # Input is not an ASN either. Consider it a hostname and try to resolve it.
                 echo -e -n "\n${blue}Resolving \"$1\"... "
