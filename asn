@@ -15,7 +15,7 @@
 ################################################################################################################
 
 WhoisASN(){
-        found_asname=$(whois -h whois.cymru.com " -f -w -c -p as$1" | sed -e 's/\ *|\ */|/g' | awk -F '[|]' {'print $3'})
+        found_asname=$(whois -h whois.cymru.com " -f -w -c -p as$1" | sed -e 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
         [[ "$found_asname" == "NO_NAME" ]] && found_asname=""
 }
 
@@ -28,15 +28,15 @@ LookupASNAndRouteFromIP(){
         found_asn=""
         found_asname=""
         output=$(whois -h whois.cymru.com " -f -p $1" | sed -e 's/\ *|\ */|/g')
-        found_asn=$(echo "$output" | awk -F'[|]' {'print $1'})
-        found_asname=$(echo "$output" | awk -F'[|]' {'print $4'})
-        found_route=$(echo "$output" | awk -F'[|]' {'print $3'})
+        found_asn=$(echo "$output" | awk -F'[|]' '{print $1}')
+        found_asname=$(echo "$output" | awk -F'[|]' '{print $4}')
+        found_route=$(echo "$output" | awk -F'[|]' '{print $3}')
         [[ "$found_asname" == "NA" ]] && found_asname=""
         [[ "$found_route" == "NA" ]] && found_route=""
 }
 
 ResolveHostnameToIPList(){
-        ip=$(host $1 | grep -Eo $ipv4v6regex)
+        ip=$(host "$1" | grep -Eo "$ipv4v6regex")
         echo -e "$ip\n"
 }
 
@@ -73,23 +73,23 @@ if [[ $# -ne 1 ]]; then
 fi
 
 # Check prerequisites
-if [ -z $(command -v "whois") ]; then
+if [ -z "$(command -v whois)" ]; then
         echo -e "\n${red}ERROR: ${white}program '${red}whois${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install whois${white} on Debian-based linux distributions)\n"
         exit 1
 fi
-if [ -z $(command -v "host") ]; then
+if [ -z "$(command -v host)" ]; then
         echo -e "\n${red}ERROR: ${white}program '${red}host${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install bind9-host${white} on Debian-based linux distributions)\n"
         exit 1
 fi
 
-input=$(echo "$1" | sed -e 's/\/.*//g' | grep -Eo $ipv4v6regex)
+input=$(echo "$1" | sed -e 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 if [ -z "$input" ]; then
         # Input is not an IP Address. Check if it is a number (ASN)
         asn=$(echo "$1" | sed -e 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
         if [ -z "$asn" ]; then
                 # Input is not an ASN either. Consider it a hostname and try to resolve it.
                 echo -e -n "\n${blue}Resolving \"$1\"... "
-                ip=$(ResolveHostnameToIPList $1)
+                ip=$(ResolveHostnameToIPList "$1")
                 if [ -z "$ip" ]; then
                         PrintErrorAndExit "Error: unable to resolve hostname"
                 fi
@@ -101,34 +101,34 @@ if [ -z "$input" ]; then
                 for singleip in $ip; do
                         [[ ${#singleip} -gt $longest ]] && longest=${#singleip}
                 done
-                let longest=$longest+1
+                (( longest++ ))
                 # output actual results
                 for singleip in $ip; do
-                        LookupASNAndRouteFromIP $singleip
-                        WhoisIP $singleip
+                        LookupASNAndRouteFromIP "$singleip"
+                        WhoisIP "$singleip"
                 done
                 tput sgr0
                 echo ""
                 exit 0
         else
                 # Input is an ASN
-                WhoisASN $asn
+                WhoisASN "$asn"
                 if [ -z "$found_asname" ]; then
                         PrintErrorAndExit "Error: no data found for AS${asn}"
                 fi
-                printf "\n${red}[AS$1] ${green}$found_asname\n${white}\n"
+                printf "\n${red}[AS%s] ${green}%s\n${white}\n" "$1" "$found_asname"
                 tput sgr0
                 exit 0
         fi
 else
         # Input is an IP address
-        LookupASNAndRouteFromIP $input
+        LookupASNAndRouteFromIP "$input"
         if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
                 PrintErrorAndExit "Error: no data found for $input"
         fi
         echo -e "\n${green}1 IP address found:\e[39m"
-        let longest=${#input}+1
-        WhoisIP $input
+        (( longest=${#input}+1 ))
+        WhoisIP "$input"
         tput sgr0
         echo ""
         exit 0
