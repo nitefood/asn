@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 
 ################################################################################################################
-# ---------------------------------------------------------------------------
-# ASN/IPv4/IPv6/Prefix lookup tool. Uses Team Cymru's whois service for data.
-# ---------------------------------------------------------------------------
+# -----------------------------------------------------------------------------------
+# ASN/IPv4/IPv6/Prefix/AS Path lookup tool. Uses Team Cymru's whois service for data.
+# -----------------------------------------------------------------------------------
 # example usage:
 #  asn <ASnumber>      -- to lookup matching ASN data. Supports "as123" and "123" formats (case insensitive)
 #  asn <IPv4/IPv6>     -- to lookup matching route(4/6) and ASN data
@@ -36,16 +36,128 @@ LookupASNAndRouteFromIP(){
 }
 
 ResolveHostnameToIPList(){
-        ip=$(host "$1" | grep -Eo "$ipv4v6regex")
+        ip=$(host "$1" 2>/dev/null | grep -Eo "$ipv4v6regex")
         echo -e "$ip\n"
 }
 
 PrintUsage(){
-        echo -e "\n${yellow}Example usage:\n"
-        echo -e "\t${green}$0 <ASnumber>${white}\t-- to lookup matching ASN data. Supports \"as123\" and \"123\" formats (case insensitive)"
-        echo -e "\t${green}$0 <IPv4/IPv6>${white}\t-- to lookup matching route and ASN data"
-        echo -e "\t${green}$0 <ROUTE>${white}\t\t-- to lookup matching ASN data"
-        echo -e "\t${green}$0 <host.name.tld>${white}\t-- to lookup matching IP, route and ASN data (supports multiple IPs - e.g. DNS RR)\n"
+        programname=$(basename "$0")
+        echo -e "\nASN Lookup Tool\
+        \n\n\nUsage:\n\t${white}$programname [-n] TARGET${default}\n\nOptions:\n\
+        \n  ${white}-n, --notrace\n\t${default}Disable tracing the AS path to the TARGET\n\nSupported targets:\n\
+        \n  ${white}<AS Number>\n\t(to lookup matching ASN data. Supports \"as123\" and \"123\" formats - case insensitive)\
+        \n  ${white}<IPv4/IPv6>\n\t(to lookup matching route and ASN data)\
+        \n  ${white}<Prefix>\n\t(to lookup matching ASN data)\
+        \n  ${white}<host.name.tld>\n\t(to lookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR)\
+        \n\
+        \nNote: AS path tracing will be performed only for single IPs/DNS lookup results.
+        "
+}
+
+TraceASPath(){
+        input="$1"
+        collecting_message="\n\e[47m\e[30mCollecting mtr output (press CTRL-C to cancel)...\e[49m"
+        echo -en "$collecting_message"
+        # fetch raw mtr results beginning with :
+        # - h ("hostline", or IPs) 
+        # - d ("dnsline", or hostnames)
+        # - p ("pingline", or latencies)
+        # see https://github.com/traviscross/mtr/blob/master/FORMATS
+        mtr_output=$(mtr -l -c10 "$input" | grep "^[hdp]")
+        declare -a hostline_array
+        declare -a dnsline_array
+        declare -a pingline_array
+        declare -a aspath_array
+        # cache the previously looked-up AS to save one lookup (target/last hop)
+        saved_asn=$found_asn
+        saved_asname=$found_asname
+        privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
+        for raw_mtr_line in $mtr_output; do
+                mtr_type=$(echo "$raw_mtr_line" | cut -d ' ' -f 1)
+                mtr_hopnum=$(echo "$raw_mtr_line" | cut -d ' ' -f 2)
+                mtr_data=$(echo "$raw_mtr_line" | cut -d ' ' -f 3)
+                case "$mtr_type" in
+                        "h")
+                                # this is a hostline ($mtr_data is an IP address)
+                                hostline_array["$mtr_hopnum"]="$mtr_data"
+                                ;;
+                        "d")
+                                # this is a dnsline ($mtr_data is a hostname)
+                                dnsline_array["$mtr_hopnum"]="$mtr_data"
+                                ;;
+                        "p")
+                                # this is a pingline ($mtr_data is a latency value in microseconds)
+                                pingline_array["$mtr_hopnum"]=$(echo "$mtr_data" | awk '{ printf( "%.1f\n", $1/1000) }') # convert to milliseconds, round to 1 digit precision (mtr-style)
+                                ;;
+                esac
+        done
+
+        # mtr finished, parse and format results
+        trace_output=$(printf "\e[100m${white}\e[1m%4s %-61s %16s     %s\e[49m" "Hop" "${white}IP Address" "Ping" "${white}AS Information")
+        cur_hop_count=1
+        last_hop=false
+        for mtr_hopnum in "${!hostline_array[@]}"; do
+                hop_ip=${hostline_array[$mtr_hopnum]}
+                # AS DATA lookup
+                # check if IP is in private addressing space
+                if [[ $hop_ip =~ $privateregex ]]; then
+                        asn_data="${white}(Private network)${default}"
+                else
+                        # not a private address, try saving a lookup
+                        # (if $hop_ip = our target, ie we're at the last hop)
+                        if [ "$hop_ip" = "$userinput" ]; then
+                                found_asn=$saved_asn
+                                found_asname=$saved_asname
+                                # avoid adding the same AS multiple times in a row in the summary path
+                                aspath_entry=$(printf "AS%s [%s]${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+                                if [[ ${#aspath_array[@]} -eq 0 ]] || [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
+                                        aspath_array+=("$aspath_entry")
+                                fi
+                                asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+                                last_hop=true
+                        else
+                                # not the last hop. Lookup hop data
+                                LookupASNAndRouteFromIP "$hop_ip"
+                                if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
+                                        # no data found
+                                        asn_data="${yellow}(No data)${default}"
+                                else
+                                        # lookup success
+                                        asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+                                        # avoid adding the same AS multiple times in a row in the summary path
+                                        aspath_entry=$(printf "AS%s [%s]${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+                                        if [[ ${#aspath_array[@]} -eq 0 ]] || [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
+                                                aspath_array+=("$aspath_entry")
+                                        fi
+                                fi
+                        fi
+                fi
+
+                # DNS data (only used if a hostname was resolved)
+                if [ -n "${dnsline_array[$mtr_hopnum]}" ] && [ "${dnsline_array[$mtr_hopnum]}" != "$hop_ip" ]; then
+                        saveip=$hop_ip
+                        hop_ip="${dnsline_array[$mtr_hopnum]} ($saveip)"
+                fi
+
+                # PING data
+                ping_data="${pingline_array[$mtr_hopnum]} ms"
+                [[ "$ping_data" = " ms" ]] && ping_data="*"
+
+                # account for missing (no reply) hops
+                while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
+                        trace_output+=$(printf "\n%3s. %-80s %10s   %s" "$cur_hop_count" "${white}???${default}" "???" "${white}(No reply)${default}")
+                        ((cur_hop_count++))
+                done
+                trace_output+=$(printf "\n%3s. %-80s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
+                [[ "$last_hop" = true ]] && break
+                (( cur_hop_count++ ))
+        done
+        printf "\r%${#collecting_message}s\r" " " # to delete the previous "collecting" text
+        echo -en "${green}===== ${white}AS path to $userinput ${green}=====${default}\n\n (localhost)"
+        for as in "${aspath_array[@]}"; do
+                echo -en " -> ${yellow}${as}${default}"
+        done
+        echo -e " -> (target)\n\n${green}===== ${white}Detailed trace ${green}=====${default}\n\n${trace_output}\n"
 }
 
 PrintErrorAndExit(){
@@ -54,11 +166,20 @@ PrintErrorAndExit(){
         exit 1
 }
 
+Ctrl_C() {
+        PrintErrorAndExit "Interrupted"
+}
+
+IFS=$'\n\t'
 green="\e[32m"
 yellow="\e[33m"
 white="\e[97m"
 blue="\e[94m"
 red="\e[31m"
+default="\e[39m\e[49m"
+
+trap Ctrl_C INT
+
 ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
 '([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|'\
 '([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|'\
@@ -67,12 +188,39 @@ ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:)
 '1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
 
 # Check cmdline parameters
-if [[ $# -ne 1 ]]; then
+if [[ $# -lt 1 ]]; then
         PrintUsage
         exit 1
 fi
+case "$1" in
+        "-n"|"--notrace")
+                if [[ $# -lt 2 ]]; then
+                        PrintUsage
+                        echo -e "Error: missing ${red}TARGET${default}\n"
+                        exit 1
+                fi
+	        TRACEASNPATH=false
+                userinput="$2"
+	        ;;
+        *)
+                if [ "${1:0:1}" = "-" ]; then
+                         PrintUsage
+                         echo -e "Error: unknown option ${red}$1${default}\n"
+                         exit 1
+                else
+                        TRACEASNPATH=true
+                        userinput="$1"
+                fi
+                ;;
+esac
 
 # Check prerequisites
+# TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed
+if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
+        echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
+        "\non Debian-based linux distributions) to enable AS path tracing"
+        TRACEASNPATH=false
+fi
 if [ -z "$(command -v whois)" ]; then
         echo -e "\n${red}ERROR: ${white}program '${red}whois${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install whois${white} on Debian-based linux distributions)\n"
         exit 1
@@ -82,14 +230,14 @@ if [ -z "$(command -v host)" ]; then
         exit 1
 fi
 
-input=$(echo "$1" | sed -e 's/\/.*//g' | grep -Eo "$ipv4v6regex")
+input=$(echo "$userinput" | sed -e 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 if [ -z "$input" ]; then
         # Input is not an IP Address. Check if it is a number (ASN)
-        asn=$(echo "$1" | sed -e 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
+        asn=$(echo "$userinput" | sed -e 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
         if [ -z "$asn" ]; then
                 # Input is not an ASN either. Consider it a hostname and try to resolve it.
-                echo -e -n "\n${blue}Resolving \"$1\"... "
-                ip=$(ResolveHostnameToIPList "$1")
+                echo -e -n "\n${blue}Resolving \"$userinput\"... "
+                ip=$(ResolveHostnameToIPList "$userinput")
                 if [ -z "$ip" ]; then
                         PrintErrorAndExit "Error: unable to resolve hostname"
                 fi
@@ -107,6 +255,10 @@ if [ -z "$input" ]; then
                         LookupASNAndRouteFromIP "$singleip"
                         WhoisIP "$singleip"
                 done
+                # Check if AS path tracing is requested
+                if [ $TRACEASNPATH = true ] && [[ $numips = 1 ]]; then
+                        TraceASPath "$ip"
+                fi
                 tput sgr0
                 echo ""
                 exit 0
@@ -116,7 +268,7 @@ if [ -z "$input" ]; then
                 if [ -z "$found_asname" ]; then
                         PrintErrorAndExit "Error: no data found for AS${asn}"
                 fi
-                printf "\n${red}[AS%s] ${green}%s\n${white}\n" "$1" "$found_asname"
+                printf "\n${red}[AS%s] ${green}%s\n${white}\n" "$userinput" "$found_asname"
                 tput sgr0
                 exit 0
         fi
@@ -129,6 +281,10 @@ else
         echo -e "\n${green}1 IP address found:\e[39m"
         (( longest=${#input}+1 ))
         WhoisIP "$input"
+        # Check if AS path tracing is requested
+        if [ $TRACEASNPATH = true ]; then
+                TraceASPath "$input"
+        fi
         tput sgr0
         echo ""
         exit 0
