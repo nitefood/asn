@@ -4,7 +4,7 @@
 
 ASN/IPv4/IPv6/Prefix/ASPath lookup tool.
 
-The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr)) for single IPs or DNS results (screenshots below).
+The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results (screenshots below).
 
 The script uses [Team Cymru's whois service](https://team-cymru.com/community-services/ip-asn-mapping/) for data.
 
