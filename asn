@@ -55,7 +55,8 @@ PrintUsage(){
 }
 
 TraceASPath(){
-        input="$1"
+        host_to_trace="$1"
+        mtr_rounds=10
         collecting_message="\n\e[47m\e[30mCollecting mtr output (press CTRL-C to cancel)...\e[49m"
         echo -en "$collecting_message"
         # fetch raw mtr results beginning with :
@@ -63,7 +64,7 @@ TraceASPath(){
         # - d ("dnsline", or hostnames)
         # - p ("pingline", or latencies)
         # see https://github.com/traviscross/mtr/blob/master/FORMATS
-        mtr_output=$(mtr -l -c10 "$input" | grep "^[hdp]")
+        mtr_output=$(mtr -l -c"$mtr_rounds" "$host_to_trace" | grep "^[hdp]")
         declare -a hostline_array
         declare -a dnsline_array
         declare -a pingline_array
@@ -87,13 +88,15 @@ TraceASPath(){
                                 ;;
                         "p")
                                 # this is a pingline ($mtr_data is a latency value in microseconds)
-                                pingline_array["$mtr_hopnum"]=$(echo "$mtr_data" | awk '{ printf( "%.1f\n", $1/1000) }') # convert to milliseconds, round to 1 digit precision (mtr-style)
+                                cur_latency_sum=${pingline_array["$mtr_hopnum"]}
+                                pingline_array["$mtr_hopnum"]=$(echo "$cur_latency_sum $mtr_data" |\
+                                 awk '{ sum = $1 + $2; printf ("%.1f\n", sum) }') # we store the total sum of reply times in the array, and will average it at display time
                                 ;;
                 esac
         done
 
         # mtr finished, parse and format results
-        trace_output=$(printf "\e[100m${white}\e[1m%4s %-61s %16s     %s\e[49m" "Hop" "${white}IP Address" "Ping" "${white}AS Information")
+        trace_output=$(printf "\e[100m${white}\e[1m%4s %-62s %16s     %s\e[49m" "Hop" "${white}IP Address" "Ping avg" "${white}AS Information ")
         cur_hop_count=1
         last_hop=false
         for mtr_hopnum in "${!hostline_array[@]}"; do
@@ -105,7 +108,7 @@ TraceASPath(){
                 else
                         # not a private address, try saving a lookup
                         # (if $hop_ip = our target, ie we're at the last hop)
-                        if [ "$hop_ip" = "$userinput" ]; then
+                        if [ "$hop_ip" = "$host_to_trace" ]; then
                                 found_asn=$saved_asn
                                 found_asname=$saved_asname
                                 # avoid adding the same AS multiple times in a row in the summary path
@@ -140,14 +143,18 @@ TraceASPath(){
                 fi
 
                 # PING data
-                ping_data="${pingline_array[$mtr_hopnum]} ms"
-                [[ "$ping_data" = " ms" ]] && ping_data="*"
-
                 # account for missing (no reply) hops
                 while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
-                        trace_output+=$(printf "\n%3s. %-80s %10s   %s" "$cur_hop_count" "${white}???${default}" "???" "${white}(No reply)${default}")
+                        trace_output+=$(printf "\n%3s. %-80s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
                         ((cur_hop_count++))
                 done
+                # data in the array item is the total sum of mtr latencies collected for this hop in microseconds.
+                # convert it to milliseconds, and round it to 1 digit precision (mtr's output style)
+                ping_total_usec=${pingline_array[$mtr_hopnum]}
+                if [ -n "$ping_total_usec" ]; then
+                        ping_average_msec=$(echo "$ping_total_usec $mtr_rounds" | awk '{ avg = $1 / $2; printf( "%.1f\n", avg/1000) }')
+                        ping_data="$ping_average_msec ms"
+                fi
                 trace_output+=$(printf "\n%3s. %-80s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
                 [[ "$last_hop" = true ]] && break
                 (( cur_hop_count++ ))
