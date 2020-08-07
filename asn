@@ -61,10 +61,9 @@ TraceASPath(){
         echo -en "$collecting_message"
         # fetch raw mtr results beginning with :
         # - h ("hostline", or IPs) 
-        # - d ("dnsline", or hostnames)
         # - p ("pingline", or latencies)
         # see https://github.com/traviscross/mtr/blob/master/FORMATS
-        mtr_output=$(mtr -l -c"$mtr_rounds" "$host_to_trace" | grep "^[hdp]")
+        mtr_output=$(mtr -l -n -c"$mtr_rounds" "$host_to_trace" | grep "^[hp]")
         declare -a hostline_array
         declare -a dnsline_array
         declare -a pingline_array
@@ -81,10 +80,10 @@ TraceASPath(){
                         "h")
                                 # this is a hostline ($mtr_data is an IP address)
                                 hostline_array["$mtr_hopnum"]="$mtr_data"
-                                ;;
-                        "d")
-                                # this is a dnsline ($mtr_data is a hostname)
-                                dnsline_array["$mtr_hopnum"]="$mtr_data"
+                                rdns=$(host "$mtr_data")
+                                if [ $? == 0 ]; then
+                                        dnsline_array["$mtr_hopnum"]=$(echo $rdns | awk '{print $NF}')
+                                fi
                                 ;;
                         "p")
                                 # this is a pingline ($mtr_data is a latency value in microseconds)
