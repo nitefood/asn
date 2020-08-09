@@ -92,7 +92,7 @@ TraceASPath(){
                                                 last_resolved_ip="$mtr_data"
                                                 if hostname=$(host "$mtr_data"); then
                                                         dnsline_array["$mtr_hopnum"]=$(echo "$hostname" |\
-                                                        awk '{sub(/\.\r?$/, "", $NF); print $NF}') # remove trailing dot and CR (Cygwin) from hostname
+                                                        awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}') # get first line and remove trailing dot and CR (Cygwin) from hostname
                                                 fi
                                         fi
                                         ;;
