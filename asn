@@ -43,7 +43,8 @@ ResolveHostnameToIPList(){
 PrintUsage(){
         programname=$(basename "$0")
         echo -e "\nASN Lookup Tool\
-        \n\n\nUsage:\n\t${white}$programname [-n] TARGET${default}\n\nOptions:\n\
+        \n\n\nUsage:\n\t${white}$programname [-d|-n] <TARGET>${default}\n\nOptions:\n\
+        \n  ${white}-d, --detailed\n\t${default}Output detailed hop info (collected from pWhois) during the AS path trace to the TARGET
         \n  ${white}-n, --notrace\n\t${default}Disable tracing the AS path to the TARGET\n\nSupported targets:\n\
         \n  ${white}<AS Number>\n\t(to lookup matching ASN data. Supports \"as123\" and \"123\" formats - case insensitive)\
         \n  ${white}<IPv4/IPv6>\n\t(to lookup matching route and ASN data)\
@@ -55,10 +56,11 @@ PrintUsage(){
 }
 
 TraceASPath(){
+        starttime=$(date +%s)
         host_to_trace="$1"
         mtr_rounds=3
-        collecting_message="\n${lightgreybg}${black}Collecting mtr output (press CTRL-C to cancel)...${default}"
-        echo -en "$collecting_message"
+        statusbar_message="\n${lightgreybg}${black}Collecting mtr output (press CTRL-C to cancel)...${default}"
+        echo -en "$statusbar_message"
         # cache the previously looked-up AS to save one lookup (target/last hop)
         saved_asn=$found_asn
         saved_asname=$found_asname
@@ -107,7 +109,11 @@ TraceASPath(){
                         break
                 fi
         done
+        wait
         # mtr finished, parse and format results
+        printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
+        statusbar_message="${lightgreybg}${black}Parsing collected mtr output (press CTRL-C to cancel)...${default}"
+        echo -en "$statusbar_message"        
         trace_output=$(printf "${lightgreybg}${black}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
         cur_hop_count=1
         last_hop=false
@@ -117,6 +123,7 @@ TraceASPath(){
                 # check if IP is in private addressing space
                 if [[ $hop_ip =~ $privateregex ]]; then
                         asn_data="${white}(Private network)${default}"
+                        pwhois_output=""
                 else
                         # not a private address, try saving a lookup
                         # (if $hop_ip = our target, ie we're at the last hop)
@@ -146,6 +153,24 @@ TraceASPath(){
                                         fi
                                 fi
                         fi
+                        if [ "$PWHOIS_LOOKUP" = "true" ]; then
+                                pwhois_output=$(whois -h whois.pwhois.org "$hop_ip")
+                                if echo "$pwhois_output" | grep -vq "That IP address doesn't appear"; then
+                                        pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
+                                        pwhois_org=$(echo "$pwhois_output" | grep -E "^AS-Org-Name" | cut -d ':' -f 2 | sed 's/^ //')
+                                        pwhois_net=$(echo "$pwhois_output" | grep -E "^Net-Name" | cut -d ':' -f 2 | sed 's/^ //')
+                                        pwhois_city=$(echo "$pwhois_output" | grep -E "^City" | cut -d ':' -f 2 | sed 's/^ //')
+                                        pwhois_region=$(echo "$pwhois_output" | grep -E "^Region" | cut -d ':' -f 2 | sed 's/^ //')
+                                        pwhois_cc=$(echo "$pwhois_output" | grep -E "^Country-Code" | cut -d ':' -f 2 | sed 's/^ //')
+                                        if [ "$pwhois_city" = "NULL" ] || [ "$pwhois_region" = "NULL" ]; then
+                                                pwhois_geo="$pwhois_cc"
+                                        else
+                                                pwhois_geo="$pwhois_city, $pwhois_region ($pwhois_cc)"
+                                        fi
+                                else
+                                        pwhois_output="";
+                                fi
+                        fi
                 fi
 
                 # DNS data (only used if a hostname was resolved)
@@ -158,6 +183,10 @@ TraceASPath(){
                 # account for missing (no reply) hops
                 while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
                         trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
+                        if [ "$PWHOIS_LOOKUP" = "true" ]; then
+                                # PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
+                                trace_output+="\n"
+                        fi
                         ((cur_hop_count++))
                 done
                 # data in the array item is the total sum of mtr latencies collected for this hop in microseconds.
@@ -168,15 +197,26 @@ TraceASPath(){
                         ping_data="$ping_average_msec ms"
                 fi
                 trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
+                if [ "$PWHOIS_LOOKUP" = "true" ] && [ -n "$pwhois_output" ]; then
+                        trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
+                                "$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
+                        trace_output+="\n"
+                elif [ "$PWHOIS_LOOKUP" = "true" ]; then
+                        # PWHOIS lookups ON, but no valid data. Just add a newline for readability
+                        trace_output+="\n"
+                fi
                 [[ "$last_hop" = true ]] && break
                 (( cur_hop_count++ ))
         done
-        printf "\r%${#collecting_message}s\r" " " # to delete the previous "collecting" text
+        printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
         echo -en "${green}===== ${white}AS path to $userinput ${green}=====${default}\n\n (localhost)"
         for as in "${aspath_array[@]}"; do
                 echo -en " -> ${yellow}${as}${default}"
         done
         echo -e " -> (target)\n\n${green}===== ${white}Detailed trace ${green}=====${default}\n\n${trace_output}\n"
+        endtime=$(date +%s)
+        runtime=$((endtime-starttime))
+        echo -e "Trace complete in $runtime seconds.\n"
 }
 
 PrintErrorAndExit(){
@@ -191,12 +231,14 @@ Ctrl_C() {
 
 IFS=$'\n\t'
 green="\e[32m"
+magenta="\e[35m"
 yellow="\e[33m"
 white="\e[97m"
 blue="\e[94m"
 red="\e[31m"
 black="\e[30m"
 lightgreybg="\e[47m"
+bluebg="\e[44m\e[30m"
 default="\e[0m"
 
 trap Ctrl_C INT
@@ -221,6 +263,17 @@ case "$1" in
                         exit 1
                 fi
 	        TRACEASNPATH=false
+                PWHOIS_LOOKUP=false
+                userinput="$2"
+	        ;;
+        "-d"|"--detailed")
+                if [[ $# -lt 2 ]]; then
+                        PrintUsage
+                        echo -e "Error: missing ${red}TARGET${default}\n"
+                        exit 1
+                fi
+                TRACEASNPATH=true
+	        PWHOIS_LOOKUP=true
                 userinput="$2"
 	        ;;
         *)
@@ -229,7 +282,9 @@ case "$1" in
                          echo -e "Error: unknown option ${red}$1${default}\n"
                          exit 1
                 else
+                        # defaults
                         TRACEASNPATH=true
+                        PWHOIS_LOOKUP=false
                         userinput="$1"
                 fi
                 ;;
