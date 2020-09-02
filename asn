@@ -113,7 +113,7 @@ TraceASPath(){
         # mtr finished, parse and format results
         printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
         statusbar_message="${lightgreybg}${black}Parsing collected mtr output (press CTRL-C to cancel)...${default}"
-        echo -en "$statusbar_message"        
+        echo -en "$statusbar_message"
         trace_output=$(printf "${lightgreybg}${black}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
         cur_hop_count=1
         last_hop=false
@@ -208,6 +208,12 @@ TraceASPath(){
                 [[ "$last_hop" = true ]] && break
                 (( cur_hop_count++ ))
         done
+        # mtr output (hostlines) parsing complete
+        if [ "$last_hop" = false ]; then
+                # last hop wasn't our target IP. Add a missing last hop to the trace.
+                trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
+                [[ "$PWHOIS_LOOKUP" = "true" ]] && trace_output+="\n"
+        fi
         printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
         echo -en "${green}===== ${white}AS path to $userinput ${green}=====${default}\n\n (localhost)"
         for as in "${aspath_array[@]}"; do
