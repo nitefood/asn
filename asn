@@ -21,8 +21,11 @@ WhoisASN(){
 
 WhoisIP(){
         PwhoisLookup "$1"
+        hostname=$(RdnsLookup "$1")
+        [[ -z "$hostname" ]] && hostname="-"
         indent=$(( longest+4 ))
-        printf "${white}%${longest}s${default} ┌${bluebg}ASN${default} ${red}%s ${green}(%s)${default}\n" "$1" "$found_asn" "$found_asname"
+        printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
+        printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s ${green}(%s)${default}\n" "├" "$found_asn" "$found_asname"
         printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
         printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
         printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n\n" "└" "$pwhois_geo"
@@ -97,6 +100,14 @@ PwhoisLookup(){
         fi
 }
 
+RdnsLookup(){
+        # reverse DNS (PTR) lookup.
+        # get first lookup result only (in case of multiple PTR records) and remove trailing dot and CR (Cygwin) from hostname
+        rdns=$(host "$1" | awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}')
+        if echo "$rdns" | grep -q "NXDOMAIN"; then rdns=""; fi
+        echo "$rdns"
+}
+
 TraceASPath(){
         starttime=$(date +%s)
         host_to_trace="$1"
@@ -134,10 +145,8 @@ TraceASPath(){
                                         # See https://github.com/nitefood/asn/pull/3
                                         if [ "$mtr_data" != "$last_resolved_ip" ]; then
                                                 last_resolved_ip="$mtr_data"
-                                                if hostname=$(host "$mtr_data"); then
-                                                        dnsline_array["$mtr_hopnum"]=$(echo "$hostname" |\
-                                                        awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}') # get first line and remove trailing dot and CR (Cygwin) from hostname
-                                                fi
+                                                hostname=$(RdnsLookup "$mtr_data")
+                                                [[ -n "$hostname" ]] && dnsline_array["$mtr_hopnum"]="$hostname"
                                         fi
                                         ;;
                                 "p")
@@ -200,7 +209,7 @@ TraceASPath(){
                                         fi
                                 fi
                         fi
-                        [[ "$PWHOIS_LOOKUP" = "true" ]] && PwhoisLookup "$hop_ip"
+                        [[ "$DETAILED_TRACE" = "true" ]] && PwhoisLookup "$hop_ip"
                 fi
 
                 # DNS data (only used if a hostname was resolved)
@@ -213,7 +222,7 @@ TraceASPath(){
                 # account for missing (no reply) hops
                 while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
                         trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
-                        if [ "$PWHOIS_LOOKUP" = "true" ]; then
+                        if [ "$DETAILED_TRACE" = "true" ]; then
                                 # PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
                                 trace_output+="\n"
                         fi
@@ -227,11 +236,11 @@ TraceASPath(){
                         ping_data="$ping_average_msec ms"
                 fi
                 trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
-                if [ "$PWHOIS_LOOKUP" = "true" ] && [ -n "$pwhois_output" ]; then
+                if [ "$DETAILED_TRACE" = "true" ] && [ -n "$pwhois_output" ]; then
                         trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
                                 "$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
                         trace_output+="\n"
-                elif [ "$PWHOIS_LOOKUP" = "true" ]; then
+                elif [ "$DETAILED_TRACE" = "true" ]; then
                         # PWHOIS lookups ON, but no valid data. Just add a newline for readability
                         trace_output+="\n"
                 fi
@@ -242,7 +251,7 @@ TraceASPath(){
         if [ "$last_hop" = false ]; then
                 # last hop wasn't our target IP. Add a missing last hop to the trace.
                 trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
-                [[ "$PWHOIS_LOOKUP" = "true" ]] && trace_output+="\n"
+                [[ "$DETAILED_TRACE" = "true" ]] && trace_output+="\n"
         fi
         printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
 
@@ -318,7 +327,7 @@ case "$1" in
                         exit 1
                 fi
 	        TRACEASNPATH=false
-                PWHOIS_LOOKUP=false
+                DETAILED_TRACE=false
                 userinput="$2"
 	        ;;
         "-d"|"--detailed")
@@ -328,7 +337,7 @@ case "$1" in
                         exit 1
                 fi
                 TRACEASNPATH=true
-	        PWHOIS_LOOKUP=true
+	        DETAILED_TRACE=true
                 userinput="$2"
 	        ;;
         *)
@@ -339,7 +348,7 @@ case "$1" in
                 else
                         # defaults
                         TRACEASNPATH=true
-                        PWHOIS_LOOKUP=false
+                        DETAILED_TRACE=false
                         userinput="$1"
                 fi
                 ;;
