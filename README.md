@@ -8,6 +8,8 @@ The script will perform an AS path trace (using [mtr](https://github.com/travisc
 
 The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/) and the [Prefix WhoIs Project](https://pwhois.org/) services for data.
 
+Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
+
 ---
 
 ## Screenshots
