@@ -38,7 +38,7 @@ The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-as
 
 * _Detailed ASPath trace to www.github.com_
 
-![asn-tracepath](https://user-images.githubusercontent.com/24555810/91781037-9658af80-ebf9-11ea-8f9d-af587a701a7b.png)
+![asn-tracepath](https://user-images.githubusercontent.com/24555810/92062664-8a0b5880-ed99-11ea-8d6c-6c8c25ddd733.png)
 
 ---
 
