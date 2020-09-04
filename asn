@@ -255,7 +255,12 @@ TraceASPath(){
         fi
         printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
 
-        BoxHeader "Detailed trace to $userinput"
+        if [ "$DETAILED_TRACE" = true ]; then
+                headermsg="Detailed trace to $userinput"
+        else
+                headermsg="Trace to $userinput"
+        fi
+        BoxHeader "$headermsg"
         echo -e "\n${trace_output}"
         endtime=$(date +%s)
         runtime=$((endtime-starttime))

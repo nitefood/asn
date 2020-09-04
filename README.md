@@ -18,29 +18,29 @@ Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 * _IPv4 lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92062672-8c6db280-ed99-11ea-89f8-59babb6f84c5.png)
+![asn](https://user-images.githubusercontent.com/24555810/92260223-db216680-eed7-11ea-9a69-4ca1c504987a.png)
 
 * _IPv6 lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92062671-8bd51c00-ed99-11ea-9433-be0afb3d5375.png)
+![asn](https://user-images.githubusercontent.com/24555810/92260287-f9876200-eed7-11ea-82be-6358c4620385.png)
 
 * _Autonomous system number lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92062669-8bd51c00-ed99-11ea-882e-3580f9228966.png)
+![asn](https://user-images.githubusercontent.com/24555810/92260440-305d7800-eed8-11ea-8371-76c0a54d3b30.png)
 
 * _Hostname lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92062668-8b3c8580-ed99-11ea-896e-5585c97d3d4a.png)
+![asn](https://user-images.githubusercontent.com/24555810/92260525-508d3700-eed8-11ea-8a1d-fbaeff03e0a7.png)
 
 ### AS Path tracing ###
 
 * _ASPath trace to www.github.com_
 
-![asn-tracepath](https://user-images.githubusercontent.com/24555810/92062667-8b3c8580-ed99-11ea-949a-e26d2dcf63e8.png)
+![asn-tracepath](https://user-images.githubusercontent.com/24555810/92260566-64d13400-eed8-11ea-8b23-93088532f88e.png)
 
 * _Detailed ASPath trace to www.github.com_
 
-![asn-tracepath](https://user-images.githubusercontent.com/24555810/92062664-8a0b5880-ed99-11ea-8d6c-6c8c25ddd733.png)
+![asn-tracepath](https://user-images.githubusercontent.com/24555810/92260592-70245f80-eed8-11ea-9f9a-f640dd3cd4a7.png)
 
 ---
 
