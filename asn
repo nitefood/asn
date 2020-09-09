@@ -298,19 +298,72 @@ TraceASPath(){
 }
 
 SearchByOrg(){
-        PS3="
-Select an organization (or CTRL-C to cancel): "
         declare -a orgs
+        MULTIPLE_RESULTS=false
         echo ""
-        StatusbarMessage "Searching for organization ${bluebg}$1${lightgreybg}"
+        StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
         for orgname in $(whois -h whois.pwhois.org "registry org-name=$1" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u); do
                 orgs+=("$orgname")
         done
         StatusbarMessage ""
 
-        if [ -z "$orgs" ]; then
+        if [ ${#orgs[@]} -eq 0 ]; then
+                # company search yielded no results
                 PrintErrorAndExit "Error: organization not found"
+        elif [ ${#orgs[@]} -eq 1 ]; then
+                # company search yielded 1 result, proceed to the lookup directly
+                org="${orgs[0]}"
+        else
+                # company search yielded multiple results, show a menu and let the user choose which ORG to inspect
+                MULTIPLE_RESULTS=true
+                ShowMenu
         fi
+        while true; do
+                echo ""
+                searchresults=""
+                StatusbarMessage "Retrieving data for organization ${bluebg}$org${lightgreybg}"
+                orgids=$(whois -h whois.pwhois.org "registry org-name=$org" | grep -E "^Org-ID:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u)
+                for ipversion in 4 6; do
+                        StatusbarMessage "Looking up IPv${ipversion} netblocks for organization ${bluebg}$org${lightgreybg}"
+                        searchresults+=$(BoxHeader "IPv${ipversion} netblocks for \"${org}\"")
+                        NO_RESULTS=true
+                        [[ "$ipversion" = "4" ]] && ipversion=""
+                        for id in $orgids; do
+                                netblock=$(whois -h whois.pwhois.org "netblock${ipversion} org-id=$id" | grep -E "^*>|Net-")
+                                if [ -n "$netblock" ]; then
+                                        NO_RESULTS=false
+                                        searchresults+="$(echo -e "\n${red}Org-ID: ${green}${id}${default}\n${netblock}")"
+                                        searchresults+="\n"
+                                fi
+                        done
+                        [[ "$NO_RESULTS" = true ]] && searchresults+="\n${red}No results found${default}\n"
+                done
+                StatusbarMessage ""
+                echo -e "$searchresults"
+                if [ "$MULTIPLE_RESULTS" = true ]; then
+                        # let the user choose if they want to look up another company among the multiple results found
+                        echo -en "${lightgreybg}${black}Press any key to return to the menu or 'q' to quit${default}"
+                        read -rsn1 key
+                        StatusbarMessage ""
+                        if [ "$key" = "q" ] || [ "$key" = "Q" ]; then
+                                break
+                        else
+                                echo ""
+                                ShowMenu
+                        fi
+                else
+                        break
+                fi
+        done
+        tput sgr0
+        exit 0
+}
+
+ShowMenu(){ # show selection menu for multiple search-by-company results
+        PS3="
+Select an organization (or CTRL-C to cancel): "
+        BoxHeader "Organizations matching \"$userinput\""
+        echo ""
         COLUMNS=0
         set -o posix
         select choice in "${orgs[@]}"; do
@@ -321,25 +374,6 @@ Select an organization (or CTRL-C to cancel): "
                 done
         done
         set +o posix
-        echo ""
-        searchresults=""
-        orgids=$(whois -h whois.pwhois.org "registry org-name=$org" | grep -E "^Org-ID:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u)
-        for ipversion in 4 6; do
-                StatusbarMessage "Looking up IPv${ipversion} netblocks for organization ${bluebg}$org${lightgreybg}"
-                searchresults+=$(BoxHeader "IPv${ipversion} netblocks for \"${org}\"")
-                [[ "$ipversion" = "4" ]] && ipversion=""
-                for id in $(echo "$orgids"); do
-                        netblock=$(whois -h whois.pwhois.org "netblock${ipversion} org-id=$id" | grep -E "^*>|Net-")
-                        if [ -n "$netblock" ]; then
-                                searchresults+="$(echo -e "\n${red}Org-ID: ${green}${id}${default}\n${netblock}")"
-                                searchresults+="\n"
-                        fi
-                done
-        done
-        StatusbarMessage ""
-        echo -e "$searchresults"
-        tput sgr0
-        exit 0
 }
 
 PrintErrorAndExit(){
