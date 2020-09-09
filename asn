@@ -22,12 +22,14 @@ WhoisASN(){
 WhoisIP(){
         PwhoisLookup "$1"
         hostname=$(RdnsLookup "$1")
+        abusecontacts=$(AbuseLookup "$1")
         [[ -z "$hostname" ]] && hostname="-"
         indent=$(( longest+4 ))
         printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
         printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s ${green}(%s)${default}\n" "├" "$found_asn" "$found_asname"
         printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
         printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
+        printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
         printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n\n" "└" "$pwhois_geo"
 }
 
@@ -104,16 +106,35 @@ RdnsLookup(){
         # reverse DNS (PTR) lookup.
         # get first lookup result only (in case of multiple PTR records) and remove trailing dot and CR (Cygwin) from hostname
         rdns=$(host "$1" | awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}')
-        if echo "$rdns" | grep -q "NXDOMAIN"; then rdns=""; fi
+        if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL"; then rdns=""; fi
         echo "$rdns"
+}
+
+AbuseLookup(){
+        abuselist=""
+        for abusecontact in $(whois "$1" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
+                if echo $abusecontact | grep -vq '@'; then
+                        # $abusecontact is not an email, try a whois lookup (it should be a handle)
+                        resolvedabuse=$(whois "$abusecontact" | grep -E -i "^abuse-mailbox:" | awk '{print $2}' | tr -d \')
+                        [[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
+                fi
+                [[ -n "$abuselist" ]] && abuselist+="\n"
+                abuselist+="$abusecontact"
+        done
+
+        if [ -n "$abuselist" ]; then
+                echo "$(echo -e $abuselist | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')"
+        else
+                echo "-"
+        fi
 }
 
 TraceASPath(){
         starttime=$(date +%s)
         host_to_trace="$1"
         mtr_rounds=3
-        statusbar_message="\n${lightgreybg}${black}Tracing path to ${bluebg}${host_to_trace}${lightgreybg} (press CTRL-C to cancel)...${default}"
-        echo -en "$statusbar_message"
+        echo ""
+        StatusbarMessage "Tracing path to ${bluebg}${host_to_trace}${lightgreybg}"
         # cache the previously looked-up AS to save one lookup (target/last hop)
         saved_asn=$found_asn
         saved_asname=$found_asname
@@ -162,9 +183,7 @@ TraceASPath(){
         done
         wait
         # mtr finished, parse and format results
-        printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
-        statusbar_message="${lightgreybg}${black}Parsing collected trace output (press CTRL-C to cancel)...${default}"
-        echo -en "$statusbar_message"
+        StatusbarMessage "Parsing collected trace output"
         trace_output=$(printf "${lightgreybg}${black}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
         cur_hop_count=1
         last_hop=false
@@ -253,7 +272,7 @@ TraceASPath(){
                 trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
                 [[ "$DETAILED_TRACE" = "true" ]] && trace_output+="\n"
         fi
-        printf "\r%${#statusbar_message}s\r" " " # to delete the previous status bar text
+        StatusbarMessage ""
 
         if [ "$DETAILED_TRACE" = true ]; then
                 headermsg="Detailed trace to $userinput"
@@ -278,6 +297,50 @@ TraceASPath(){
 
 }
 
+SearchByOrg(){
+        PS3="
+Select an organization (or CTRL-C to cancel): "
+        declare -a orgs
+        echo ""
+        StatusbarMessage "Searching for organization ${bluebg}$1${lightgreybg}"
+        for orgname in $(whois -h whois.pwhois.org "registry org-name=$1" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u); do
+                orgs+=("$orgname")
+        done
+        StatusbarMessage ""
+
+        if [ -z "$orgs" ]; then
+                PrintErrorAndExit "Error: organization not found"
+        fi
+        COLUMNS=0
+        set -o posix
+        select choice in "${orgs[@]}"; do
+                for org in "${orgs[@]}"; do
+                        if [[ "$org" = "$choice" ]]; then
+                                break 2
+                        fi
+                done
+        done
+        set +o posix
+        echo ""
+        searchresults=""
+        for ipversion in 4 6; do
+                StatusbarMessage "Looking up IPv${ipversion} netblocks for organization ${bluebg}$org${lightgreybg}"
+                searchresults+=$(BoxHeader "IPv${ipversion} netblocks for \"${org}\"")
+                [[ "$ipversion" = "4" ]] && ipversion=""
+                for id in $(whois -h whois.pwhois.org "registry org-name=$org" | grep -E "^Org-ID:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u); do
+                        netblock=$(whois -h whois.pwhois.org "netblock${ipversion} org-id=$id" | grep -E "^*>|Net-")
+                        if [ -n "$netblock" ]; then
+                                searchresults+="$(echo -e "\n${red}Org-ID: ${green}${id}${default}\n${netblock}")"
+                                searchresults+="\n"
+                        fi
+                done
+        done
+        StatusbarMessage ""
+        echo -e "$searchresults"
+        tput sgr0
+        exit 0
+}
+
 PrintErrorAndExit(){
         echo -e "\n\e[30m\e[101m${1}\e[39m\e[49m\n"
         tput sgr0
@@ -295,6 +358,17 @@ BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
 │ ${yellow}${s}${white} │
 ╰─${s//?/─}─╯"
   tput sgr 0
+}
+
+StatusbarMessage() { # invoke without parameters to delete the status bar message
+        if [ -n "$statusbar_message" ]; then
+                # delete previous status bar message
+                printf "\r%${#statusbar_message}s\r" " "
+        fi
+        if [ -n "$1" ]; then
+                statusbar_message="${lightgreybg}${black}$1 (press CTRL-C to cancel)...${default}"
+                echo -en "$statusbar_message"
+        fi
 }
 
 
@@ -354,7 +428,8 @@ case "$1" in
                         # defaults
                         TRACEASNPATH=true
                         DETAILED_TRACE=false
-                        userinput="$1"
+                        ENABLE_ORGSEARCH=true
+                        userinput="$@"
                 fi
                 ;;
 esac
@@ -381,37 +456,44 @@ if [ -z "$input" ]; then
         # Input is not an IP Address. Check if it is a number (ASN)
         asn=$(echo "$userinput" | sed 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
         if [ -z "$asn" ]; then
-                # Input is not an ASN either. Consider it a hostname and try to resolve it.
-                echo -e -n "\n${blue}- Resolving \"$userinput\"... "
-                ip=$(ResolveHostnameToIPList "$userinput")
-                if [ -z "$ip" ]; then
-                        PrintErrorAndExit "Error: unable to resolve hostname"
+                # Input is not an ASN either. See if it's a hostname (includes at least one dot)
+                if echo "$userinput" | grep -q "\."; then
+                        echo -e -n "\n${blue}- Resolving \"$userinput\"... "
+                        ip=$(ResolveHostnameToIPList "$userinput")
+                        if [ -z "$ip" ]; then
+                                echo ""
+                                PrintErrorAndExit "Error: unable to resolve hostname"
+                        fi
+                        numips=$(echo "$ip" | wc -l)
+                        [[ $numips = 1 ]] && s="" || s="es"
+                        echo -e "${blue}$numips IP address$s found:\n"
+                        # grab the longest IP to properly size output padding
+                        longest=0
+                        for singleip in $ip; do
+                                [[ ${#singleip} -gt $longest ]] && longest=${#singleip}
+                        done
+                        (( longest++ ))
+                        # output actual results
+                        ip_to_trace=""
+                        for singleip in $ip; do
+                                LookupASNAndRouteFromIP "$singleip"
+                                WhoisIP "$singleip"
+                                # save the first IP from the dns lookup result
+                                [[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
+                        done
+                        # Check if AS path tracing is requested
+                        if [ $TRACEASNPATH = true ]; then
+                                # in case of multiple IPs (DNS RR), trace the first one
+                                TraceASPath "$ip_to_trace"
+                        fi
+                        tput sgr0
+                        echo ""
+                        exit 0
+                else
+                        # not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
+                        [[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: Search by ORGANIZATION requires no command line switches"
+                        SearchByOrg "$userinput"
                 fi
-                numips=$(echo "$ip" | wc -l)
-                [[ $numips = 1 ]] && s="" || s="es"
-                echo -e "${blue}$numips IP address$s found:\n"
-                # grab the longest IP to properly size output padding
-                longest=0
-                for singleip in $ip; do
-                        [[ ${#singleip} -gt $longest ]] && longest=${#singleip}
-                done
-                (( longest++ ))
-                # output actual results
-                ip_to_trace=""
-                for singleip in $ip; do
-                        LookupASNAndRouteFromIP "$singleip"
-                        WhoisIP "$singleip"
-                        # save the first IP from the dns lookup result
-                        [[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
-                done
-                # Check if AS path tracing is requested
-                if [ $TRACEASNPATH = true ]; then
-                        # in case of multiple IPs (DNS RR), trace the first one
-                        TraceASPath "$ip_to_trace"
-                fi
-                tput sgr0
-                echo ""
-                exit 0
         else
                 # Input is an ASN
                 WhoisASN "$asn"

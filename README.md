@@ -2,9 +2,13 @@
 
 ## Description
 
-ASN/IPv4/IPv6/Prefix/ASPath lookup tool.
+ASN/IPv4/IPv6/Prefix/ASPath/Organization lookup tool.
 
-The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc. (screenshots below).
+The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc.
+
+It is also possible to search for netblocks by _organization name_. A multiple choice menu will be presented if more than one organization ID matches the search query.
+
+Screenshots for every lookup option are below.
 
 The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/) and the [Prefix WhoIs Project](https://pwhois.org/) services for data.
 
@@ -18,29 +22,35 @@ Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 * _IPv4 lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92260223-db216680-eed7-11ea-9a69-4ca1c504987a.png)
+![ipv4lookup](https://user-images.githubusercontent.com/24555810/92528238-b9eaae00-f228-11ea-875a-a44eff701f4d.png)
 
 * _IPv6 lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92260287-f9876200-eed7-11ea-82be-6358c4620385.png)
+![ipv6lookup](https://user-images.githubusercontent.com/24555810/92528338-e69ec580-f228-11ea-9488-3f762c2d8582.png)
 
 * _Autonomous system number lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92260440-305d7800-eed8-11ea-8371-76c0a54d3b30.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/92260440-305d7800-eed8-11ea-8371-76c0a54d3b30.png)
 
 * _Hostname lookup_
 
-![asn](https://user-images.githubusercontent.com/24555810/92260525-508d3700-eed8-11ea-8a1d-fbaeff03e0a7.png)
+![hostnamelookup](https://user-images.githubusercontent.com/24555810/92540333-83229100-f244-11ea-8d3f-2e21d6f04b3b.png)
 
 ### AS Path tracing ###
 
-* _ASPath trace to www.github.com_
+* _ASPath trace to github.com_
 
-![asn-tracepath](https://user-images.githubusercontent.com/24555810/92260566-64d13400-eed8-11ea-8b23-93088532f88e.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/92540382-b49b5c80-f244-11ea-87a8-9cf460ea192a.png)
 
 * _Detailed ASPath trace to www.github.com_
 
-![asn-tracepath](https://user-images.githubusercontent.com/24555810/92260592-70245f80-eed8-11ea-9f9a-f640dd3cd4a7.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/92541428-46579980-f246-11ea-90da-3a24bdb5e833.png)
+
+### Netblock search by organization ###
+
+* _Organization search for company "github"_
+
+![search_by_org](https://user-images.githubusercontent.com/24555810/92541547-a3534f80-f246-11ea-9f12-96b3aaabcd93.png)
 
 ---
 
