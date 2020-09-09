@@ -323,11 +323,12 @@ Select an organization (or CTRL-C to cancel): "
         set +o posix
         echo ""
         searchresults=""
+        orgids=$(whois -h whois.pwhois.org "registry org-name=$org" | grep -E "^Org-ID:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u)
         for ipversion in 4 6; do
                 StatusbarMessage "Looking up IPv${ipversion} netblocks for organization ${bluebg}$org${lightgreybg}"
                 searchresults+=$(BoxHeader "IPv${ipversion} netblocks for \"${org}\"")
                 [[ "$ipversion" = "4" ]] && ipversion=""
-                for id in $(whois -h whois.pwhois.org "registry org-name=$org" | grep -E "^Org-ID:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u); do
+                for id in $(echo "$orgids"); do
                         netblock=$(whois -h whois.pwhois.org "netblock${ipversion} org-id=$id" | grep -E "^*>|Net-")
                         if [ -n "$netblock" ]; then
                                 searchresults+="$(echo -e "\n${red}Org-ID: ${green}${id}${default}\n${netblock}")"
