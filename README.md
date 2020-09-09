@@ -67,13 +67,14 @@ After that, you can use the script by running `./asn`.
 * `asn <ASnumber>` -- _to lookup matching ASN data. Supports "as123" and "123" formats (case insensitive)_
 * `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6) and ASN data_
 * `asn [-n|-d] <host.name.tld>` -- _to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)_
-* `asn <ROUTE>` -- _to lookup matching ASN data_
+* `asn <Route>` -- _to lookup matching ASN data for the given prefix_
+* `asn <Organization Name>` -- _to search by company name and lookup netblocks (ORG-IDs) exported by such company_
 
-Detailed prefix info reporting can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) for every hop in the mtr trace, and its output will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
+Detailed hop info reporting can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) for every hop in the mtr trace, and its output will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
 
 The script will attempt a generic `whois` lookup during traces when Team Cymru and pWhois have no info about the IP address or prefix. This usually happens for IXP and PNI prefixes, and will give better insight into the path taken by packets.
 
-Geolocation data is taken from pWhois.
+Geolocation and organization data is taken from pWhois.
 
 AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP. Tracing can be disabled by passing the `[-n|--notrace]` command line switch.
 
