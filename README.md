@@ -6,7 +6,7 @@ ASN/IPv4/IPv6/Prefix/ASPath/Organization lookup tool.
 
 The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc.
 
-It is also possible to search for netblocks by _organization name_. A multiple choice menu will be presented if more than one organization ID matches the search query.
+It is also possible to search by _organization name_ in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 
 Screenshots for every lookup option are below.
 
@@ -46,11 +46,11 @@ Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/92541428-46579980-f246-11ea-90da-3a24bdb5e833.png)
 
-### Netblock search by organization ###
+### Network search by organization ###
 
-* _Organization search for company "github"_
+* _Organization search for "github"_
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/92541547-a3534f80-f246-11ea-9f12-96b3aaabcd93.png)
+![search_by_org](https://user-images.githubusercontent.com/24555810/92757367-f71c8080-f38d-11ea-8bab-121251427911.png)
 
 ---
 

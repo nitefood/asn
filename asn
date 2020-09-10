@@ -1,18 +1,34 @@
 #!/usr/bin/env bash
 
-################################################################################################################
+########################################################################################
 # -----------------------------------------------------------------------------------
-# ASN/IPv4/IPv6/Prefix/AS Path lookup tool. Uses Team Cymru's whois service for data.
+#          ASN / IPv4 / IPv6 / Prefix / AS Path / Organization lookup tool
+#
+#               Project homepage: https://github.com/nitefood/asn
 # -----------------------------------------------------------------------------------
-# example usage:
-#  asn <ASnumber>      -- to lookup matching ASN data. Supports "as123" and "123" formats (case insensitive)
-#  asn <IPv4/IPv6>     -- to lookup matching route(4/6) and ASN data
-#  asn <ROUTE>         -- to lookup matching ASN data
-#  asn <host.name.tld> -- to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)
 #
-# Author: Adriano Provvisiero - BV Networks 2017-2020
+# Usage:
 #
-################################################################################################################
+#  asn <ASnumber>              -- to lookup matching ASN data.
+#                                 Supports "as123" and "123" formats (case insensitive)
+#
+#  asn [-n|-d] <IPv4/IPv6>     -- to lookup matching route(4/6) and ASN data
+#
+#  asn [-n|-d] <host.name.tld> -- to lookup matching IP(v4/v6), route and ASN data 
+#                                 (supports multiple IPs - e.g. DNS RR)
+#
+#  asn <Route>                 -- to lookup matching ASN data
+#
+#  asn <Organization Name>     -- to search by company name and lookup network ranges 
+#                                 exported by (or related to) the company
+# -----------------------------------------------------------------------------------
+#
+# Command line switches:
+#
+#  -d | --detailed : Display detailed MTR hop data
+#  -n | --notrace  : Disable MTR tracing for lookup results
+#
+########################################################################################
 
 WhoisASN(){
         found_asname=$(whois -h whois.cymru.com " -f -w -c -p as$1" | sed 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
@@ -299,10 +315,11 @@ TraceASPath(){
 
 SearchByOrg(){
         declare -a orgs
-        MULTIPLE_RESULTS=false
+        MULTIPLE_ORGS_FOUND=false
         echo ""
         StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
-        for orgname in $(whois -h whois.pwhois.org "registry org-name=$1" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u); do
+        organizations=$(whois -h whois.pwhois.org "registry org-name=$1")
+        for orgname in $(echo "$organizations" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u) ; do
                 orgs+=("$orgname")
         done
         StatusbarMessage ""
@@ -315,32 +332,37 @@ SearchByOrg(){
                 org="${orgs[0]}"
         else
                 # company search yielded multiple results, show a menu and let the user choose which ORG to inspect
-                MULTIPLE_RESULTS=true
+                MULTIPLE_ORGS_FOUND=true
                 ShowMenu
         fi
         while true; do
                 echo ""
                 searchresults=""
-                StatusbarMessage "Retrieving data for organization ${bluebg}$org${lightgreybg}"
-                orgids=$(whois -h whois.pwhois.org "registry org-name=$org" | grep -E "^Org-ID:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u)
+                orgids=$(echo -e "$organizations" | grep -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
                 for ipversion in 4 6; do
-                        StatusbarMessage "Looking up IPv${ipversion} netblocks for organization ${bluebg}$org${lightgreybg}"
-                        searchresults+=$(BoxHeader "IPv${ipversion} netblocks for \"${org}\"")
                         NO_RESULTS=true
-                        [[ "$ipversion" = "4" ]] && ipversion=""
-                        for id in $orgids; do
-                                netblock=$(whois -h whois.pwhois.org "netblock${ipversion} org-id=$id" | grep -E "^*>|Net-")
+                        searchresults+=$(BoxHeader "IPv${ipversion} networks for organization \"${org}\"")
+                        # iterate over Org-IDs related to the company (in case of multiple Org-IDs for a single Org-Name)
+                        for orgid in $orgids; do
+                                StatusbarMessage "Looking up IPv${ipversion} networks for organization ${bluebg}$org${lightgreybg} (Org-ID: ${bluebg}${orgid}${lightgreybg})"
+                                if [ "$ipversion" = "4" ]; then
+                                        netblock=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^*>|Net-")
+                                else
+                                        # apply some formatting for clarity to ipv6 results
+                                        netblock=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | \
+                                        sed 's/^Netblock-Record: .*//g' | grep -E "^Net-(Range|Name|Handle|Source)|^$")
+                                fi
                                 if [ -n "$netblock" ]; then
                                         NO_RESULTS=false
-                                        searchresults+="$(echo -e "\n${red}Org-ID: ${green}${id}${default}\n${netblock}")"
+                                        searchresults+=$(echo -e "\n${red}(Org-ID: ${green}${orgid}${red})${default}\n${netblock}")
                                         searchresults+="\n"
                                 fi
                         done
-                        [[ "$NO_RESULTS" = true ]] && searchresults+="\n${red}No results found${default}\n"
+                        [[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
                 done
                 StatusbarMessage ""
                 echo -e "$searchresults"
-                if [ "$MULTIPLE_RESULTS" = true ]; then
+                if [ "$MULTIPLE_ORGS_FOUND" = true ]; then
                         # let the user choose if they want to look up another company among the multiple results found
                         echo -en "${lightgreybg}${black}Press any key to return to the menu or 'q' to quit${default}"
                         read -rsn1 key
