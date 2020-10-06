@@ -2,7 +2,7 @@
 
 ## Description
 
-ASN/IPv4/IPv6/Prefix/ASPath/Organization lookup tool.
+ASN / BGP stats / IPv4v6 / Prefix / ASPath / Organization lookup tool.
 
 The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc.
 
@@ -10,9 +10,9 @@ It is also possible to search by _organization name_ in order to retrieve a list
 
 Screenshots for every lookup option are below.
 
-The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/), [Prefix WhoIs Project](https://pwhois.org/) and [ipify](https://www.ipify.org/) services for data.
+The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/), [Prefix WhoIs Project](https://pwhois.org/), [ipify](https://www.ipify.org/) and [RIPE](https://stat.ripe.net/) services for data.
 
-Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
+Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ---
 
@@ -28,9 +28,9 @@ Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ![ipv6lookup](https://user-images.githubusercontent.com/24555810/92528338-e69ec580-f228-11ea-9488-3f762c2d8582.png)
 
-* _Autonomous system number lookup_
+* _Autonomous system number lookup with BGP stats_
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/92260440-305d7800-eed8-11ea-8371-76c0a54d3b30.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/95152564-a1b97080-078d-11eb-9fcf-47ca60b5bac2.png)
 
 * _Hostname lookup_
 
@@ -56,15 +56,23 @@ Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ## Installation
 
-To download the **asn** script from your shell:
+### Prerequisite packages
+
+Some packages are required for full functionality. On a Debian/Ubuntu machine, you can install them with:
+
+`apt -y install whois bind9-host mtr-tiny jq`
+
+### Script download
+
+Afterwards, to download the **asn** script from your shell:
 
 `curl https://raw.githubusercontent.com/nitefood/asn/master/asn > asn && chmod +x asn`
 
-After that, you can use the script by running `./asn`.
+You can then use the script by running `./asn`.
 
 ## Usage
 
-* `asn <ASnumber>` -- _to lookup matching ASN data. Supports "as123" and "123" formats (case insensitive)_
+* `asn <ASnumber>` -- _to lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)_
 * `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6) and ASN data_
 * `asn [-n|-d] <host.name.tld>` -- _to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)_
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
