@@ -31,408 +31,450 @@
 ########################################################################################
 
 WhoisASN(){
-    found_asname=$(whois -h whois.cymru.com " -f -w -c -p as$1" | sed 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
-    [[ "$found_asname" = "NO_NAME" ]] && found_asname=""
+	found_asname=$(whois -h whois.cymru.com " -f -w -c -p as$1" | sed 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
+	[[ "$found_asname" = "NO_NAME" ]] && found_asname=""
 }
 
 WhoisIP(){
-    PwhoisLookup "$1"
-    hostname=$(RdnsLookup "$1")
-    abusecontacts=$(AbuseLookup "$1")
-    [[ -z "$hostname" ]] && hostname="-"
-    indent=$(( longest+4 ))
-    printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
-    printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s ${green}(%s)${default}\n" "├" "$found_asn" "$found_asname"
-    printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
-    printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
-    printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
-    printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n\n" "└" "$pwhois_geo"
+	full_whois_data=$(whois "$1")
+	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
+	abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
+	hostname=$(RdnsLookup "$1")
+	abusecontacts=$(AbuseLookup "$abuse_whois_data")
+	[[ -z "$hostname" ]] && hostname="-"
+	if [ "$SKIP_PWHOIS" = false ]; then
+		PwhoisLookup "$1"
+	else
+		# No data in the Team Cymru and pWhois DBs. Fall back to generic whois.
+		[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
+		found_asn="N/A"
+		found_asname="N/A"
+		pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+		[[ -z "$pwhois_org" ]] && pwhois_org="N/A"
+		found_route=$(echo -e "$network_whois_data" | grep -i -m2 -E "^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do if [ -n "$line" ]; then echo -n "$line / "; fi; done | sed 's/ \/ $//')
+		[[ -z "$found_route" ]] && found_route="N/A"
+		pwhois_net=$(echo -e "$network_whois_data" | grep -i -E "^netname:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+		[[ -z "$pwhois_net" ]] && pwhois_net="N/A"
+		pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
+		[[ -z "$pwhois_geo" ]] && pwhois_geo="N/A"
+	fi
+	indent=$(( longest+4 ))
+	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
+	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s ${green}(%s)${default}\n" "├" "$found_asn" "$found_asname"
+	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
+	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
+	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
+	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n\n" "└" "$pwhois_geo"
 }
 
 LookupASNAndRouteFromIP(){
-    found_route=""
-    found_asn=""
-    found_asname=""
-    output=$(whois -h whois.cymru.com " -f -p $1" | sed 's/\ *|\ */|/g')
-    found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
-    found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
-    found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
-    [[ "$found_asname" = "NA" ]] && found_asname=""
-    [[ "$found_route" = "NA" ]] && found_route=""
+	found_route=""
+	found_asn=""
+	found_asname=""
+	output=$(whois -h whois.cymru.com " -f -p $1" | sed 's/\ *|\ */|/g')
+	found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
+	found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
+	found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
+	if [ "$found_asname" = "NA" ]; then
+		# Team Cymru has no data for this IP. Try pWhois next
+		output=$(whois -h whois.pwhois.org "$1" | sed 's/\: /:/')
+		found_asn=$(echo "$output" | grep -E "^Origin-AS:" | cut -d ':' -f 2)
+		found_asname=$(echo "$output" | grep -E "^AS-Org-Name:" | cut -d ':' -f 2)
+		found_route=$(echo "$output" | grep -E "^Prefix:" | cut -d ':' -f 2)
+	fi
+	if [ -z "$found_asname" ]; then
+		# Team Cymru and pWhois have no data about this IP. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
+		SKIP_PWHOIS=true
+	else
+		SKIP_PWHOIS=false
+	fi
 }
 
 ResolveHostnameToIPList(){
-    raw_host_output=$(host "$1" 2>/dev/null)
-    if echo -e "$raw_host_output" | grep -q "mail is handled"; then
-        host_output=$(echo "$raw_host_output" | grep -B100 -A0 -m1 "mail is handled" | sed '$d')
-    else
-        host_output="$raw_host_output"
-    fi
-    ip=$(echo "$host_output" | grep -Eo "$ipv4v6regex")
-    echo -e "$ip\n"
+	raw_host_output=$(host "$1" 2>/dev/null)
+	if echo -e "$raw_host_output" | grep -q "mail is handled"; then
+		host_output=$(echo "$raw_host_output" | grep -B100 -A0 -m1 "mail is handled" | sed '$d')
+	else
+		host_output="$raw_host_output"
+	fi
+	ip=$(echo "$host_output" | grep -Eo "$ipv4v6regex")
+	echo -e "$ip\n"
 }
 
 PrintUsage(){
-    programname=$(basename "$0")
-    echo -e "\nASN Lookup Tool\
-    \n\n\nUsage:\n\t${white}$programname [-d|-n] <TARGET>${default}\n\nOptions:\n\
-    \n  ${white}-d, --detailed\n\t${default}Output detailed hop info (collected from pWhois) during the AS path trace to the TARGET
-    \n  ${white}-n, --notrace\n\t${default}Disable tracing the AS path to the TARGET\n\nSupported targets:\n\
-    \n  ${white}<AS Number>\n\t(to lookup matching ASN data. Supports \"as123\" and \"123\" formats - case insensitive)\
-    \n  ${white}<IPv4/IPv6>\n\t(to lookup matching route and ASN data)\
-    \n  ${white}<Prefix>\n\t(to lookup matching ASN data)\
-    \n  ${white}<host.name.tld>\n\t(to lookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR)\
-    \n\
-    \nNote: AS path tracing will be performed only for single IPs/DNS lookup results.
-    "
+	programname=$(basename "$0")
+	echo -e "\nASN Lookup Tool\
+	\n\n\nUsage:\n\t${white}$programname [-d|-n] <TARGET>${default}\n\nOptions:\n\
+	\n  ${white}-d, --detailed\n\t${default}Output detailed hop info (collected from pWhois) during the AS path trace to the TARGET
+	\n  ${white}-n, --notrace\n\t${default}Disable tracing the AS path to the TARGET\n\nSupported targets:\n\
+	\n  ${white}<AS Number>\n\t(to lookup matching ASN data. Supports \"as123\" and \"123\" formats - case insensitive)\
+	\n  ${white}<IPv4/IPv6>\n\t(to lookup matching route and ASN data)\
+	\n  ${white}<Prefix>\n\t(to lookup matching ASN data)\
+	\n  ${white}<host.name.tld>\n\t(to lookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR)\
+	\n\
+	\nNote: AS path tracing will be performed only for single IPs/DNS lookup results.
+	"
 }
 
 PwhoisLookup(){
-    pwhois_output=$(whois -h whois.pwhois.org "$1")
-    if echo "$pwhois_output" | grep -vq "That IP address doesn't appear"; then
-        pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
-        pwhois_org=$(echo "$pwhois_output" | grep -E "^AS-Org-Name" | cut -d ':' -f 2 | sed 's/^ //')
-        # if the "AS-Org-Name" field is missing, group all "Org-Name" fields on a single line
-        [ -z "$pwhois_org" ] && pwhois_org=$(echo "$pwhois_output" | grep -E "^Org-Name" | cut -d ':' -f 2 | sed 's/^[ \t]*//g' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
-        pwhois_net=$(echo "$pwhois_output" | grep -E "^Net-Name" | cut -d ':' -f 2 | sed 's/^ //')
-        if echo "$pwhois_output" | grep -q -E "^Geo-"; then
-            # use "Geo-" fields in pWhois output
-            cityfield="Geo-City"
-            regionfield="Geo-Region"
-            ccfield="Geo-CC"
-        else
-            cityfield="City"
-            regionfield="Region"
-            ccfield="Country-Code"
-        fi
-        pwhois_city=$(echo "$pwhois_output" | grep -m1 -E "^${cityfield}" | cut -d ':' -f 2 | sed 's/^ //')
-        pwhois_region=$(echo "$pwhois_output" | grep -m1 -E "^${regionfield}" | cut -d ':' -f 2 | sed 's/^ //')
-        pwhois_cc=$(echo "$pwhois_output" | grep -m1 -E "^${ccfield}" | cut -d ':' -f 2 | sed 's/^ //')
-        if [ "$pwhois_city" = "NULL" ] || [ "$pwhois_region" = "NULL" ]; then
-            pwhois_geo="$pwhois_cc"
-        else
-            pwhois_geo="$pwhois_city, $pwhois_region ($pwhois_cc)"
-        fi
-    else
-        pwhois_output="";
-    fi
+	pwhois_output=$(whois -h whois.pwhois.org "$1")
+	if echo "$pwhois_output" | grep -vq "That IP address doesn't appear"; then
+		pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
+		pwhois_asorg=$(echo "$pwhois_output" | grep -E "^AS-Org-Name" | cut -d ':' -f 2 | sed 's/^ //')
+		# group all "Org-Name" fields on a single line
+		pwhois_org=$(echo "$pwhois_output" | grep -E "^Org-Name" | cut -d ':' -f 2 | sed 's/^[ \t]*//g' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+		pwhois_net=$(echo "$pwhois_output" | grep -E "^Net-Name" | cut -d ':' -f 2 | sed 's/^ //')
+		# if pWhois' Net-Name=Org-Name, then it's more useful to use AS-Org-Name instead of Org-Name (unless AS-Org-Name is empty)
+		if [ -n "$pwhois_asorg" ] && [ "$pwhois_net" = "$pwhois_org" ]; then
+			pwhois_org="$pwhois_asorg"
+		fi
+		if echo "$pwhois_output" | grep -q -E "^Geo-"; then
+			# use "Geo-" fields in pWhois output
+			cityfield="Geo-City"
+			regionfield="Geo-Region"
+			ccfield="Geo-CC"
+		else
+			cityfield="City"
+			regionfield="Region"
+			ccfield="Country-Code"
+		fi
+		pwhois_city=$(echo "$pwhois_output" | grep -m1 -E "^${cityfield}" | cut -d ':' -f 2 | sed 's/^ //')
+		pwhois_region=$(echo "$pwhois_output" | grep -m1 -E "^${regionfield}" | cut -d ':' -f 2 | sed 's/^ //')
+		pwhois_cc=$(echo "$pwhois_output" | grep -m1 -E "^${ccfield}" | cut -d ':' -f 2 | sed 's/^ //')
+		if [ "$pwhois_city" = "NULL" ] || [ "$pwhois_region" = "NULL" ]; then
+			pwhois_geo="$pwhois_cc"
+		else
+			pwhois_geo="$pwhois_city, $pwhois_region ($pwhois_cc)"
+		fi
+	else
+		pwhois_output="";
+	fi
 }
 
 RdnsLookup(){
-    # reverse DNS (PTR) lookup.
-    # get first lookup result only (in case of multiple PTR records) and remove trailing dot and CR (Cygwin) from hostname
-    rdns=$(host "$1" | awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}')
-    if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL"; then rdns=""; fi
-    echo "$rdns"
+	# reverse DNS (PTR) lookup.
+	# get first lookup result only (in case of multiple PTR records) and remove trailing dot and CR (Cygwin) from hostname
+	rdns=$(host "$1" | awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}')
+	if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL"; then rdns=""; fi
+	echo "$rdns"
 }
 
 AbuseLookup(){
-    abuselist=""
-    for abusecontact in $(whois "$1" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
-        if echo $abusecontact | grep -vq '@'; then
-            # $abusecontact is not an email, try a whois lookup (it should be a handle)
-            resolvedabuse=$(whois "$abusecontact" | grep -E -i "^abuse-mailbox:" | awk '{print $2}' | tr -d \')
-            [[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
-        fi
-        [[ -n "$abuselist" ]] && abuselist+="\n"
-        abuselist+="$abusecontact"
-    done
+	abuselist=""
+	for abusecontact in $(echo -e "$1" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
+		if echo $abusecontact | grep -vq '@'; then
+			# $abusecontact is not an email, try a whois lookup (it should be a handle)
+			resolvedabuse=$(whois "$abusecontact" | grep -E -i "^abuse-mailbox:" | awk '{print $2}' | tr -d \')
+			if [ -z "$resolvedabuse" ]; then
+				# whois couldn't resolve the abuse handle. Try identifying the
+				# original answering whois server and forcing a lookup on the same server
+				original_whois_server=$(echo -e "$full_whois_data" | grep -E "^%.*whois\..*$" | awk 'NR==1 {print $NF}' | tr -d '[]')
+				if [ -n "$original_whois_server" ]; then
+					# original whois server found, try manually querying it with an extended set of grep patterns
+					resolvedabuse=$(whois -h "$original_whois_server" "$abusecontact" | grep -E -m1 -i "^abuse-mailbox:|^e-mail:" | awk '{print $2}' | tr -d \')
+					[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
+				fi
+			fi
+		fi
+		[[ -n "$abuselist" ]] && abuselist+="\n"
+		abuselist+="$abusecontact"
+	done
 
-    if [ -n "$abuselist" ]; then
-        echo "$(echo -e $abuselist | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')"
-    else
-        echo "-"
-    fi
+	if [ -n "$abuselist" ]; then
+		echo "$(echo -e $abuselist | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')"
+	else
+		echo "-"
+	fi
 }
 
 TraceASPath(){
-    starttime=$(date +%s)
-    host_to_trace="$1"
-    mtr_rounds=3
-    echo ""
-    StatusbarMessage "Tracing path to ${bluebg}${host_to_trace}${lightgreybg}"
-    # cache the previously looked-up AS to save one lookup (target/last hop)
-    saved_asn=$found_asn
-    saved_asname=$found_asname
-    # last_resolved_ip will save us one dns resolution (mtr returns the same last hop twice)
-    last_resolved_ip=""
-    privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
-    # start the mtr trace in a bash coprocess to parse its output asynchronously
-    coproc mtr -l -n -c"$mtr_rounds" "$host_to_trace"
-    declare -a hostline_array
-    declare -a dnsline_array
-    declare -a pingline_array
-    declare -a aspath_array
-    # initialize the aspath array with our source AS
-    LookupASNAndRouteFromIP $(curl -s api.ipify.org)
-    aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
-    aspath_array+=("$aspath_entry")
-    while true; do
-        # read mtr output from the bash coprocess pipe,
-        # parsing raw mtr results beginning with :
-        # - h ("hostline", or IPs)
-        # - p ("pingline", or latencies)
-        # see https://github.com/traviscross/mtr/blob/master/FORMATS
-        if read -r -u "${COPROC[0]}" raw_mtr_line 2>/dev/null; then
-            mtr_type=$(echo "$raw_mtr_line" | cut -d ' ' -f 1)
-            mtr_hopnum=$(echo "$raw_mtr_line" | cut -d ' ' -f 2)
-            mtr_data=$(echo "$raw_mtr_line" | cut -d ' ' -f 3)
-            case "$mtr_type" in
-                "h")
-                    # this is a hostline ($mtr_data is an IP address)
-                    hostline_array["$mtr_hopnum"]="$mtr_data"
-                    # do a reverse DNS lookup for the IP instead of relying on
-                    # mtr's dnsline results since it proved unreliable in dnsmasq scenarios.
-                    # See https://github.com/nitefood/asn/pull/3
-                    if [ "$mtr_data" != "$last_resolved_ip" ]; then
-                        last_resolved_ip="$mtr_data"
-                        hostname=$(RdnsLookup "$mtr_data")
-                        [[ -n "$hostname" ]] && dnsline_array["$mtr_hopnum"]="$hostname"
-                    fi
-                    ;;
-                "p")
-                    # this is a pingline ($mtr_data is a latency value in microseconds)
-                    cur_latency_sum=${pingline_array["$mtr_hopnum"]}
-                    pingline_array["$mtr_hopnum"]=$(echo "$cur_latency_sum $mtr_data" |\
-                    awk '{ sum = $1 + $2; printf ("%.1f\n", sum) }') # we store the total sum of reply times in the array, and will average it at display time
-                    ;;
-            esac
-        else
-            break
-        fi
-    done
-    wait
-    # mtr finished, parse and format results
-    StatusbarMessage "Parsing collected trace output"
-    trace_output=$(printf "${lightgreybg}${black}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
-    cur_hop_count=1
-    last_hop=false
-    for mtr_hopnum in "${!hostline_array[@]}"; do
-        hop_ip=${hostline_array[$mtr_hopnum]}
-        # AS DATA lookup
-        # check if IP is in private addressing space
-        if [[ $hop_ip =~ $privateregex ]]; then
-            asn_data="${white}(Private network)${default}"
-            pwhois_output=""
-        else
-            # not a private address, try saving a lookup
-            # (if $hop_ip = our target, ie we're at the last hop)
-            if [ "$hop_ip" = "$host_to_trace" ]; then
-                found_asn=$saved_asn
-                found_asname=$saved_asname
-                # avoid adding the same AS multiple times in a row in the summary path
-                aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "${found_asn}" "$(echo "${found_asname}" | cut -d ',' -f 1)" )
-                if [[ ${#aspath_array[@]} -eq 0 ]] || [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
-                    aspath_array+=("$aspath_entry")
-                fi
-                asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
-                last_hop=true
-            else
-                # not the last hop. Lookup hop data
-                LookupASNAndRouteFromIP "$hop_ip"
-                if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
-                    # no data found, try retrieving relevant info from a generic whois lookup
-                    generic_whois_data=$(whois "$hop_ip" | grep -i -m2 -E "^netname:|^orgname:|^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
-                    if [ -z "$generic_whois_data" ]; then
-                        asn_data="${yellow}(No data)${default}"
-                    else
-                        asn_data="${yellow}(${generic_whois_data})${default}"
-                    fi
-                else
-                    # lookup success
-                    asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
-                    # avoid adding the same AS multiple times in a row in the summary path
-                    aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
-                    if [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
-                        aspath_array+=("$aspath_entry")
-                    fi
-                fi
-            fi
-            [[ "$DETAILED_TRACE" = "true" ]] && PwhoisLookup "$hop_ip"
-        fi
+	starttime=$(date +%s)
+	host_to_trace="$1"
+	mtr_rounds=3
+	echo ""
+	StatusbarMessage "Tracing path to ${bluebg}${host_to_trace}${lightgreybg}"
+	# cache the previously looked-up AS to save one lookup (target/last hop)
+	saved_asn=$found_asn
+	saved_asname=$found_asname
+	# last_resolved_ip will save us one dns resolution (mtr returns the same last hop twice)
+	last_resolved_ip=""
+	privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
+	# start the mtr trace in a bash coprocess to parse its output asynchronously
+	coproc mtr -l -n -c"$mtr_rounds" "$host_to_trace"
+	declare -a hostline_array
+	declare -a dnsline_array
+	declare -a pingline_array
+	declare -a aspath_array
+	# initialize the aspath array with our source AS
+	LookupASNAndRouteFromIP "$(curl -s api.ipify.org)"
+	aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+	aspath_array+=("$aspath_entry")
+	while true; do
+		# read mtr output from the bash coprocess pipe,
+		# parsing raw mtr results beginning with :
+		# - h ("hostline", or IPs)
+		# - p ("pingline", or latencies)
+		# see https://github.com/traviscross/mtr/blob/master/FORMATS
+		if read -r -u "${COPROC[0]}" raw_mtr_line 2>/dev/null; then
+			mtr_type=$(echo "$raw_mtr_line" | cut -d ' ' -f 1)
+			mtr_hopnum=$(echo "$raw_mtr_line" | cut -d ' ' -f 2)
+			mtr_data=$(echo "$raw_mtr_line" | cut -d ' ' -f 3)
+			case "$mtr_type" in
+				"h")
+					# this is a hostline ($mtr_data is an IP address)
+					hostline_array["$mtr_hopnum"]="$mtr_data"
+					# do a reverse DNS lookup for the IP instead of relying on
+					# mtr's dnsline results since it proved unreliable in dnsmasq scenarios.
+					# See https://github.com/nitefood/asn/pull/3
+					if [ "$mtr_data" != "$last_resolved_ip" ]; then
+						last_resolved_ip="$mtr_data"
+						hostname=$(RdnsLookup "$mtr_data")
+						[[ -n "$hostname" ]] && dnsline_array["$mtr_hopnum"]="$hostname"
+					fi
+					;;
+				"p")
+					# this is a pingline ($mtr_data is a latency value in microseconds)
+					cur_latency_sum=${pingline_array["$mtr_hopnum"]}
+					pingline_array["$mtr_hopnum"]=$(echo "$cur_latency_sum $mtr_data" |\
+					awk '{ sum = $1 + $2; printf ("%.1f\n", sum) }') # we store the total sum of reply times in the array, and will average it at display time
+					;;
+			esac
+		else
+			break
+		fi
+	done
+	wait
+	# mtr finished, parse and format results
+	StatusbarMessage "Parsing collected trace output"
+	trace_output=$(printf "${lightgreybg}${black}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
+	cur_hop_count=1
+	last_hop=false
+	for mtr_hopnum in "${!hostline_array[@]}"; do
+		hop_ip=${hostline_array[$mtr_hopnum]}
+		# AS DATA lookup
+		# check if IP is in private addressing space
+		if [[ $hop_ip =~ $privateregex ]]; then
+			asn_data="${white}(Private network)${default}"
+			pwhois_output=""
+		else
+			# not a private address, try saving a lookup
+			# (if $hop_ip = our target, ie we're at the last hop)
+			if [ "$hop_ip" = "$host_to_trace" ]; then
+				found_asn=$saved_asn
+				found_asname=$saved_asname
+				# avoid adding the same AS multiple times in a row in the summary path
+				aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "${found_asn}" "$(echo "${found_asname}" | cut -d ',' -f 1)" )
+				if [[ ${#aspath_array[@]} -eq 0 ]] || [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
+					aspath_array+=("$aspath_entry")
+				fi
+				asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+				last_hop=true
+			else
+				# not the last hop. Lookup hop data
+				LookupASNAndRouteFromIP "$hop_ip"
+				if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
+					# no data found, try retrieving relevant info from a generic whois lookup
+					network_whois_data=$(whois "$hop_ip" | grep -i -m2 -E "^netname:|^orgname:|^org-name:|^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+					if [ -z "$network_whois_data" ]; then
+						asn_data="${yellow}(No data)${default}"
+					else
+						asn_data="${yellow}(${network_whois_data})${default}"
+					fi
+				else
+					# lookup success
+					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+					# avoid adding the same AS multiple times in a row in the summary path
+					aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+					if [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
+						aspath_array+=("$aspath_entry")
+					fi
+				fi
+			fi
+			[[ "$DETAILED_TRACE" = "true" ]] && PwhoisLookup "$hop_ip"
+		fi
 
-        # DNS data (only used if a hostname was resolved)
-        if [ -n "${dnsline_array[$mtr_hopnum]}" ]; then
-            saveip=$hop_ip
-            hop_ip="${dnsline_array[$mtr_hopnum]} ($saveip)"
-        fi
+		# DNS data (only used if a hostname was resolved)
+		if [ -n "${dnsline_array[$mtr_hopnum]}" ]; then
+			saveip=$hop_ip
+			hop_ip="${dnsline_array[$mtr_hopnum]} ($saveip)"
+		fi
 
-        # PING data
-        # account for missing (no reply) hops
-        while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
-            trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
-            if [ "$DETAILED_TRACE" = "true" ]; then
-                # PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
-                trace_output+="\n"
-            fi
-            ((cur_hop_count++))
-        done
-        # data in the array item is the total sum of mtr latencies collected for this hop in microseconds.
-        # convert it to milliseconds, and round it to 1 digit precision (mtr's output style)
-        ping_total_usec=${pingline_array[$mtr_hopnum]}
-        if [ -n "$ping_total_usec" ]; then
-            ping_average_msec=$(echo "$ping_total_usec $mtr_rounds" | awk '{ avg = $1 / $2; printf( "%.1f\n", avg/1000) }')
-            ping_data="$ping_average_msec ms"
-        fi
-        trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
-        if [ "$DETAILED_TRACE" = "true" ] && [ -n "$pwhois_output" ]; then
-            trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
-                "$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
-            trace_output+="\n"
-        elif [ "$DETAILED_TRACE" = "true" ]; then
-            # PWHOIS lookups ON, but no valid data. Just add a newline for readability
-            trace_output+="\n"
-        fi
-        [[ "$last_hop" = true ]] && break
-        (( cur_hop_count++ ))
-    done
-    # mtr output (hostlines) parsing complete
-    if [ "$last_hop" = false ]; then
-        # last hop wasn't our target IP. Add a missing last hop to the trace.
-        trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
-        [[ "$DETAILED_TRACE" = "true" ]] && trace_output+="\n"
-    fi
-    StatusbarMessage ""
+		# PING data
+		# account for missing (no reply) hops
+		while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
+			trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
+			if [ "$DETAILED_TRACE" = "true" ]; then
+				# PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
+				trace_output+="\n"
+			fi
+			((cur_hop_count++))
+		done
+		# data in the array item is the total sum of mtr latencies collected for this hop in microseconds.
+		# convert it to milliseconds, and round it to 1 digit precision (mtr's output style)
+		ping_total_usec=${pingline_array[$mtr_hopnum]}
+		if [ -n "$ping_total_usec" ]; then
+			ping_average_msec=$(echo "$ping_total_usec $mtr_rounds" | awk '{ avg = $1 / $2; printf( "%.1f\n", avg/1000) }')
+			ping_data="$ping_average_msec ms"
+		fi
+		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
+		if [ "$DETAILED_TRACE" = "true" ] && [ -n "$pwhois_output" ]; then
+			trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
+				"$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
+			trace_output+="\n"
+		elif [ "$DETAILED_TRACE" = "true" ]; then
+			# PWHOIS lookups ON, but no valid data. Just add a newline for readability
+			trace_output+="\n"
+		fi
+		[[ "$last_hop" = true ]] && break
+		(( cur_hop_count++ ))
+	done
+	# mtr output (hostlines) parsing complete
+	if [ "$last_hop" = false ]; then
+		# last hop wasn't our target IP. Add a missing last hop to the trace.
+		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
+		[[ "$DETAILED_TRACE" = "true" ]] && trace_output+="\n"
+	fi
+	StatusbarMessage ""
 
-    if [ "$DETAILED_TRACE" = true ]; then
-        headermsg="Detailed trace to $userinput"
-    else
-        headermsg="Trace to $userinput"
-    fi
-    BoxHeader "$headermsg"
-    echo -e "\n${trace_output}"
-    endtime=$(date +%s)
-    runtime=$((endtime-starttime))
-    echo -e "\nTrace complete in $runtime seconds.\n\n"
+	if [ "$DETAILED_TRACE" = true ]; then
+		headermsg="Detailed trace to $userinput"
+	else
+		headermsg="Trace to $userinput"
+	fi
+	BoxHeader "$headermsg"
+	echo -e "\n${trace_output}"
+	endtime=$(date +%s)
+	runtime=$((endtime-starttime))
+	echo -e "\nTrace complete in $runtime seconds.\n\n"
 
-    BoxHeader "AS path to $userinput"
-    echo -en "\n  "
-    for as in "${aspath_array[@]}"; do
-        if [ "$as" = "${aspath_array[0]}" ]; then
-            echo -en "${as} ${yellow}(Local AS)${default}"
-        else
-            echo -en "${as}${default}"
-        fi
-        if [ "$as" != "${aspath_array[-1]}" ]; then
-            echo -en "\n ╭╯\n ╰"
-        fi
-    done
-    echo -e "\n"
+	BoxHeader "AS path to $userinput"
+	echo -en "\n  "
+	for as in "${aspath_array[@]}"; do
+		if [ "$as" = "${aspath_array[0]}" ]; then
+			echo -en "${as} ${yellow}(Local AS)${default}"
+		else
+			echo -en "${as}${default}"
+		fi
+		if [ "$as" != "${aspath_array[-1]}" ]; then
+			echo -en "\n ╭╯\n ╰"
+		fi
+	done
+	echo -e "\n"
 
 }
 
 SearchByOrg(){
-    declare -a orgs
-    MULTIPLE_ORGS_FOUND=false
-    echo ""
-    StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
-    organizations=$(whois -h whois.pwhois.org "registry org-name=$1")
-    for orgname in $(echo "$organizations" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u) ; do
-        orgs+=("$orgname")
-    done
-    StatusbarMessage ""
+	declare -a orgs
+	MULTIPLE_ORGS_FOUND=false
+	echo ""
+	StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
+	organizations=$(whois -h whois.pwhois.org "registry org-name=$1")
+	for orgname in $(echo "$organizations" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u) ; do
+		orgs+=("$orgname")
+	done
+	StatusbarMessage ""
 
-    if [ ${#orgs[@]} -eq 0 ]; then
-        # company search yielded no results
-        PrintErrorAndExit "Error: organization not found"
-    elif [ ${#orgs[@]} -eq 1 ]; then
-        # company search yielded 1 result, proceed to the lookup directly
-        org="${orgs[0]}"
-    else
-        # company search yielded multiple results, show a menu and let the user choose which ORG to inspect
-        MULTIPLE_ORGS_FOUND=true
-        ShowMenu
-    fi
-    while true; do
-        searchresults=""
-        orgids=$(echo -e "$organizations" | grep -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
-        for ipversion in 4 6; do
-            NO_RESULTS=true
-            searchresults+=$(BoxHeader "IPv${ipversion} networks for organization \"${org}\"")
-            # iterate over Org-IDs related to the company (in case of multiple Org-IDs for a single Org-Name)
-            for orgid in $orgids; do
-                StatusbarMessage "Looking up IPv${ipversion} networks for organization ${bluebg}$org${lightgreybg} (Org-ID: ${bluebg}${orgid}${lightgreybg})"
-                if [ "$ipversion" = "4" ]; then
-                    netblock=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^*>|Net-")
-                else
-                    # apply some formatting for clarity to ipv6 results
-                    netblock=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | \
-                    sed 's/^Netblock-Record: .*//g' | grep -E "^Net-(Range|Name|Handle|Source)|^$")
-                fi
-                if [ -n "$netblock" ]; then
-                    NO_RESULTS=false
-                    searchresults+=$(echo -e "\n${red}(Org-ID: ${green}${orgid}${red})${default}\n${netblock}")
-                    searchresults+="\n"
-                fi
-            done
-            [[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
-        done
-        StatusbarMessage ""
-        echo -e "$searchresults"
-        if [ "$MULTIPLE_ORGS_FOUND" = true ]; then
-            # let the user choose if they want to look up another company among the multiple results found
-            echo -en "${lightgreybg}${black}Press any key to return to the menu or 'q' to quit${default}"
-            read -rsn1 key
-            StatusbarMessage ""
-            if [ "$key" = "q" ] || [ "$key" = "Q" ]; then
-                break
-            else
-                echo ""
-                ShowMenu
-            fi
-        else
-            break
-        fi
-    done
-    tput sgr0
-    exit 0
+	if [ ${#orgs[@]} -eq 0 ]; then
+		# company search yielded no results
+		PrintErrorAndExit "Error: organization not found"
+	elif [ ${#orgs[@]} -eq 1 ]; then
+		# company search yielded 1 result, proceed to the lookup directly
+		org="${orgs[0]}"
+	else
+		# company search yielded multiple results, show a menu and let the user choose which ORG to inspect
+		MULTIPLE_ORGS_FOUND=true
+		ShowMenu
+	fi
+	while true; do
+		searchresults=""
+		orgids=$(echo -e "$organizations" | grep -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+		for ipversion in 4 6; do
+			NO_RESULTS=true
+			searchresults+=$(BoxHeader "IPv${ipversion} networks for organization \"${org}\"")
+			# iterate over Org-IDs related to the company (in case of multiple Org-IDs for a single Org-Name)
+			for orgid in $orgids; do
+				StatusbarMessage "Looking up IPv${ipversion} networks for organization ${bluebg}$org${lightgreybg} (Org-ID: ${bluebg}${orgid}${lightgreybg})"
+				if [ "$ipversion" = "4" ]; then
+					netblock=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^*>|Net-")
+				else
+					# apply some formatting for clarity to ipv6 results
+					netblock=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | \
+					sed 's/^Netblock-Record: .*//g' | grep -E "^Net-(Range|Name|Handle|Source)|^$")
+				fi
+				if [ -n "$netblock" ]; then
+					NO_RESULTS=false
+					searchresults+=$(echo -e "\n${red}(Org-ID: ${green}${orgid}${red})${default}\n${netblock}")
+					searchresults+="\n"
+				fi
+			done
+			[[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
+		done
+		StatusbarMessage ""
+		echo -e "$searchresults"
+		if [ "$MULTIPLE_ORGS_FOUND" = true ]; then
+			# let the user choose if they want to look up another company among the multiple results found
+			echo -en "${lightgreybg}${black}Press any key to return to the menu or 'q' to quit${default}"
+			read -rsn1 key
+			StatusbarMessage ""
+			if [ "$key" = "q" ] || [ "$key" = "Q" ]; then
+				break
+			else
+				echo ""
+				ShowMenu
+			fi
+		else
+			break
+		fi
+	done
+	tput sgr0
+	exit 0
 }
 
 ShowMenu(){ # show selection menu for multiple search-by-company results
-    PS3="
+	PS3="
 Select an organization (or CTRL-C to cancel): "
-    BoxHeader "Organizations matching \"$userinput\""
-    echo ""
-    COLUMNS=0
-    set -o posix
-    select choice in "${orgs[@]}"; do
-        for org in "${orgs[@]}"; do
-            if [[ "$org" = "$choice" ]]; then
-                break 2
-            fi
-        done
-    done
-    set +o posix
-    echo ""
+	BoxHeader "Organizations matching \"$userinput\""
+	echo ""
+	COLUMNS=0
+	set -o posix
+	select choice in "${orgs[@]}"; do
+		for org in "${orgs[@]}"; do
+			if [[ "$org" = "$choice" ]]; then
+				break 2
+			fi
+		done
+	done
+	set +o posix
+	echo ""
 }
 
 PrintErrorAndExit(){
-    echo -e "\n\e[30m\e[101m${1}\e[39m\e[49m\n"
-    tput sgr0
-    exit 1
+	echo -e "\n\e[30m\e[101m${1}\e[39m\e[49m\n"
+	tput sgr0
+	exit 1
 }
 
 Ctrl_C() {
-    PrintErrorAndExit "Interrupted"
+	PrintErrorAndExit "Interrupted"
 }
 
 BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
-    local s="$*"
-    echo -e "\n${white}╭─${s//?/─}─╮
+	local s="$*"
+	echo -e "\n${white}╭─${s//?/─}─╮
 │ ${yellow}${s}${white} │
 ╰─${s//?/─}─╯"
-    tput sgr 0
+	tput sgr 0
 }
 
 StatusbarMessage() { # invoke without parameters to delete the status bar message
-    if [ -n "$statusbar_message" ]; then
-        # delete previous status bar message
-        printf "\r%${#statusbar_message}s\r" " "
-    fi
-    if [ -n "$1" ]; then
-        statusbar_message="${lightgreybg}${black}$1 (press CTRL-C to cancel)...${default}"
-        echo -en "$statusbar_message"
-    fi
+	if [ -n "$statusbar_message" ]; then
+		# delete previous status bar message
+		printf "\r%${#statusbar_message}s\r" " "
+	fi
+	if [ -n "$1" ]; then
+		statusbar_message="${lightgreybg}${black}$1 (press CTRL-C to cancel)...${default}"
+		echo -en "$statusbar_message"
+	fi
 }
 
 
@@ -459,128 +501,125 @@ ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:)
 
 # Check cmdline parameters
 if [[ $# -lt 1 ]]; then
-    PrintUsage
-    exit 1
+	PrintUsage
+	exit 1
 fi
 case "$1" in
-    "-n"|"--notrace")
-        if [[ $# -lt 2 ]]; then
-            PrintUsage
-            echo -e "Error: missing ${red}TARGET${default}\n"
-            exit 1
-        fi
-        TRACEASNPATH=false
-        DETAILED_TRACE=false
-        userinput="$2"
-        ;;
-    "-d"|"--detailed")
-        if [[ $# -lt 2 ]]; then
-            PrintUsage
-            echo -e "Error: missing ${red}TARGET${default}\n"
-            exit 1
-        fi
-        TRACEASNPATH=true
-        DETAILED_TRACE=true
-        userinput="$2"
-        ;;
-    *)
-        if [ "${1:0:1}" = "-" ]; then
-             PrintUsage
-             echo -e "Error: unknown option ${red}$1${default}\n"
-             exit 1
-        else
-            # defaults
-            TRACEASNPATH=true
-            DETAILED_TRACE=false
-            ENABLE_ORGSEARCH=true
-            userinput="$@"
-        fi
-        ;;
+	"-n"|"--notrace")
+		if [[ $# -lt 2 ]]; then
+			PrintUsage
+			echo -e "Error: missing ${red}TARGET${default}\n"
+			exit 1
+		fi
+		TRACEASNPATH=false
+		DETAILED_TRACE=false
+		userinput="$2"
+		;;
+	"-d"|"--detailed")
+		if [[ $# -lt 2 ]]; then
+			PrintUsage
+			echo -e "Error: missing ${red}TARGET${default}\n"
+			exit 1
+		fi
+		TRACEASNPATH=true
+		DETAILED_TRACE=true
+		userinput="$2"
+		;;
+	*)
+		if [ "${1:0:1}" = "-" ]; then
+			 PrintUsage
+			 echo -e "Error: unknown option ${red}$1${default}\n"
+			 exit 1
+		else
+			# defaults
+			TRACEASNPATH=true
+			DETAILED_TRACE=false
+			ENABLE_ORGSEARCH=true
+			userinput="$@"
+		fi
+		;;
 esac
 
 # Check prerequisites
 # TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed
 if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
-    echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
-    "\non Debian-based linux distributions) to enable AS path tracing"
-    TRACEASNPATH=false
+	echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
+	"\non Debian-based linux distributions) to enable AS path tracing"
+	TRACEASNPATH=false
 fi
 if [ -z "$(command -v whois)" ]; then
-    echo -e "\n${red}ERROR: ${white}program '${red}whois${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install whois${white} on Debian-based linux distributions)\n"
-    exit 1
+	echo -e "\n${red}ERROR: ${white}program '${red}whois${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install whois${white} on Debian-based linux distributions)\n"
+	exit 1
 fi
 if [ -z "$(command -v host)" ]; then
-    echo -e "\n${red}ERROR: ${white}program '${red}host${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install bind9-host${white} on Debian-based linux distributions)\n"
-    exit 1
+	echo -e "\n${red}ERROR: ${white}program '${red}host${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install bind9-host${white} on Debian-based linux distributions)\n"
+	exit 1
 fi
 
 BoxHeader "ASN lookup for $userinput"
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 if [ -z "$input" ]; then
-    # Input is not an IP Address. Check if it is a number (ASN)
-    asn=$(echo "$userinput" | sed 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
-    if [ -z "$asn" ]; then
-        # Input is not an ASN either. See if it's a hostname (includes at least one dot)
-        if echo "$userinput" | grep -q "\."; then
-            echo -e -n "\n${blue}- Resolving \"$userinput\"... "
-            ip=$(ResolveHostnameToIPList "$userinput")
-            if [ -z "$ip" ]; then
-                echo ""
-                PrintErrorAndExit "Error: unable to resolve hostname"
-            fi
-            numips=$(echo "$ip" | wc -l)
-            [[ $numips = 1 ]] && s="" || s="es"
-            echo -e "${blue}$numips IP address$s found:\n"
-            # grab the longest IP to properly size output padding
-            longest=0
-            for singleip in $ip; do
-                [[ ${#singleip} -gt $longest ]] && longest=${#singleip}
-            done
-            (( longest++ ))
-            # output actual results
-            ip_to_trace=""
-            for singleip in $ip; do
-                LookupASNAndRouteFromIP "$singleip"
-                WhoisIP "$singleip"
-                # save the first IP from the dns lookup result
-                [[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
-            done
-            # Check if AS path tracing is requested
-            if [ $TRACEASNPATH = true ]; then
-                # in case of multiple IPs (DNS RR), trace the first one
-                TraceASPath "$ip_to_trace"
-            fi
-            tput sgr0
-            echo ""
-            exit 0
-        else
-            # not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
-            [[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: Search by ORGANIZATION requires no command line switches"
-            SearchByOrg "$userinput"
-        fi
-    else
-        # Input is an ASN
-        WhoisASN "$asn"
-        if [ -z "$found_asname" ]; then
-            PrintErrorAndExit "Error: no data found for AS${asn}"
-        fi
-        printf "\n${red}[AS%s] ${green}%s\n${white}\n" "$asn" "$found_asname"
-        tput sgr0
-        exit 0
-    fi
+	# Input is not an IP Address. Check if it is a number (ASN)
+	asn=$(echo "$userinput" | sed 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
+	if [ -z "$asn" ]; then
+		# Input is not an ASN either. See if it's a hostname (includes at least one dot)
+		if echo "$userinput" | grep -q "\."; then
+			echo -e -n "\n${blue}- Resolving \"$userinput\"... "
+			ip=$(ResolveHostnameToIPList "$userinput")
+			if [ -z "$ip" ]; then
+				echo ""
+				PrintErrorAndExit "Error: unable to resolve hostname"
+			fi
+			numips=$(echo "$ip" | wc -l)
+			[[ $numips = 1 ]] && s="" || s="es"
+			echo -e "${blue}$numips IP address$s found:\n"
+			# grab the longest IP to properly size output padding
+			longest=0
+			for singleip in $ip; do
+				[[ ${#singleip} -gt $longest ]] && longest=${#singleip}
+			done
+			(( longest++ ))
+			# output actual results
+			ip_to_trace=""
+			for singleip in $ip; do
+				LookupASNAndRouteFromIP "$singleip"
+				WhoisIP "$singleip"
+				# save the first IP from the dns lookup result
+				[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
+			done
+			# Check if AS path tracing is requested
+			if [ $TRACEASNPATH = true ]; then
+				# in case of multiple IPs (DNS RR), trace the first one
+				TraceASPath "$ip_to_trace"
+			fi
+			tput sgr0
+			echo ""
+			exit 0
+		else
+			# not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
+			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: Search by ORGANIZATION requires no command line switches"
+			SearchByOrg "$userinput"
+		fi
+	else
+		# Input is an ASN
+		WhoisASN "$asn"
+		if [ -z "$found_asname" ]; then
+			PrintErrorAndExit "Error: no data found for AS${asn}"
+		fi
+		printf "\n${red}[AS%s] ${green}%s\n${white}\n" "$asn" "$found_asname"
+		tput sgr0
+		exit 0
+	fi
 else
-    # Input is an IP address
-    LookupASNAndRouteFromIP "$input"
-    if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
-        PrintErrorAndExit "Error: no data found for $input"
-    fi
-    (( longest=${#input}+1 ))
-    WhoisIP "$input"
-    # Check if AS path tracing is requested
-    if [ $TRACEASNPATH = true ]; then
-        TraceASPath "$input"
-    fi
-    tput sgr0
-    echo ""
-    exit 0
+	# Input is an IP address
+	LookupASNAndRouteFromIP "$input"
+	(( longest=${#input}+1 ))
+	WhoisIP "$input"
+	# Check if AS path tracing is requested
+	if [ $TRACEASNPATH = true ]; then
+		TraceASPath "$input"
+	fi
+	tput sgr0
+	echo ""
+	exit 0
 fi

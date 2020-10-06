@@ -10,7 +10,7 @@ It is also possible to search by _organization name_ in order to retrieve a list
 
 Screenshots for every lookup option are below.
 
-The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/) and the [Prefix WhoIs Project](https://pwhois.org/) services for data.
+The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/), [Prefix WhoIs Project](https://pwhois.org/) and [ipify](https://www.ipify.org/) services for data.
 
 Requires Bash v4+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
@@ -72,7 +72,7 @@ After that, you can use the script by running `./asn`.
 
 Detailed hop info reporting can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) for every hop in the mtr trace, and its output will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
 
-The script will attempt a generic `whois` lookup during traces when Team Cymru and pWhois have no info about the IP address or prefix. This usually happens for IXP and PNI prefixes, and will give better insight into the path taken by packets.
+The script will attempt a best-effort, generic `whois` lookup when Team Cymru and pWhois have no info about the IP address or prefix. This usually happens for IXP and PNI prefixes, and will give better insight into the path taken by packets.
 
 Geolocation and organization data is taken from pWhois.
 
