@@ -48,9 +48,9 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ### Network search by organization ###
 
-* _Organization search for "github"_
+* _Organization search for "cloudflare"_
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/92757367-f71c8080-f38d-11ea-8bab-121251427911.png)
+![search_by_org](https://user-images.githubusercontent.com/24555810/95413230-2beb0b80-092b-11eb-829f-0660f492b4c9.gif)
 
 ---
 

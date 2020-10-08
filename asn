@@ -38,18 +38,26 @@ WhoisASN(){
 	else
 		pwhois_asn_info=$(whois -h whois.pwhois.org "registry source-as=$1" | grep -E "^Org-Name:|^Create-Date:")
 		found_org=$(echo -e "$pwhois_asn_info" | grep -E "^Org-Name:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
-		found_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
-		if [ "$HAVE_JQ" = true ]; then
-			StatusbarMessage "Querying RIPEstat for BGP data"
-			RIPESTAT_QUERY=true
-			ripestat_data=$(curl -s https://stat.ripe.net/data/routing-status/data.json?resource=AS$1)
-			RIPESTAT_QUERY=false
-			StatusbarMessage ""
-			if [ -n "$ripestat_data" ]; then
-				ripestat_ipv4=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v4.prefixes')
-				ripestat_ipv6=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v6.prefixes')
-				ripestat_bgp=$(echo -e "$ripestat_data" | jq -r '.data.observed_neighbours')
-			fi
+		pwhois_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
+		found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%d %H:%M:%S")
+	fi
+}
+
+QueryRipestat(){
+	ripestat_data=""
+	if [ "$HAVE_JQ" = false ]; then
+		echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
+			"on Debian-based linux distributions)\nto enable RIPEstat BGP info for ASN lookups${default}"
+	else
+		BoxHeader "BGP statistics for $found_asname"
+		echo ""
+		StatusbarMessage "Querying RIPEstat for BGP data"
+		ripestat_data=$(curl -s https://stat.ripe.net/data/routing-status/data.json?resource=AS$1)
+		StatusbarMessage ""
+		if [ -n "$ripestat_data" ]; then
+			ripestat_ipv4=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v4.prefixes')
+			ripestat_ipv6=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v6.prefixes')
+			ripestat_bgp=$(echo -e "$ripestat_data" | jq -r '.data.observed_neighbours')
 		fi
 	fi
 }
@@ -122,16 +130,18 @@ ResolveHostnameToIPList(){
 
 PrintUsage(){
 	programname=$(basename "$0")
-	echo -e "\nASN Lookup Tool\
-	\n\n\nUsage:\n\t${white}$programname [-d|-n] <TARGET>${default}\n\nOptions:\n\
-	\n  ${white}-d, --detailed\n\t${default}Output detailed hop info (collected from pWhois) during the AS path trace to the TARGET
-	\n  ${white}-n, --notrace\n\t${default}Disable tracing the AS path to the TARGET\n\nSupported targets:\n\
-	\n  ${white}<AS Number>\n\t(to lookup matching ASN data. Supports \"as123\" and \"123\" formats - case insensitive)\
-	\n  ${white}<IPv4/IPv6>\n\t(to lookup matching route and ASN data)\
-	\n  ${white}<Prefix>\n\t(to lookup matching ASN data)\
-	\n  ${white}<host.name.tld>\n\t(to lookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR)\
-	\n\
-	\nNote: AS path tracing will be performed only for single IPs/DNS lookup results.
+	BoxHeader "ASN / BGP stats / IPv4v6 / Prefix / ASPath / Organization lookup tool"
+	echo -e "\
+	\nUsage:\n\t$programname ${green}[OPTIONS] ${blue}<TARGET>${default}\n\nOptions:\n\
+	\n  ${green}-d, --detailed\n\t${default}Output detailed hop info (collected from pWhois) during the AS path trace to the ${blue}TARGET${default}
+	\n  ${green}-n, --notrace\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}\n\nSupported targets:\
+	\n\n  ${blue}<AS Number>${default}\n\tLookup matching and BGP announcements/neighbours data.\
+	\n\t(Supports \"as123\" and \"123\" formats - case insensitive)\
+	\n\n  ${blue}<IPv4/IPv6>${default}\n\tLookup matching route and ASN data\
+	\n\n  ${blue}<Prefix>${default}\n\tLookup matching ASN data\
+	\n\n  ${blue}<host.name.tld>${default}\n\tLookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR\
+	\n\n  ${blue}<Organization Name>${default}\n\tSearch by company name and lookup network ranges exported by (or related to) the company\
+	\n\n\nProject homepage: ${red}https://github.com/nitefood/asn${default}\n
 	"
 }
 
@@ -383,12 +393,61 @@ TraceASPath(){
 }
 
 SearchByOrg(){
+	unset orgs
 	declare -a orgs
 	MULTIPLE_ORGS_FOUND=false
 	echo ""
-	StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
-	organizations=$(whois -h whois.pwhois.org "registry org-name=$1")
-	for orgname in $(echo "$organizations" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u) ; do
+	if [ "$ORG_FILTER" = false ]; then
+		StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
+		full_org_search_data=$(whois -h whois.pwhois.org "registry org-name=$1")
+		original_organizations=$(echo -e "$full_org_search_data" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u)
+		total_orgsearch_results=$(echo -e "$original_organizations" | wc -l)
+		organizations="$original_organizations"
+	else
+		# user chose to apply a search filter to a previous query
+		MULTIPLE_ORGS_FOUND=true
+		if [ ${#orgfilters_array[@]} -eq 0 ] && [ ${#excl_orgfilters_array[@]} -eq 0 ]; then
+			# user deleted all search filters. Revert to original query result
+			organizations="$original_organizations"
+			ORG_FILTER=false
+		else
+			StatusbarMessage "Applying filters"
+			filtered_org="$original_organizations"
+			# parse all inclusion filters
+			for filter in "${orgfilters_array[@]}"; do
+				apply_filter=$(echo -e "$filtered_org" | grep -i -- "$filter")
+				if [ -z "$apply_filter" ]; then
+					StatusbarMessage ""
+					echo -en "${yellow}Warning: No results found for ${bluebg}${filter}${default}"
+					sleep 2
+					# remove last filter term
+					unset 'orgfilters_array[${#orgfilters_array[@]}-1]'
+				else
+					filtered_org="$apply_filter"
+				fi
+			done
+			# parse all exclusion filters
+			for filter in "${excl_orgfilters_array[@]}"; do
+				apply_filter=$(echo -e "$filtered_org" | grep -i -v -- "$filter")
+				if [ -z "$apply_filter" ]; then
+					StatusbarMessage ""
+					echo -en "${yellow}Warning: No more results found if excluding ${bluebg}${filter}${default}"
+					sleep 2
+					# remove last filter term
+					unset 'excl_orgfilters_array[${#excl_orgfilters_array[@]}-1]'
+				else
+					filtered_org="$apply_filter"
+				fi
+			done
+			# have we removed all filters (because of no matches)? go back to unfiltered results
+			if [ ${#orgfilters_array[@]} -eq 0 ] && [ ${#excl_orgfilters_array[@]} -eq 0 ]; then
+				ORG_FILTER=false
+				echo ""
+			fi
+			organizations="$filtered_org"
+		fi
+	fi
+	for orgname in $organizations; do
 		orgs+=("$orgname")
 	done
 	StatusbarMessage ""
@@ -397,8 +456,10 @@ SearchByOrg(){
 		# company search yielded no results
 		PrintErrorAndExit "Error: organization not found"
 	elif [ ${#orgs[@]} -eq 1 ]; then
-		# company search yielded 1 result, proceed to the lookup directly
+		# company search yielded 1 result, proceed to the lookup directly if no filters are active
+		# or show the menu (even if there's just one hit) if we filtered our way to this result
 		org="${orgs[0]}"
+		[[ "$ORG_FILTER" = true ]] && ShowMenu
 	else
 		# company search yielded multiple results, show a menu and let the user choose which ORG to inspect
 		MULTIPLE_ORGS_FOUND=true
@@ -406,7 +467,8 @@ SearchByOrg(){
 	fi
 	while true; do
 		searchresults=""
-		orgids=$(echo -e "$organizations" | grep -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+		orgids=$(echo -e "$full_org_search_data" | grep -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+		NO_ERROR_ON_INTERRUPT=true
 		for ipversion in 4 6; do
 			NO_RESULTS=true
 			searchresults+=$(BoxHeader "IPv${ipversion} networks for organization \"${org}\"")
@@ -428,6 +490,7 @@ SearchByOrg(){
 			done
 			[[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
 		done
+		NO_ERROR_ON_INTERRUPT=false
 		StatusbarMessage ""
 		echo -e "$searchresults"
 		if [ "$MULTIPLE_ORGS_FOUND" = true ]; then
@@ -450,9 +513,40 @@ SearchByOrg(){
 }
 
 ShowMenu(){ # show selection menu for multiple search-by-company results
-	PS3="
-Select an organization (or CTRL-C to cancel): "
 	BoxHeader "Organizations matching \"$userinput\""
+	if [ "$ORG_FILTER" = true ]; then
+		num_inclusion_filters="${#orgfilters_array[@]}"
+		num_exclusion_filters="${#excl_orgfilters_array[@]}"
+		num_filters=$(( num_inclusion_filters+num_exclusion_filters ))
+		[[ $num_filters = 1 ]] && s="" || s="s"
+		ACTIVE_FILTERS_STRING=$'\n'"${bluebg}${black}${num_filters} Active filter${s}:${default}"
+
+		# recap inclusion filters
+		for filter in "${orgfilters_array[@]}"; do
+			ACTIVE_FILTERS_STRING+=" ${lightgreybg}${black}${filter}${default}"
+		done
+
+		# recap exclusion filters
+		for filter in "${excl_orgfilters_array[@]}"; do
+			ACTIVE_FILTERS_STRING+=" ${lightgreybg}${red}-${filter}${default}"
+		done
+
+		ACTIVE_FILTERS_STRING+=$'\n'
+	else
+		ACTIVE_FILTERS_STRING=""
+	fi
+	PS3="
+________________________________________________
+$ACTIVE_FILTERS_STRING
+${yellow}${#orgs[@]} of $total_orgsearch_results total results shown${default}
+
+Choose an organization or enter:
+- <${green}text${default}> to FILTER FOR A STRING
+- <${blue}-${default}> to EXCLUDE A STRING
+- <${blue}x${default}> to REMOVE ALL FILTERS
+- <${blue}q${default}> to QUIT
+
+>> "
 	echo ""
 	COLUMNS=0
 	set -o posix
@@ -462,6 +556,35 @@ Select an organization (or CTRL-C to cancel): "
 				break 2
 			fi
 		done
+		case "$REPLY" in
+			"q"|"Q")
+				exit 0
+			;;
+			"-")
+				# add an exclusion filter
+				echo -n "Enter a string to ${red}exclude${default}: "
+				read -r exclusion_string
+				excl_orgfilters_array+=("$exclusion_string")
+				ORG_FILTER=true
+				SearchByOrg
+			;;
+			"x"|"X")
+				# reset filters
+				if [ "$ORG_FILTER" = true ]; then
+					unset orgfilters_array
+					unset excl_orgfilters_array
+					declare -a orgfilters_array
+					declare -a excl_orgfilters_array
+					SearchByOrg
+				fi
+			;;
+			*)
+				# apply filter to the results
+				orgfilters_array+=("$REPLY")
+				ORG_FILTER=true
+				SearchByOrg
+			;;
+		esac
 	done
 	set +o posix
 	echo ""
@@ -474,7 +597,11 @@ PrintErrorAndExit(){
 }
 
 Ctrl_C() {
-	if [ "$RIPESTAT_QUERY" != true ]; then
+	if [ "$NO_ERROR_ON_INTERRUPT" = true ]; then
+		StatusbarMessage ""
+		tput sgr0
+		ShowMenu
+	else
 		PrintErrorAndExit "Interrupted"
 	fi
 }
@@ -500,17 +627,18 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 
 
 IFS=$'\n\t'
-green="\e[32m"
-magenta="\e[35m"
-yellow="\e[33m"
-white="\e[97m"
-blue="\e[94m"
-red="\e[31m"
-black="\e[30m"
-lightgreybg="\e[47m"
-bluebg="\e[44m\e[30m"
-default="\e[0m"
+green=$'\e[32m'
+magenta=$'\e[35m'
+yellow=$'\e[33m'
+white=$'\e[97m'
+blue=$'\e[94m'
+red=$'\e[31m'
+black=$'\e[30m'
+lightgreybg=$'\e[47m'
+bluebg=$'\e[44m\e[30m'
+default=$'\e[0m'
 
+NO_ERROR_ON_INTERRUPT=false
 trap Ctrl_C INT
 
 ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
@@ -625,6 +753,9 @@ if [ -z "$input" ]; then
 		else
 			# not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
 			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: Search by ORGANIZATION requires no command line switches"
+			ORG_FILTER=false
+			declare -a orgfilters_array
+			declare -a excl_orgfilters_array
 			SearchByOrg "$userinput"
 		fi
 	else
@@ -641,17 +772,14 @@ if [ -z "$input" ]; then
 		printf " ${yellow}%s\n" "$found_org"
 		printf "${bluebg} AS Reg. date ───>${default}"
 		printf " ${white}%s\n" "$found_createdate"
-		# ripestat output
-		if [ "$HAVE_JQ" = false ]; then
-			echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
-				"on Debian-based linux distributions)\nto enable RIPEstat BGP info for ASN lookups${default}"
-		elif [ -n "$ripestat_data" ]; then
+		QueryRipestat "${asn}"
+		if [ -n "$ripestat_data" ]; then
 			printf "${bluebg} IPv4 Prefixes ──>${default}"
-			printf " ${white}%s\n" "$ripestat_ipv4"
+			printf " ${green}%s\n" "$ripestat_ipv4"
 			printf "${bluebg} IPv6 Prefixes ──>${default}"
-			printf " ${white}%s\n" "$ripestat_ipv6"
+			printf " ${yellow}%s\n" "$ripestat_ipv6"
 			printf "${bluebg} BGP Neighbours ─>${default}"
-			printf " ${white}%s\n" "$ripestat_bgp"
+			printf " ${blue}%s\n" "$ripestat_bgp"
 		fi
 		tput sgr0
 		echo ""
