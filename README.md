@@ -48,9 +48,9 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ### Network search by organization ###
 
-* _Organization search for "cloudflare"_
+* _Organization search for "github"_
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/95413230-2beb0b80-092b-11eb-829f-0660f492b4c9.gif)
+![search_by_org](https://user-images.githubusercontent.com/24555810/95528480-85f5da80-09d8-11eb-8f9f-29d6211e2d86.png)
 
 ---
 
@@ -60,7 +60,7 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 Some packages are required for full functionality. On a Debian/Ubuntu machine, you can install them with:
 
-`apt -y install whois bind9-host mtr-tiny jq`
+`apt -y install whois bind9-host mtr-tiny jq ipcalc`
 
 ### Script download
 

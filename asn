@@ -52,7 +52,7 @@ QueryRipestat(){
 		BoxHeader "BGP statistics for $found_asname"
 		echo ""
 		StatusbarMessage "Querying RIPEstat for BGP data"
-		ripestat_data=$(curl -s https://stat.ripe.net/data/routing-status/data.json?resource=AS$1)
+		ripestat_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1")
 		StatusbarMessage ""
 		if [ -n "$ripestat_data" ]; then
 			ripestat_ipv4=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v4.prefixes')
@@ -191,7 +191,7 @@ RdnsLookup(){
 AbuseLookup(){
 	abuselist=""
 	for abusecontact in $(echo -e "$1" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
-		if echo $abusecontact | grep -vq '@'; then
+		if echo "$abusecontact" | grep -vq '@'; then
 			# $abusecontact is not an email, try a whois lookup (it should be a handle)
 			resolvedabuse=$(whois "$abusecontact" | grep -E -i "^abuse-mailbox:" | awk '{print $2}' | tr -d \')
 			if [ -z "$resolvedabuse" ]; then
@@ -210,7 +210,7 @@ AbuseLookup(){
 	done
 
 	if [ -n "$abuselist" ]; then
-		echo "$(echo -e $abuselist | tr " " "\n" | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')"
+		echo -e "$abuselist" | tr " " "\n" | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//'
 	else
 		echo "-"
 	fi
@@ -400,7 +400,7 @@ SearchByOrg(){
 	if [ "$ORG_FILTER" = false ]; then
 		StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
 		full_org_search_data=$(whois -h whois.pwhois.org "registry org-name=$1")
-		original_organizations=$(echo -e "$full_org_search_data" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -u)
+		original_organizations=$(echo -e "$full_org_search_data" | grep -E "^Org-Name:" | cut -d ':' -f 2- | sed 's/^ //g' | sort -uf)
 		total_orgsearch_results=$(echo -e "$original_organizations" | wc -l)
 		organizations="$original_organizations"
 	else
@@ -467,7 +467,7 @@ SearchByOrg(){
 	fi
 	while true; do
 		searchresults=""
-		orgids=$(echo -e "$full_org_search_data" | grep -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+		orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
 		NO_ERROR_ON_INTERRUPT=true
 		for ipversion in 4 6; do
 			NO_RESULTS=true
@@ -475,16 +475,60 @@ SearchByOrg(){
 			# iterate over Org-IDs related to the company (in case of multiple Org-IDs for a single Org-Name)
 			for orgid in $orgids; do
 				StatusbarMessage "Looking up IPv${ipversion} networks for organization ${bluebg}$org${lightgreybg} (Org-ID: ${bluebg}${orgid}${lightgreybg})"
+				netblocks_output=""
 				if [ "$ipversion" = "4" ]; then
-					netblock=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^*>|Net-")
+					# Parse IPv4 NETBLOCKS
+					netblocks=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^*>")
+					netblocks_header="            IPv4 NET RANGE                | INFO"
+					for netblock in $netblocks; do
+						prefix=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 1)
+						netname=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 2 | tr -d ' ')
+						netblock_type=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 3 | tr -d ' ')
+						if [ "$netblock_type" = "unknown" ]; then
+							nettype=""
+						else
+							nettype=" (${yellow}$netblock_type${default})"
+						fi
+						regdate=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 4 | tr -d ' ')
+						if [ "$HAVE_IPCALC" = true ]; then
+							# deaggregate IPv4 netblocks into CIDR prefixes for readability
+							prefix_spacing=19
+							trimmed_prefix=$(echo "$prefix" | tr -d ' ')
+							prefix=$(ipcalc -r "$trimmed_prefix" | grep -A1 "deaggregate" | tail -n 1)
+						else
+							# no ipcalc, use direct pWhois output
+							prefix_spacing=41
+						fi
+						netblocks_output+=$(printf "\n${blue}%${prefix_spacing}s${default} | ${green}%-45s${default} - Registered: ${magenta}%s${default}%s" "$prefix" "$netname" "$regdate" "$nettype")
+					done
+					[[ "$HAVE_IPCALC" = true ]] && netblocks_header="    IPv4 PREFIX     |       INFO"
 				else
-					# apply some formatting for clarity to ipv6 results
-					netblock=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | \
-					sed 's/^Netblock-Record: .*//g' | grep -E "^Net-(Range|Name|Handle|Source)|^$")
+					# Parse IPv6 NETBLOCKS
+					netblocks=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | grep -E "^Net-(Range|Name|Handle|Type)|^Register-Date" |\
+						cut -d ':' -f 2- |\
+						sed 's/^ //g' |\
+						awk '{if (NR%5) {ORS=""} else {ORS="\n"}{print $0"|"}}') # cheers https://stackoverflow.com/a/35315421/5377165
+					netblocks_header="                       IPv6 NET RANGE                         | INFO"
+					for netblock in $netblocks; do
+						prefix=$(echo -e "$netblock" | cut -d '|' -f 1)
+						netname=$(echo -e "$netblock" | cut -d '|' -f 2)
+						nethandle=$(echo -e "$netblock" | cut -d '|' -f 3)
+						netname+=" (${nethandle})"
+						netblock_type=$(echo -e "$netblock" | cut -d '|' -f 4)
+						if [ "$netblock_type" = "unknown" ]; then
+							nettype=""
+						else
+							nettype=" (${yellow}$netblock_type${default})"
+						fi
+						regdate=$(echo -e "$netblock" | cut -d '|' -f 5)
+						prefix_spacing=61
+						netblocks_output+=$(printf "\n${blue}%${prefix_spacing}s${default} | ${green}%-45s${default} - Registered: ${magenta}%s${default}%s" "$prefix" "$netname" "$regdate" "$nettype")
+					done
 				fi
-				if [ -n "$netblock" ]; then
+				if [ -n "$netblocks_output" ]; then
+					# Print out netblocks
 					NO_RESULTS=false
-					searchresults+=$(echo -e "\n${red}(Org-ID: ${green}${orgid}${red})${default}\n${netblock}")
+					searchresults+=$(echo -e "\n${red}Org-ID: ${magenta}${orgid}${red}${default}\n${netblocks_header}${netblocks_output}")
 					searchresults+="\n"
 				fi
 			done
@@ -535,6 +579,11 @@ ShowMenu(){ # show selection menu for multiple search-by-company results
 	else
 		ACTIVE_FILTERS_STRING=""
 	fi
+	if [ "$HAVE_IPCALC" = true ]; then
+		IPCALC_WARNING=""
+	else
+		IPCALC_WARNING=$'\n'"${yellow}Warning: program ${red}ipcalc${yellow} not found."$'\n'"Install it with ${green}apt install ipcalc${yellow}"$'\n'"to enable netblock->CIDR prefix aggregation.${default}"$'\n'
+	fi
 	PS3="
 ________________________________________________
 $ACTIVE_FILTERS_STRING
@@ -545,7 +594,7 @@ Choose an organization or enter:
 - <${blue}-${default}> to EXCLUDE A STRING
 - <${blue}x${default}> to REMOVE ALL FILTERS
 - <${blue}q${default}> to QUIT
-
+$IPCALC_WARNING
 >> "
 	echo ""
 	COLUMNS=0
@@ -710,6 +759,12 @@ if [ -z "$(command -v jq)" ]; then
 else
 	HAVE_JQ=true
 fi
+if [ -z "$(command -v ipcalc)" ]; then
+	# won't be able to aggregate netblocks into CIDR prefixes during Search by Organization, but no hard fail
+	HAVE_IPCALC=false
+else
+	HAVE_IPCALC=true
+fi
 
 BoxHeader "ASN lookup for $userinput"
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
@@ -764,22 +819,15 @@ if [ -z "$input" ]; then
 		if [ -z "$found_asname" ]; then
 			PrintErrorAndExit "Error: no data found for AS${asn}"
 		fi
-		printf "\n${bluebg} AS Number ──────>${default}"
-		printf " ${red}%s\n" "$asn"
-		printf "${bluebg} AS Name ────────>${default}"
-		printf " ${green}%s\n" "$found_asname"
-		printf "${bluebg} Organization ───>${default}"
-		printf " ${yellow}%s\n" "$found_org"
-		printf "${bluebg} AS Reg. date ───>${default}"
-		printf " ${white}%s\n" "$found_createdate"
+		echo -e "\n${bluebg} AS Number ──────>${default} ${red}${asn}"
+		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
+		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
+		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}\n"
 		QueryRipestat "${asn}"
 		if [ -n "$ripestat_data" ]; then
-			printf "${bluebg} IPv4 Prefixes ──>${default}"
-			printf " ${green}%s\n" "$ripestat_ipv4"
-			printf "${bluebg} IPv6 Prefixes ──>${default}"
-			printf " ${yellow}%s\n" "$ripestat_ipv6"
-			printf "${bluebg} BGP Neighbours ─>${default}"
-			printf " ${blue}%s\n" "$ripestat_bgp"
+			echo -e "${bluebg} IPv4 Prefixes ──>${default} ${green}${ripestat_ipv4}"
+			echo -e "${bluebg} IPv6 Prefixes ──>${default} ${yellow}${ripestat_ipv6}"
+			echo -e "${bluebg} BGP Neighbours ─>${default} ${blue}${ripestat_bgp}\n"
 		fi
 		tput sgr0
 		echo ""
