@@ -30,7 +30,7 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 * _Autonomous system number lookup with BGP stats_
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/95152564-a1b97080-078d-11eb-9fcf-47ca60b5bac2.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/95674499-e475b100-0bb0-11eb-89db-a670442462cf.png)
 
 * _Hostname lookup_
 
@@ -38,19 +38,19 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ### AS Path tracing ###
 
-* _ASPath trace to github.com_
+* _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/92540382-b49b5c80-f244-11ea-87a8-9cf460ea192a.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/95675519-2b1ad980-0bb8-11eb-9888-478728c54064.png)
 
-* _Detailed ASPath trace to www.github.com_
+* _Detailed ASPath trace to www.github.com (with unannounced IXP prefix in the path at hop #11)_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/92541428-46579980-f246-11ea-90da-3a24bdb5e833.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/95675487-f1e26980-0bb7-11eb-8c39-61582d1e7b1b.png)
 
 ### Network search by organization ###
 
 * _Organization search for "github"_
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/95528480-85f5da80-09d8-11eb-8f9f-29d6211e2d86.png)
+![search_by_org](https://user-images.githubusercontent.com/24555810/95673393-4b429c80-0ba8-11eb-8703-8894c48e1638.png)
 
 ---
 

@@ -49,7 +49,7 @@ QueryRipestat(){
 		echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
 			"on Debian-based linux distributions)\nto enable RIPEstat BGP info for ASN lookups${default}"
 	else
-		BoxHeader "BGP statistics for $found_asname"
+		BoxHeader "BGP statistics for AS${asn} (${found_asname})"
 		echo ""
 		StatusbarMessage "Querying RIPEstat for BGP data"
 		ripestat_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1")
@@ -74,8 +74,8 @@ WhoisIP(){
 	else
 		# No data in the Team Cymru and pWhois DBs. Fall back to generic whois.
 		[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
-		found_asn="N/A"
-		found_asname="N/A"
+		found_asn="N/A (address not announced)"
+		found_asname=""
 		pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
 		[[ -z "$pwhois_org" ]] && pwhois_org="N/A"
 		found_route=$(echo -e "$network_whois_data" | grep -i -m2 -E "^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do if [ -n "$line" ]; then echo -n "$line / "; fi; done | sed 's/ \/ $//')
@@ -86,8 +86,13 @@ WhoisIP(){
 		[[ -z "$pwhois_geo" ]] && pwhois_geo="N/A"
 	fi
 	indent=$(( longest+4 ))
+	if [ -n "$found_asname" ]; then
+		output_asname="${green}($found_asname)"
+	else
+		output_asname=""
+	fi
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
-	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s ${green}(%s)${default}\n" "├" "$found_asn" "$found_asname"
+	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$found_asn" "$output_asname"
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
@@ -275,7 +280,7 @@ TraceASPath(){
 	wait
 	# mtr finished, parse and format results
 	StatusbarMessage "Parsing collected trace output"
-	trace_output=$(printf "${lightgreybg}${black}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
+	trace_output=$(printf "${lightgreybg}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
 	cur_hop_count=1
 	last_hop=false
 	for mtr_hopnum in "${!hostline_array[@]}"; do
@@ -319,7 +324,15 @@ TraceASPath(){
 					fi
 				fi
 			fi
-			[[ "$DETAILED_TRACE" = "true" ]] && PwhoisLookup "$hop_ip"
+			if [ "$DETAILED_TRACE" = "true" ]; then
+				if [ "$SKIP_PWHOIS" = false ]; then
+					PwhoisLookup "$hop_ip"
+				else
+					pwhois_asn="${red}N/A (address not announced)${default}"
+					# don't display this, we're being parsed off-screen
+					WhoisIP "$hop_ip" >/dev/null
+				fi
+			fi
 		fi
 
 		# DNS data (only used if a hostname was resolved)
@@ -395,7 +408,6 @@ TraceASPath(){
 SearchByOrg(){
 	unset orgs
 	declare -a orgs
-	MULTIPLE_ORGS_FOUND=false
 	echo ""
 	if [ "$ORG_FILTER" = false ]; then
 		StatusbarMessage "Searching for organizations matching ${bluebg}$1${lightgreybg}"
@@ -405,7 +417,6 @@ SearchByOrg(){
 		organizations="$original_organizations"
 	else
 		# user chose to apply a search filter to a previous query
-		MULTIPLE_ORGS_FOUND=true
 		if [ ${#orgfilters_array[@]} -eq 0 ] && [ ${#excl_orgfilters_array[@]} -eq 0 ]; then
 			# user deleted all search filters. Revert to original query result
 			organizations="$original_organizations"
@@ -455,17 +466,11 @@ SearchByOrg(){
 	if [ ${#orgs[@]} -eq 0 ]; then
 		# company search yielded no results
 		PrintErrorAndExit "Error: organization not found"
-	elif [ ${#orgs[@]} -eq 1 ]; then
-		# company search yielded 1 result, proceed to the lookup directly if no filters are active
-		# or show the menu (even if there's just one hit) if we filtered our way to this result
-		org="${orgs[0]}"
-		[[ "$ORG_FILTER" = true ]] && ShowMenu
-	else
-		# company search yielded multiple results, show a menu and let the user choose which ORG to inspect
-		MULTIPLE_ORGS_FOUND=true
-		ShowMenu
 	fi
+
+	# Menu showing loop
 	while true; do
+		ShowMenu
 		searchresults=""
 		orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
 		NO_ERROR_ON_INTERRUPT=true
@@ -536,27 +541,40 @@ SearchByOrg(){
 		done
 		NO_ERROR_ON_INTERRUPT=false
 		StatusbarMessage ""
-		echo -e "$searchresults"
-		if [ "$MULTIPLE_ORGS_FOUND" = true ]; then
-			# let the user choose if they want to look up another company among the multiple results found
-			echo -en "${lightgreybg}${black}Press any key to return to the menu or 'q' to quit${default}"
-			read -rsn1 key
-			StatusbarMessage ""
-			if [ "$key" = "q" ] || [ "$key" = "Q" ]; then
-				break
+		echo -e "$searchresults\n${yellow}────────────────────────────────────────────────────${default}"
+		# let the user choose if they want to run a quick IP lookup
+		while true; do
+			echo -e "\n- Enter any ${blue}IP/Prefix${default} to look it up or"
+			echo -e "- Press ${yellow}ENTER${default} to return to the menu:\n"
+			echo -n ">> "
+			read -r choice
+			# check if it's an IPv4/IPv6
+			if [ -n "${choice}" ]; then
+				input=$(echo "$choice" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
+				if [ -n "$input" ]; then
+					# valid IP
+					echo ""
+					StatusbarMessage "Looking up data for ${bluebg}${input}${lightgreybg}"
+					LookupASNAndRouteFromIP "$input"
+					(( longest=${#input}+1 ))
+					output=$(WhoisIP "$input")
+					StatusbarMessage ""
+					echo -e "$output"
+					continue
+				else
+					continue
+				fi
 			else
-				echo ""
-				ShowMenu
+				# user pressed ENTER, go back to main organizations menu
+				clear
+				break
 			fi
-		else
-			break
-		fi
+		done
 	done
-	tput sgr0
-	exit 0
 }
 
-ShowMenu(){ # show selection menu for multiple search-by-company results
+ShowMenu(){ # show selection menu for search-by-company results
+	clear
 	BoxHeader "Organizations matching \"$userinput\""
 	if [ "$ORG_FILTER" = true ]; then
 		num_inclusion_filters="${#orgfilters_array[@]}"
@@ -567,7 +585,7 @@ ShowMenu(){ # show selection menu for multiple search-by-company results
 
 		# recap inclusion filters
 		for filter in "${orgfilters_array[@]}"; do
-			ACTIVE_FILTERS_STRING+=" ${lightgreybg}${black}${filter}${default}"
+			ACTIVE_FILTERS_STRING+=" ${lightgreybg}${filter}${default}"
 		done
 
 		# recap exclusion filters
@@ -584,8 +602,7 @@ ShowMenu(){ # show selection menu for multiple search-by-company results
 	else
 		IPCALC_WARNING=$'\n'"${yellow}Warning: program ${red}ipcalc${yellow} not found."$'\n'"Install it with ${green}apt install ipcalc${yellow}"$'\n'"to enable netblock->CIDR prefix aggregation.${default}"$'\n'
 	fi
-	PS3="
-________________________________________________
+	PS3="${yellow}────────────────────────────────────────────────────${default}
 $ACTIVE_FILTERS_STRING
 ${yellow}${#orgs[@]} of $total_orgsearch_results total results shown${default}
 
@@ -596,7 +613,7 @@ Choose an organization or enter:
 - <${blue}q${default}> to QUIT
 $IPCALC_WARNING
 >> "
-	echo ""
+	echo -e "${yellow}────────────────────────────────────────────────────${green}"
 	COLUMNS=0
 	set -o posix
 	select choice in "${orgs[@]}"; do
@@ -669,7 +686,7 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 		printf "\r%${#statusbar_message}s\r" " "
 	fi
 	if [ -n "$1" ]; then
-		statusbar_message="${lightgreybg}${black}$1 (press CTRL-C to cancel)...${default}"
+		statusbar_message="${lightgreybg}$1 (press CTRL-C to cancel)...${default}"
 		echo -en "$statusbar_message"
 	fi
 }
@@ -683,7 +700,7 @@ white=$'\e[97m'
 blue=$'\e[94m'
 red=$'\e[31m'
 black=$'\e[30m'
-lightgreybg=$'\e[47m'
+lightgreybg=$'\e[47m\e[30m'
 bluebg=$'\e[44m\e[30m'
 default=$'\e[0m'
 
@@ -827,7 +844,7 @@ if [ -z "$input" ]; then
 		if [ -n "$ripestat_data" ]; then
 			echo -e "${bluebg} IPv4 Prefixes ──>${default} ${green}${ripestat_ipv4}"
 			echo -e "${bluebg} IPv6 Prefixes ──>${default} ${yellow}${ripestat_ipv6}"
-			echo -e "${bluebg} BGP Neighbours ─>${default} ${blue}${ripestat_bgp}\n"
+			echo -e "${bluebg} BGP Neighbours ─>${default} ${blue}${ripestat_bgp}${default}\n"
 		fi
 		tput sgr0
 		echo ""
