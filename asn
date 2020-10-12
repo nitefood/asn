@@ -222,6 +222,7 @@ TraceASPath(){
 	starttime=$(date +%s)
 	host_to_trace="$1"
 	mtr_rounds=3
+	WhatIsMyIP
 	echo ""
 	StatusbarMessage "Tracing path to ${bluebg}${host_to_trace}${lightgreybg}"
 	# cache the previously looked-up AS to save one lookup (target/last hop)
@@ -237,7 +238,12 @@ TraceASPath(){
 	declare -a pingline_array
 	declare -a aspath_array
 	# initialize the aspath array with our source AS
-	LookupASNAndRouteFromIP "$(curl -s api64.ipify.org)"
+	# TODO: improve local WAN IPv6 ASN lookup (Cymru and pWhois sometimes fail to correctly retrieve matching prefix. Consider RIPEstat/direct whois?)
+	LookupASNAndRouteFromIP "$local_wanip"
+	if [ -z "$found_asn" ]; then
+		found_asn="XXX"
+		found_asname="(Unknown)"
+	fi
 	aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
 	aspath_array+=("$aspath_entry")
 	while true; do
@@ -714,14 +720,13 @@ ReputationLookup(){
 	StatusbarMessage ""
 	unique_tags=$(echo "$global_tags" | tr ',' '\n' | sort -u  | tr '[:lower:]' '[:upper:]')
 	output_tags=""
-	redbg=$'\e[30m\e[101m'
 	for tag in $unique_tags; do output_tags+="${redbg} ${tag} ${default} "; done
 	echo -e "${bluebg} ABUSE TAGS ───>${default} ${output_tags}"
 	echo -e "${blacklist_output}"
 }
 
 PrintErrorAndExit(){
-	echo -e "\n\e[30m\e[101m${1}\e[39m\e[49m\n"
+	echo -e "\n${redbg}${1}${default}\n"
 	tput sgr0
 	exit 1
 }
@@ -755,6 +760,17 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 	fi
 }
 
+WhatIsMyIP() {
+	# only lookup local WAN IP once
+	[[ -n "$local_wanip" ]] && return
+	# retrieve local WAN IP (v6 takes precedence) from ipify
+	local_wanip=$(curl -s api64.ipify.org)
+	# check if we default to an IPv6 internet connection
+	if echo "$local_wanip" | grep -q ':'; then
+		HAVE_IPV6=true
+	fi
+}
+
 # Color scheme
 IFS=$'\n\t'
 green=$'\e[32m'
@@ -766,6 +782,7 @@ red=$'\e[31m'
 black=$'\e[30m'
 lightgreybg=$'\e[47m\e[30m'
 bluebg=$'\e[44m\e[30m'
+redbg=$'\e[30m\e[101m'
 default=$'\e[0m'
 
 # External API token for Auth0 Signals (IP reputation lookup)
@@ -863,6 +880,8 @@ else
 	HAVE_IPCALC=true
 fi
 
+local_wanip=""
+HAVE_IPV6=false
 BoxHeader "ASN lookup for $userinput"
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 if [ -z "$input" ]; then
@@ -888,6 +907,7 @@ if [ -z "$input" ]; then
 			(( longest++ ))
 			# output actual results
 			ip_to_trace=""
+			WhatIsMyIP
 			for singleip in $ip; do
 				LookupASNAndRouteFromIP "$singleip"
 				WhoisIP "$singleip"
@@ -896,7 +916,13 @@ if [ -z "$input" ]; then
 			done
 			# Check if AS path tracing is requested
 			if [ $TRACEASNPATH = true ]; then
-				# in case of multiple IPs (DNS RR), trace the first one
+				# In case of multiple IPs (DNS RR), trace the first one.
+				# Additionally, if we're on an IPv6 connection, default to
+				# tracing to the first resolved IPv6 address (if any)
+				if [ "$HAVE_IPV6" = true ]; then
+					first_ipv6=$(echo "$ip" | grep -m1 ':')
+					[[ -n "$first_ipv6" ]] && ip_to_trace="$first_ipv6"
+				fi
 				TraceASPath "$ip_to_trace"
 			fi
 			tput sgr0
