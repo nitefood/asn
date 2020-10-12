@@ -2,15 +2,24 @@
 
 ## Description
 
-ASN / BGP stats / IPv4v6 / Prefix / ASPath / Organization lookup tool.
+ASN / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool.
 
-The script will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc.
+This script serves the purpose of having a quick OSINT command line tool at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
-It is also possible to search by _organization name_ in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
+- It will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc.
+
+- It will also perform IP reputation lookups (especially useful when investigating foreign IPs from log files).
+
+- It is also possible to search by _organization name_ in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 
 Screenshots for every lookup option are below.
 
-The script uses the [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/), [Prefix WhoIs Project](https://pwhois.org/), [ipify](https://www.ipify.org/) and [RIPE](https://stat.ripe.net/) services for data.
+The script uses the following services for data retrieval:
+* [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/)
+* [The Prefix WhoIs Project](https://pwhois.org/)
+* [ipify](https://www.ipify.org/)
+* [RIPE](https://stat.ripe.net/)
+* [Auth0 Signals](https://auth0.com/signals)
 
 Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
@@ -22,11 +31,15 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 * _IPv4 lookup_
 
-![ipv4lookup](https://user-images.githubusercontent.com/24555810/92528238-b9eaae00-f228-11ea-875a-a44eff701f4d.png)
+![ipv4lookup](https://user-images.githubusercontent.com/24555810/95701899-1176a200-0c4b-11eb-9ca4-86de1eebaefb.png)
+
+* _IPv4 lookup (bad reputation IP)_
+
+![badipv4lookup](https://user-images.githubusercontent.com/24555810/95702521-cfe6f680-0c4c-11eb-9110-be82e9efbc82.png)
 
 * _IPv6 lookup_
 
-![ipv6lookup](https://user-images.githubusercontent.com/24555810/92528338-e69ec580-f228-11ea-9488-3f762c2d8582.png)
+![ipv6lookup](https://user-images.githubusercontent.com/24555810/95702427-91513c00-0c4c-11eb-8ccb-614224bed15c.png)
 
 * _Autonomous system number lookup with BGP stats_
 
@@ -70,10 +83,22 @@ Afterwards, to download the **asn** script from your shell:
 
 You can then use the script by running `./asn`.
 
+### IP reputation API token
+
+The script will perform anonymous IPv4/v6 IP reputation lookups without the need for an API token, using the [Auth0 Signals API](https://auth0.com/signals/).
+
+Nevertheless, it's strongly recommended to [sign up](https://auth0.com/signals/api/signup) for their service (it's free) and get an API token, which will raise the daily query quota from 100 hits to 40000 hits.
+Once obtained, the api token should be written to the `$HOME/.asn/signals_token` file.
+In order to do so, you can use the following command:
+
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/signals_token" && chmod -R 600 "$HOME/.asn/"`
+
+`asn` will pick up your token on the next run, and use it to query the Signals API.
+
 ## Usage
 
 * `asn <ASnumber>` -- _to lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)_
-* `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6) and ASN data_
+* `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6), IP reputation and ASN data_
 * `asn [-n|-d] <host.name.tld>` -- _to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)_
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
 * `asn <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
@@ -82,7 +107,7 @@ Detailed hop info reporting can be turned on by passing the `[-d|--detailed]` co
 
 The script will attempt a best-effort, generic `whois` lookup when Team Cymru and pWhois have no info about the IP address or prefix. This usually happens for IXP and PNI prefixes, and will give better insight into the path taken by packets.
 
-Geolocation and organization data is taken from pWhois.
+Geolocation and organization data is taken from pWhois, while IP reputation data is taken from [Auth0 Signals](https://auth0.com/signals/).
 
 AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP. Tracing can be disabled by passing the `[-n|--notrace]` command line switch.
 

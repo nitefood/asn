@@ -13,7 +13,8 @@
 #                                 data. Supports "as123" and "123" formats
 #                                 (case insensitive)
 #
-#  asn [-n|-d] <IPv4/IPv6>     -- to lookup matching route(4/6) and ASN data
+#  asn [-n|-d] <IPv4/IPv6>     -- to lookup matching route(4/6), IP reputation
+#                              -- and ASN data
 #
 #  asn [-n|-d] <host.name.tld> -- to lookup matching IP(v4/v6), route and ASN data
 #                                 (supports multiple IPs - e.g. DNS RR)
@@ -44,21 +45,15 @@ WhoisASN(){
 }
 
 QueryRipestat(){
-	ripestat_data=""
-	if [ "$HAVE_JQ" = false ]; then
-		echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
-			"on Debian-based linux distributions)\nto enable RIPEstat BGP info for ASN lookups${default}"
-	else
-		BoxHeader "BGP statistics for AS${asn} (${found_asname})"
-		echo ""
-		StatusbarMessage "Querying RIPEstat for BGP data"
-		ripestat_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1")
-		StatusbarMessage ""
-		if [ -n "$ripestat_data" ]; then
-			ripestat_ipv4=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v4.prefixes')
-			ripestat_ipv6=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v6.prefixes')
-			ripestat_bgp=$(echo -e "$ripestat_data" | jq -r '.data.observed_neighbours')
-		fi
+	BoxHeader "BGP statistics for AS${asn} (${found_asname})"
+	echo ""
+	StatusbarMessage "Querying RIPEstat for BGP data"
+	ripestat_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1")
+	StatusbarMessage ""
+	if [ -n "$ripestat_data" ]; then
+		ripestat_ipv4=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v4.prefixes')
+		ripestat_ipv6=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v6.prefixes')
+		ripestat_bgp=$(echo -e "$ripestat_data" | jq -r '.data.observed_neighbours')
 	fi
 }
 
@@ -96,7 +91,9 @@ WhoisIP(){
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
-	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n\n" "└" "$pwhois_geo"
+	[[ "$REPUTATION_LOOKUP" = true ]] && last_symbol="├" || last_symbol="└"
+	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "$last_symbol" "$pwhois_geo"
+	[[ "$REPUTATION_LOOKUP" = false ]] && echo ""
 }
 
 LookupASNAndRouteFromIP(){
@@ -656,6 +653,73 @@ $IPCALC_WARNING
 	echo ""
 }
 
+SignalsAPIQuery(){ # output saved to $signals_response
+	signals_response=""
+	# Authenticate to Auth0 Signals API, otherwise run anonymously
+	if [ -n "$SIGNALS_TOKEN" ]; then
+		signals_response=$(curl -s --request GET --url "$1" --header "accept: application/json" --header "x-auth-token: ${SIGNALS_TOKEN}")
+	else
+		signals_response=$(curl -s --request GET --url "$1" --header "accept: application/json")
+	fi
+	# check Signals output to make sure we didn't receive invalid data (eg. quota exceeded etc)
+	# if it's not valid json...
+	json_type=$(echo "$signals_response" | jq type 2>/dev/null)
+	if [ -z "$json_type" ]; then
+		# ...and it's not a "clean ip" reply...
+		if echo "$signals_response" | grep -vq "Resource not found"; then
+			# then fail
+			StatusbarMessage ""
+			PrintErrorAndExit "ERROR: Could not query Signals API (Server said: \"${signals_response}\")"
+		fi
+	fi
+}
+
+ReputationLookup(){
+	StatusbarMessage "Looking up reputation for IP address ${bluebg}$1${lightgreybg}"
+	SignalsAPIQuery "https://signals.api.auth0.com/badip/$1"
+	StatusbarMessage ""
+	if echo "$signals_response" | grep -q "Resource not found"; then
+		IS_BADIP=false
+		badip_output="${green}✓ GOOD${default}"
+	else
+		IS_BADIP=true
+		black_count=$(echo "$signals_response" | jq '.response | length')
+		[[ "$black_count" -gt 1 ]] && s="s" || s=""
+		badip_output="${red}❌ BAD${default}"
+	fi
+	printf "${white}%${indent}s${bluebg}REP${default} ${magenta}%s${default}\n\n" "└" "$badip_output"
+	if [ "$IS_BADIP" = false ]; then
+		return
+	fi
+	badip_output="${red}❌ BAD (Address found in ${black_count} blacklist${s})${default}"
+	BoxHeader "Detailed IP reputation report for $input"
+	echo ""
+	# parse blacklists and collect bad tags associated with the IP address
+	echo -e "${bluebg} IP ADDRESS────>${default} ${white}$1"
+	echo -e "${bluebg} REPUTATION────>${default} $badip_output"
+	StatusbarMessage "Collecting detailed reputation data"
+	global_tags=""
+	blacklist_output=""
+	blacklists=$(echo "$signals_response" | jq -r '.response[]')
+	for blacklist in $(echo "$blacklists" | sort); do
+		SignalsAPIQuery "https://signals.api.auth0.com/metadata/badip/lists/$blacklist"
+		blacklist_details="$signals_response"
+		name=$(echo "$blacklist_details" | jq -r '.name')
+		group=$(echo "$blacklist_details" | jq -r '.group')
+		site=$(echo "$blacklist_details" | jq -r '.site')
+		tags=$(echo "$blacklist_details" | jq -r '.tags')
+		[[ -z "$global_tags" ]] && global_tags="$tags" || global_tags+=",$tags"
+		blacklist_output+="${bluebg} BLACKLIST HIT─>${default} ${red}[$group] ${yellow}${blacklist} (${name} -- ${blue}${site}${yellow})\n"
+	done
+	StatusbarMessage ""
+	unique_tags=$(echo "$global_tags" | tr ',' '\n' | sort -u  | tr '[:lower:]' '[:upper:]')
+	output_tags=""
+	redbg=$'\e[30m\e[101m'
+	for tag in $unique_tags; do output_tags+="${redbg} ${tag} ${default} "; done
+	echo -e "${bluebg} ABUSE TAGS ───>${default} ${output_tags}"
+	echo -e "${blacklist_output}"
+}
+
 PrintErrorAndExit(){
 	echo -e "\n\e[30m\e[101m${1}\e[39m\e[49m\n"
 	tput sgr0
@@ -691,7 +755,7 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 	fi
 }
 
-
+# Color scheme
 IFS=$'\n\t'
 green=$'\e[32m'
 magenta=$'\e[35m'
@@ -704,6 +768,11 @@ lightgreybg=$'\e[47m\e[30m'
 bluebg=$'\e[44m\e[30m'
 default=$'\e[0m'
 
+# External API token for Auth0 Signals (IP reputation lookup)
+SIGNALS_TOKEN_FILENAME="$HOME/.asn/signals_token"
+REPUTATION_LOOKUP=false
+
+# Sigint trapping
 NO_ERROR_ON_INTERRUPT=false
 trap Ctrl_C INT
 
@@ -771,7 +840,9 @@ if [ -z "$(command -v host)" ]; then
 	exit 1
 fi
 if [ -z "$(command -v jq)" ]; then
-	# won't be able to parse data from RIPEstat, but no hard fail
+	# won't be able to parse data from RIPEstat and IP reputation data, but no hard fail
+	echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
+		"on Debian-based linux distributions)\nto enable IP reputation and RIPEstat BGP info lookups${default}"
 	HAVE_JQ=false
 else
 	HAVE_JQ=true
@@ -840,11 +911,13 @@ if [ -z "$input" ]; then
 		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
 		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
 		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}\n"
-		QueryRipestat "${asn}"
-		if [ -n "$ripestat_data" ]; then
-			echo -e "${bluebg} IPv4 Prefixes ──>${default} ${green}${ripestat_ipv4}"
-			echo -e "${bluebg} IPv6 Prefixes ──>${default} ${yellow}${ripestat_ipv6}"
-			echo -e "${bluebg} BGP Neighbours ─>${default} ${blue}${ripestat_bgp}${default}\n"
+		if [ "$HAVE_JQ" = true ]; then
+			QueryRipestat "${asn}"
+			if [ -n "$ripestat_data" ]; then
+				echo -e "${bluebg} IPv4 Prefixes ──>${default} ${green}${ripestat_ipv4}"
+				echo -e "${bluebg} IPv6 Prefixes ──>${default} ${yellow}${ripestat_ipv6}"
+				echo -e "${bluebg} BGP Neighbours ─>${default} ${blue}${ripestat_bgp}${default}\n"
+			fi
 		fi
 		tput sgr0
 		echo ""
@@ -852,13 +925,35 @@ if [ -z "$input" ]; then
 	fi
 else
 	# Input is an IP address
+	# Read Auth0 Signals (IP reputation API) token from file
+	if [ "$HAVE_JQ" = true ]; then
+		REPUTATION_LOOKUP=true
+		SIGNALS_TOKEN=""
+		if [ -r "$SIGNALS_TOKEN_FILENAME" ]; then
+			SIGNALS_TOKEN=$(tr -d ' \n\r\t' < "$SIGNALS_TOKEN_FILENAME")
+		fi
+	fi
+	# Check if IP reputation lookup is enabled
+	if [ "$REPUTATION_LOOKUP" = true ]; then
+		if [ -z "$SIGNALS_TOKEN" ]; then
+			# warn the user about the limits of anonymous Signals queries
+			echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
+				"\n\nNo Auth0 Signals token found, so running anonymously.\n\nConsider registering at" \
+				"${blue}https://auth0.com/signals/api/signup${default}\nto obtain a free token and increase" \
+				"your IP reputation\nquery limit from 100 hits/day to 40000 hits/day.\n\nAfter getting your API token, copy and paste it inside" \
+				"\n${green}$SIGNALS_TOKEN_FILENAME${default} and it will be used automatically." \
+				"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
+		fi
+	fi
+	echo ""
+	# Perform IP lookup
 	LookupASNAndRouteFromIP "$input"
 	(( longest=${#input}+1 ))
 	WhoisIP "$input"
-	# Check if AS path tracing is requested
-	if [ $TRACEASNPATH = true ]; then
-		TraceASPath "$input"
-	fi
+	# Perform reputation lookup if requested
+	[[ "$REPUTATION_LOOKUP" = true ]] && ReputationLookup "$input"
+	# Perform AS path tracing if requested
+	[[ "$TRACEASNPATH" = true ]] && TraceASPath "$input"
 	tput sgr0
 	echo ""
 	exit 0
