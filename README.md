@@ -73,7 +73,7 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 Some packages are required for full functionality. On a Debian/Ubuntu machine, you can install them with:
 
-`apt -y install whois bind9-host mtr-tiny jq ipcalc`
+`apt -y install curl whois bind9-host mtr-tiny jq ipcalc`
 
 ### Script download
 

@@ -826,10 +826,10 @@ esac
 
 # Check prerequisites
 # TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed
-if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
-	echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
-	"\non Debian-based linux distributions) to enable AS path tracing"
-	TRACEASNPATH=false
+if [ -z "$(command -v coproc)" ]; then
+	echo -e "\n${red}ERROR: ${white}program '${red}coproc${white}' not found on this system.\n${white}This script requires BASH v4.2+ to run.\nIf you're on MacOS please install an updated version with:" \
+		"\n\n${green}brew install bash${white}\n"
+	exit 1
 fi
 if [ -z "$(command -v whois)" ]; then
 	echo -e "\n${red}ERROR: ${white}program '${red}whois${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install whois${white} on Debian-based linux distributions)\n"
@@ -838,6 +838,15 @@ fi
 if [ -z "$(command -v host)" ]; then
 	echo -e "\n${red}ERROR: ${white}program '${red}host${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install bind9-host${white} on Debian-based linux distributions)\n"
 	exit 1
+fi
+if [ -z "$(command -v curl)" ]; then
+	echo -e "\n${red}ERROR: ${white}program '${red}curl${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install curl${white} on Debian-based linux distributions)\n"
+	exit 1
+fi
+if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
+	echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
+		"\non Debian-based linux distributions) to enable AS path tracing"
+	TRACEASNPATH=false
 fi
 if [ -z "$(command -v jq)" ]; then
 	# won't be able to parse data from RIPEstat and IP reputation data, but no hard fail
