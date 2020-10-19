@@ -86,11 +86,19 @@ WhoisIP(){
 	else
 		output_asname=""
 	fi
+	if [ "$RPKI_LOOKUP" = true ]; then
+		StatusbarMessage "Checking RPKI validity for ${bluebg}AS${found_asn}${lightgreybg} and prefix ${bluebg}${found_route}${lightgreybg}"
+		RPKILookup "$found_asn" "$found_route"
+		StatusbarMessage ""
+		echo ""
+	fi
+
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
 	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$found_asn" "$output_asname"
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
+	[[ "$RPKI_LOOKUP" = true ]] && printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
 	[[ "$REPUTATION_LOOKUP" = true ]] && last_symbol="├" || last_symbol="└"
 	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "$last_symbol" "$pwhois_geo"
 	[[ "$REPUTATION_LOOKUP" = false ]] && echo ""
@@ -151,6 +159,7 @@ PwhoisLookup(){
 	pwhois_output=$(whois -h whois.pwhois.org "$1")
 	if echo "$pwhois_output" | grep -vq "That IP address doesn't appear"; then
 		pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
+		pwhois_prefix=$(echo "$pwhois_output" | grep -E "^Prefix" | cut -d ':' -f 2 | sed 's/^ //')
 		pwhois_asorg=$(echo "$pwhois_output" | grep -E "^AS-Org-Name" | cut -d ':' -f 2 | sed 's/^ //')
 		# group all "Org-Name" fields on a single line
 		pwhois_org=$(echo "$pwhois_output" | grep -E "^Org-Name" | cut -d ':' -f 2 | sed 's/^[ \t]*//g' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
@@ -363,8 +372,22 @@ TraceASPath(){
 		fi
 		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
 		if [ "$DETAILED_TRACE" = "true" ] && [ -n "$pwhois_output" ]; then
-			trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
-				"$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
+			if [ "$RPKI_LOOKUP" = true ] && [ -n "$found_asname" ]; then # only run RPKI lookups if the prefix is announced
+				RPKILookup "$found_asn" "$pwhois_prefix"
+				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default} \
+					\n     ├${bluebg}ORG${default} ${green}%s${default} \
+					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
+					\n     ├${bluebg}GEO${default} ${magenta}%s${default} \
+					\n     └${bluebg}ROA${default} %s" \
+					"$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo" "$rpki_output")
+					if [ "$INVALID_ROA" = true ]; then
+						# notify user of possible BGP hijack/route leak
+						aspath_array[-1]+=" ${redbg} ─> WARNING: POSSIBLE ROUTE LEAK / BGP HIJACK ${default}"
+					fi
+			else
+				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
+					"$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
+			fi
 			trace_output+="\n"
 		elif [ "$DETAILED_TRACE" = "true" ]; then
 			# PWHOIS lookups ON, but no valid data. Just add a newline for readability
@@ -669,13 +692,15 @@ SignalsAPIQuery(){ # output saved to $signals_response
 	fi
 	# check Signals output to make sure we didn't receive invalid data (eg. quota exceeded etc)
 	# if it's not valid json...
-	json_type=$(echo "$signals_response" | jq type 2>/dev/null)
-	if [ -z "$json_type" ]; then
+	is_valid_json=$(echo "$signals_response" | jq type 2>/dev/null)
+	if [ -z "$is_valid_json" ]; then
 		# ...and it's not a "clean ip" reply...
 		if echo "$signals_response" | grep -vq "Resource not found"; then
 			# then fail
 			StatusbarMessage ""
-			PrintErrorAndExit "ERROR: Could not query Signals API (Server said: \"${signals_response}\")"
+			server_errormsg="$signals_response"
+			signals_response="${redbg}ERROR: Could not query Signals API${default} (Server said: \"${server_errormsg}\")"
+			REPUTATION_LOOKUP=false
 		fi
 	fi
 }
@@ -684,7 +709,11 @@ ReputationLookup(){
 	StatusbarMessage "Looking up reputation for IP address ${bluebg}$1${lightgreybg}"
 	SignalsAPIQuery "https://signals.api.auth0.com/badip/$1"
 	StatusbarMessage ""
-	if echo "$signals_response" | grep -q "Resource not found"; then
+	if [ "$REPUTATION_LOOKUP" = false ]; then
+		# we hit an error during last Signals API query, notify and move on
+		IS_BADIP=false
+		badip_output="$signals_response"
+	elif echo "$signals_response" | grep -q "Resource not found"; then
 		IS_BADIP=false
 		badip_output="${green}✓ GOOD${default}"
 	else
@@ -709,6 +738,12 @@ ReputationLookup(){
 	blacklists=$(echo "$signals_response" | jq -r '.response[]')
 	for blacklist in $(echo "$blacklists" | sort); do
 		SignalsAPIQuery "https://signals.api.auth0.com/metadata/badip/lists/$blacklist"
+		if [ "$REPUTATION_LOOKUP" = false ]; then
+			# we hit an error during last Signals API query, notify and move on
+			StatusbarMessage ""
+			echo -e "$signals_response\n\n"
+			return
+		fi
 		blacklist_details="$signals_response"
 		name=$(echo "$blacklist_details" | jq -r '.name')
 		group=$(echo "$blacklist_details" | jq -r '.group')
@@ -721,8 +756,48 @@ ReputationLookup(){
 	unique_tags=$(echo "$global_tags" | tr ',' '\n' | sort -u  | tr '[:lower:]' '[:upper:]')
 	output_tags=""
 	for tag in $unique_tags; do output_tags+="${redbg} ${tag} ${default} "; done
-	echo -e "${bluebg} ABUSE TAGS ───>${default} ${output_tags}"
+	echo -e "${bluebg} ABUSE TAGS────>${default} ${output_tags}"
 	echo -e "${blacklist_output}"
+}
+
+RPKILookup(){
+	# $1=asn, $2=prefix
+	found_rpkivalidity=""
+	INVALID_ROA=false
+	rpki_apioutput=$(curl -s "https://rpki-validator.ripe.net/api/bgp/validity/?asn=$1&prefix=$2")
+	is_valid_json=$(echo "$rpki_apioutput" | jq type 2>/dev/null)
+	if [ -n "$is_valid_json" ]; then
+		found_rpkivalidity=$(echo "$rpki_apioutput" | jq -r '.data.validity')
+		found_rpkiroacount=$(echo "$rpki_apioutput" | jq -r '.metadata.totalCount')
+		found_rpkiorigin=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].origin')
+		found_rpkiprefix=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].prefix')
+		found_rpkimaxlength=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].maxLength')
+		# TODO: iterate over ROAs (.data.validatingRoas[]) to give deeper source RIR insight
+		#found_rpkisource=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].source')
+		case "$found_rpkivalidity" in
+			"VALID")
+				[[ "${found_rpkiroacount}" -gt 1 ]] && s="s" || s=""
+				rpki_output="${green}✓ VALID (${found_rpkiroacount} ROA$s found)${default}"
+				;;
+			"UNKNOWN")
+				rpki_output="✓ UNKNOWN"
+				;;
+			"INVALID_ASN")
+				INVALID_ROA=true
+				if [ "$found_rpkiorigin" = "0" ]; then
+					rpki_output="${red}❌ ${found_rpkivalidity} (no Origin authorized to announce Prefix '${found_rpkiprefix}' with Max-Length=${found_rpkimaxlength})${default}"
+				else
+					rpki_output="${red}❌ ${found_rpkivalidity} (expected Origin ${found_rpkiorigin} for Prefix '${found_rpkiprefix}' with Max-Length=${found_rpkimaxlength})${default}"
+				fi
+				;;
+			"INVALID_LENGTH")
+				INVALID_ROA=true
+				rpki_output="${red}❌ ${found_rpkivalidity} (expected Max-Length=${found_rpkimaxlength} for Prefix '${found_rpkiprefix}')${default}"
+				;;
+		esac
+	else
+		rpki_output="${yellow}? (WRONG RPKI DATA, invalid prefix?)${default}"
+	fi
 }
 
 PrintErrorAndExit(){
@@ -787,7 +862,6 @@ default=$'\e[0m'
 
 # External API token for Auth0 Signals (IP reputation lookup)
 SIGNALS_TOKEN_FILENAME="$HOME/.asn/signals_token"
-REPUTATION_LOOKUP=false
 
 # Sigint trapping
 NO_ERROR_ON_INTERRUPT=false
@@ -866,12 +940,30 @@ if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
 	TRACEASNPATH=false
 fi
 if [ -z "$(command -v jq)" ]; then
-	# won't be able to parse data from RIPEstat and IP reputation data, but no hard fail
+	# won't be able to parse data from RIPEstat, RPKI Validator and IP reputation data, but no hard fail
 	echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
-		"on Debian-based linux distributions)\nto enable IP reputation and RIPEstat BGP info lookups${default}"
-	HAVE_JQ=false
+		"on Debian-based linux distributions)\nto enable IP reputation, RIPEstat BGP info and RPKI ROA lookups${default}"
+	BGPSTAT_LOOKUP=false
+	RPKI_LOOKUP=false
+	REPUTATION_LOOKUP=false
 else
-	HAVE_JQ=true
+	BGPSTAT_LOOKUP=true
+	RPKI_LOOKUP=true
+	REPUTATION_LOOKUP=true
+	# Read Auth0 Signals (IP reputation API) token from file
+	SIGNALS_TOKEN=""
+	if [ -r "$SIGNALS_TOKEN_FILENAME" ]; then
+		SIGNALS_TOKEN=$(tr -d ' \n\r\t' < "$SIGNALS_TOKEN_FILENAME")
+	fi
+	if [ -z "$SIGNALS_TOKEN" ]; then
+		# warn the user about the limits of anonymous Signals queries
+		echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
+			"\n\nNo Auth0 Signals token found, so running anonymously.\n\nConsider registering at" \
+			"${blue}https://auth0.com/signals/api/signup${default}\nto obtain a free token and increase" \
+			"your IP reputation\nquery limit from 100 hits/day to 40000 hits/day.\n\nAfter getting your API token, copy and paste it inside" \
+			"\n${green}$SIGNALS_TOKEN_FILENAME${default} and it will be used automatically." \
+			"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
+	fi
 fi
 if [ -z "$(command -v ipcalc)" ]; then
 	# won't be able to aggregate netblocks into CIDR prefixes during Search by Organization, but no hard fail
@@ -911,11 +1003,12 @@ if [ -z "$input" ]; then
 			for singleip in $ip; do
 				LookupASNAndRouteFromIP "$singleip"
 				WhoisIP "$singleip"
+				[[ "$REPUTATION_LOOKUP" = true ]] && ReputationLookup "$singleip"
 				# save the first IP from the dns lookup result
 				[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
 			done
 			# Check if AS path tracing is requested
-			if [ $TRACEASNPATH = true ]; then
+			if [ "$TRACEASNPATH" = true ]; then
 				# In case of multiple IPs (DNS RR), trace the first one.
 				# Additionally, if we're on an IPv6 connection, default to
 				# tracing to the first resolved IPv6 address (if any)
@@ -946,7 +1039,7 @@ if [ -z "$input" ]; then
 		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
 		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
 		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}\n"
-		if [ "$HAVE_JQ" = true ]; then
+		if [ "$BGPSTAT_LOOKUP" = true ]; then
 			QueryRipestat "${asn}"
 			if [ -n "$ripestat_data" ]; then
 				echo -e "${bluebg} IPv4 Prefixes ──>${default} ${green}${ripestat_ipv4}"
@@ -960,27 +1053,6 @@ if [ -z "$input" ]; then
 	fi
 else
 	# Input is an IP address
-	# Read Auth0 Signals (IP reputation API) token from file
-	if [ "$HAVE_JQ" = true ]; then
-		REPUTATION_LOOKUP=true
-		SIGNALS_TOKEN=""
-		if [ -r "$SIGNALS_TOKEN_FILENAME" ]; then
-			SIGNALS_TOKEN=$(tr -d ' \n\r\t' < "$SIGNALS_TOKEN_FILENAME")
-		fi
-	fi
-	# Check if IP reputation lookup is enabled
-	if [ "$REPUTATION_LOOKUP" = true ]; then
-		if [ -z "$SIGNALS_TOKEN" ]; then
-			# warn the user about the limits of anonymous Signals queries
-			echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
-				"\n\nNo Auth0 Signals token found, so running anonymously.\n\nConsider registering at" \
-				"${blue}https://auth0.com/signals/api/signup${default}\nto obtain a free token and increase" \
-				"your IP reputation\nquery limit from 100 hits/day to 40000 hits/day.\n\nAfter getting your API token, copy and paste it inside" \
-				"\n${green}$SIGNALS_TOKEN_FILENAME${default} and it will be used automatically." \
-				"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
-		fi
-	fi
-	echo ""
 	# Perform IP lookup
 	LookupASNAndRouteFromIP "$input"
 	(( longest=${#input}+1 ))

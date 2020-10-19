@@ -2,15 +2,19 @@
 
 ## Description
 
-ASN / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool.
+ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool.
 
 This script serves the purpose of having a quick OSINT command line tool at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
-- It will perform an AS path trace (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as organization/network name, geographic location, etc.
+Features:
 
-- It will also perform IP reputation lookups (especially useful when investigating foreign IPs from log files).
-
-- It is also possible to search by _organization name_ in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
+- It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
+- It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
+- It will perform **RPKI validity** lookups for every possible IP. Data is validated against [RIPE RPKI Validator](https://rpki-validator.ripe.net/). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
+  - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
+  - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
+- It will also perform **IP reputation** lookups (especially useful when investigating foreign IPs from log files).
+- It is also possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 
 Screenshots for every lookup option are below.
 
@@ -18,7 +22,8 @@ The script uses the following services for data retrieval:
 * [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/)
 * [The Prefix WhoIs Project](https://pwhois.org/)
 * [ipify](https://www.ipify.org/)
-* [RIPE](https://stat.ripe.net/)
+* [RIPEStat](https://stat.ripe.net/)
+* [RIPE RPKI Validator](https://rpki-validator.ripe.net/)
 * [Auth0 Signals](https://auth0.com/signals)
 
 Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
@@ -31,15 +36,15 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 * _IPv4 lookup_
 
-![ipv4lookup](https://user-images.githubusercontent.com/24555810/95701899-1176a200-0c4b-11eb-9ca4-86de1eebaefb.png)
+![ipv4lookup](https://user-images.githubusercontent.com/24555810/96518776-dc320b80-126b-11eb-9fb8-cfc874be09b0.png)
 
 * _IPv4 lookup (bad reputation IP)_
 
-![badipv4lookup](https://user-images.githubusercontent.com/24555810/95702521-cfe6f680-0c4c-11eb-9110-be82e9efbc82.png)
+![ipv4badlookup](https://user-images.githubusercontent.com/24555810/96518877-1ef3e380-126c-11eb-8036-043a8d45aabc.png)
 
 * _IPv6 lookup_
 
-![ipv6lookup](https://user-images.githubusercontent.com/24555810/95702427-91513c00-0c4c-11eb-8ccb-614224bed15c.png)
+![ipv6lookup](https://user-images.githubusercontent.com/24555810/96518993-4f3b8200-126c-11eb-97c4-2d5d89763fe6.png)
 
 * _Autonomous system number lookup with BGP stats_
 
@@ -47,23 +52,23 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 * _Hostname lookup_
 
-![hostnamelookup](https://user-images.githubusercontent.com/24555810/92540333-83229100-f244-11ea-8d3f-2e21d6f04b3b.png)
+![hostnamelookup](https://user-images.githubusercontent.com/24555810/96519069-7bef9980-126c-11eb-92a3-6270c1b863cf.png)
 
 ### AS Path tracing ###
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/95675519-2b1ad980-0bb8-11eb-9888-478728c54064.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/96519328-07692a80-126d-11eb-83f8-32e8ae5c5bfd.png)
 
 * _Detailed ASPath trace to www.github.com (with unannounced IXP prefix in the path at hop #11)_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/95675487-f1e26980-0bb7-11eb-8c39-61582d1e7b1b.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/96520008-71360400-126e-11eb-8cc7-27be900ba968.png)
 
 ### Network search by organization ###
 
 * _Organization search for "github"_
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/95673393-4b429c80-0ba8-11eb-8703-8894c48e1638.png)
+![search_by_org](https://user-images.githubusercontent.com/24555810/96520260-f7eae100-126e-11eb-8987-52b97c75faaf.png)
 
 ---
 
@@ -103,7 +108,7 @@ In order to do so, you can use the following command:
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
 * `asn <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
 
-Detailed hop info reporting can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) for every hop in the mtr trace, and its output will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
+Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPE RPKI Validator](https://rpki-validator.ripe.net/) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope. Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
 
 The script will attempt a best-effort, generic `whois` lookup when Team Cymru and pWhois have no info about the IP address or prefix. This usually happens for IXP and PNI prefixes, and will give better insight into the path taken by packets.
 
