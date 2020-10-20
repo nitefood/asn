@@ -26,7 +26,12 @@ The script uses the following services for data retrieval:
 * [RIPE RPKI Validator](https://rpki-validator.ripe.net/)
 * [Auth0 Signals](https://auth0.com/signals)
 
-Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
+Requires Bash v4.2+. Tested on: 
+
+* Linux
+* FreeBSD
+* Windows (WSL2, Cygwin)
+* MacOS *(thanks @Antonio-Prado)*
 
 ---
 
@@ -76,9 +81,12 @@ Requires Bash v4.2+. Tested on Linux, FreeBSD, WSL (v2) and Cygwin.
 
 ### Prerequisite packages
 
-Some packages are required for full functionality. On a Debian/Ubuntu machine, you can install them with:
+Some packages are required for full functionality.
 
-`apt -y install curl whois bind9-host mtr-tiny jq ipcalc`
+* On Debian/Ubuntu-based Linux distributions, you can install them with:
+  `apt -y install curl whois bind9-host mtr-tiny jq ipcalc`
+* On MacOS, you can install them using Homebrew with:
+  `brew install bash coreutils curl whois mtr jq ipcalc && brew link mtr`
 
 ### Script download
 
