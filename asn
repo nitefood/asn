@@ -971,6 +971,11 @@ if [ -z "$(command -v ipcalc)" ]; then
 else
 	HAVE_IPCALC=true
 fi
+# check for `gdate` presence (MacOS coreutils), otherwise fall back to plain `date` (cheers @Antonio-Prado)
+if [ -x "$(command -v gdate)" ]; then
+	date() { gdate "$@"; }
+	export -f date
+fi
 
 local_wanip=""
 HAVE_IPV6=false
