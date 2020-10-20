@@ -31,7 +31,7 @@ Requires Bash v4.2+. Tested on:
 * Linux
 * FreeBSD
 * Windows (WSL2, Cygwin)
-* MacOS *(thanks @Antonio-Prado)*
+* MacOS *(thanks [Antonio Prado](https://github.com/Antonio-Prado))*
 
 ---
 
@@ -84,8 +84,11 @@ Requires Bash v4.2+. Tested on:
 Some packages are required for full functionality.
 
 * On Debian/Ubuntu-based Linux distributions, you can install them with:
+
   `apt -y install curl whois bind9-host mtr-tiny jq ipcalc`
-* On MacOS, you can install them using Homebrew with:
+
+* On MacOS, you can install them using [Homebrew](https://brew.sh) with:
+
   `brew install bash coreutils curl whois mtr jq ipcalc && brew link mtr`
 
 ### Script download
