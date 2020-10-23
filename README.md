@@ -9,6 +9,7 @@ This script serves the purpose of having a quick OSINT command line tool at disp
 Features:
 
 - It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
+- It will also detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
 - It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated against [RIPE RPKI Validator](https://rpki-validator.ripe.net/). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
@@ -21,6 +22,7 @@ Screenshots for every lookup option are below.
 The script uses the following services for data retrieval:
 * [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/)
 * [The Prefix WhoIs Project](https://pwhois.org/)
+* [PeeringDB](https://www.peeringdb.com/)
 * [ipify](https://www.ipify.org/)
 * [RIPEStat](https://stat.ripe.net/)
 * [RIPE RPKI Validator](https://rpki-validator.ripe.net/)
@@ -63,11 +65,18 @@ Requires Bash v4.2+. Tested on:
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/96519328-07692a80-126d-11eb-83f8-32e8ae5c5bfd.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/96940658-9b86fc00-14d0-11eb-8a46-e8dc373f2537.png)
 
-* _Detailed ASPath trace to www.github.com (with unannounced IXP prefix in the path at hop #11)_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/96520008-71360400-126e-11eb-8cc7-27be900ba968.png)
+* *ASPath trace traversing both a PNI (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> ROSTELECOM through DE-CIX at hop 14)*
+
+![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/96941621-2e289a80-14d3-11eb-95b7-99c1bd3b2add.png)
+
+
+* _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
+
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/96940972-7b0b7180-14d1-11eb-8132-456521123e6a.png)
+
 
 ### Network search by organization ###
 
@@ -81,15 +90,27 @@ Requires Bash v4.2+. Tested on:
 
 ### Prerequisite packages
 
-Some packages are required for full functionality.
+Some packages are required for full functionality:
 
-* On Debian/Ubuntu-based Linux distributions, you can install them with:
+* **Debian/Ubuntu:**
 
-  `apt -y install curl whois bind9-host mtr-tiny jq ipcalc`
+  `apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr`
 
-* On MacOS, you can install them using [Homebrew](https://brew.sh) with:
+* **CentOS 7/8:**
 
-  `brew install bash coreutils curl whois mtr jq ipcalc && brew link mtr`
+  ```
+  yum -y install curl whois bind-utils mtr jq perl && \
+  rpm -ivh http://www6.atomicorp.com/channels/atomic/centos/7/x86_64/RPMS/grepcidr-2.0-1.el7.art.x86_64.rpm \
+  https://ftp.tu-chemnitz.de/pub/linux/dag/redhat/el7/en/x86_64/rpmforge/RPMS/ipcalc-0.41-1.el7.rf.x86_64.rpm
+  ```
+
+* **FreeBSD**:
+
+  `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr`
+
+* **MacOS** (using [Homebrew](https://brew.sh)):
+
+  `brew install bash coreutils curl whois mtr jq ipcalc grepcidr && brew link mtr`
 
 ### Script download
 
@@ -121,11 +142,15 @@ In order to do so, you can use the following command:
 
 Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPE RPKI Validator](https://rpki-validator.ripe.net/) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope. Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
 
-The script will attempt a best-effort, generic `whois` lookup when Team Cymru and pWhois have no info about the IP address or prefix. This usually happens for IXP and PNI prefixes, and will give better insight into the path taken by packets.
+The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
 
-Geolocation and organization data is taken from pWhois, while IP reputation data is taken from [Auth0 Signals](https://auth0.com/signals/).
+The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
 
-AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP. Tracing can be disabled by passing the `[-n|--notrace]` command line switch.
+Geolocation and organization data is taken from pWhois, while IP reputation data is taken from Auth0 Signals.
+
+AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
+
+Tracing can be disabled altogether by passing the `[-n|--notrace]` command line switch.
 
 ## Thanks
 

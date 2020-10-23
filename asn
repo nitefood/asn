@@ -33,7 +33,7 @@
 ########################################################################################
 
 WhoisASN(){
-	found_asname=$(whois -h whois.cymru.com " -f -w -c -p as$1" | sed 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
+	found_asname=$(whois -h whois.cymru.com " -f -w -c -p -u as$1" | sed 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
 	if [ "$found_asname" = "NO_NAME" ]; then
 		found_asname=""
 	else
@@ -64,20 +64,30 @@ WhoisIP(){
 	hostname=$(RdnsLookup "$1")
 	abusecontacts=$(AbuseLookup "$abuse_whois_data")
 	[[ -z "$hostname" ]] && hostname="-"
-	if [ "$SKIP_PWHOIS" = false ]; then
+	if [ "$UNANNOUNCED_PREFIX" = false ]; then
 		PwhoisLookup "$1"
 	else
-		# No data in the Team Cymru and pWhois DBs. Fall back to generic whois.
+		# No data in the Team Cymru DB for this IP
 		[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
 		found_asn="N/A (address not announced)"
 		found_asname=""
-		pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+		# check if it's an IXP, otherwise fall back to generic whois
+		IsIXP "$1"
+		if [ -n "$ixp_data" ]; then
+			pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
+		else
+			pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+		fi
 		[[ -z "$pwhois_org" ]] && pwhois_org="N/A"
 		found_route=$(echo -e "$network_whois_data" | grep -i -m2 -E "^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do if [ -n "$line" ]; then echo -n "$line / "; fi; done | sed 's/ \/ $//')
 		[[ -z "$found_route" ]] && found_route="N/A"
 		pwhois_net=$(echo -e "$network_whois_data" | grep -i -E "^netname:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
 		[[ -z "$pwhois_net" ]] && pwhois_net="N/A"
-		pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
+		if [ -n "$ixp_geo" ]; then
+			pwhois_geo="$ixp_geo"
+		else
+			pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
+		fi
 		[[ -z "$pwhois_geo" ]] && pwhois_geo="N/A"
 	fi
 	indent=$(( longest+4 ))
@@ -86,7 +96,8 @@ WhoisIP(){
 	else
 		output_asname=""
 	fi
-	if [ "$RPKI_LOOKUP" = true ]; then
+	rpki_output=""
+	if [ "$RPKI_LOOKUP" = true ] && [ "$UNANNOUNCED_PREFIX" = false ]; then
 		StatusbarMessage "Checking RPKI validity for ${bluebg}AS${found_asn}${lightgreybg} and prefix ${bluebg}${found_route}${lightgreybg}"
 		RPKILookup "$found_asn" "$found_route"
 		StatusbarMessage ""
@@ -98,32 +109,26 @@ WhoisIP(){
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
-	[[ "$RPKI_LOOKUP" = true ]] && printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
+	[[ -n "$rpki_output" ]] && printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
 	[[ "$REPUTATION_LOOKUP" = true ]] && last_symbol="├" || last_symbol="└"
 	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "$last_symbol" "$pwhois_geo"
 	[[ "$REPUTATION_LOOKUP" = false ]] && echo ""
 }
 
 LookupASNAndRouteFromIP(){
-	found_route=""
 	found_asn=""
+	found_route=""
 	found_asname=""
-	output=$(whois -h whois.cymru.com " -f -p $1" | sed 's/\ *|\ */|/g')
+	output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
 	found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
-	found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
-	found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
-	if [ "$found_asname" = "NA" ]; then
-		# Team Cymru has no data for this IP. Try pWhois next
-		output=$(whois -h whois.pwhois.org "$1" | sed 's/\: /:/')
-		found_asn=$(echo "$output" | grep -E "^Origin-AS:" | cut -d ':' -f 2)
-		found_asname=$(echo "$output" | grep -E "^AS-Org-Name:" | cut -d ':' -f 2)
-		found_route=$(echo "$output" | grep -E "^Prefix:" | cut -d ':' -f 2)
-	fi
-	if [ -z "$found_asname" ]; then
-		# Team Cymru and pWhois have no data about this IP. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
-		SKIP_PWHOIS=true
+	if [ "$found_asn" = "NA" ]; then
+		# Team Cymru has no data for this IP. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
+		found_asn=""
+		UNANNOUNCED_PREFIX=true
 	else
-		SKIP_PWHOIS=false
+		found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
+		found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
+		UNANNOUNCED_PREFIX=false
 	fi
 }
 
@@ -195,7 +200,7 @@ RdnsLookup(){
 	# reverse DNS (PTR) lookup.
 	# get first lookup result only (in case of multiple PTR records) and remove trailing dot and CR (Cygwin) from hostname
 	rdns=$(host "$1" | awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}')
-	if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL"; then rdns=""; fi
+	if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL|^record$"; then rdns=""; fi
 	echo "$rdns"
 }
 
@@ -235,8 +240,15 @@ TraceASPath(){
 	echo ""
 	StatusbarMessage "Tracing path to ${bluebg}${host_to_trace}${lightgreybg}"
 	# cache the previously looked-up AS to save one lookup (target/last hop)
-	saved_asn=$found_asn
-	saved_asname=$found_asname
+	if [ -n "$ixp_data" ]; then
+		saved_asn="$ixp_data"
+		saved_asname=""
+		TARGET_IS_IXP=true
+	else
+		saved_asn="$found_asn"
+		saved_asname="$found_asname"
+		TARGET_IS_IXP=false
+	fi
 	# last_resolved_ip will save us one dns resolution (mtr returns the same last hop twice)
 	last_resolved_ip=""
 	privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
@@ -296,6 +308,8 @@ TraceASPath(){
 	cur_hop_count=1
 	last_hop=false
 	for mtr_hopnum in "${!hostline_array[@]}"; do
+		ixp_tag=""
+		hop_asn=""
 		hop_ip=${hostline_array[$mtr_hopnum]}
 		# AS DATA lookup
 		# check if IP is in private addressing space
@@ -309,22 +323,44 @@ TraceASPath(){
 				found_asn=$saved_asn
 				found_asname=$saved_asname
 				# avoid adding the same AS multiple times in a row in the summary path
-				aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "${found_asn}" "$(echo "${found_asname}" | cut -d ',' -f 1)" )
+				if [ "$TARGET_IS_IXP" = false ]; then
+					# last hop, not an IXP
+					aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "${found_asn}" "$(echo "${found_asname}" | cut -d ',' -f 1)" )
+					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+				else
+					# last hop, and is an IXP
+					ixp_tag="${bluebg} IXP ${default}"
+					asn_data="${ixp_tag} ${blue}${found_asn}${default}"
+					aspath_entry=$(printf "%-6s  ${blue}%s${default}" "$ixp_tag" "$found_asn")
+				fi
 				if [[ ${#aspath_array[@]} -eq 0 ]] || [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
 					aspath_array+=("$aspath_entry")
 				fi
-				asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
 				last_hop=true
 			else
 				# not the last hop. Lookup hop data
 				LookupASNAndRouteFromIP "$hop_ip"
-				if [ -z "$found_asname" ] && [ -z "$found_route" ]; then
-					# no data found, try retrieving relevant info from a generic whois lookup
-					network_whois_data=$(whois "$hop_ip" | grep -i -m2 -E "^netname:|^orgname:|^org-name:|^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
-					if [ -z "$network_whois_data" ]; then
-						asn_data="${yellow}(No data)${default}"
+				if [ "$UNANNOUNCED_PREFIX" = true ]; then
+					# No data in the Team Cymru DB. Check to see if the ip is assigned to an IXP, or fall back to generic whois.
+					WhoisIP "$hop_ip" >/dev/null # don't display this, we're being parsed off-screen
+					hop_asn="${red}N/A (address not announced)${default}"
+					hop_net="$pwhois_net"
+					hop_geo="$pwhois_geo"
+					if [ -n "$ixp_data" ]; then
+						# this hop is an IXP
+						ixp_tag="${bluebg} IXP ${default}"
+						asn_data="${ixp_tag} ${blue}${ixp_data}${default}"
+						hop_org="${ixp_tag} ${blue}${ixp_data}${default}"
+						aspath_entry=$(printf "%-6s  ${blue}%s${default}" "$ixp_tag" "$ixp_data")
+						aspath_array+=("$aspath_entry")
 					else
-						asn_data="${yellow}(${network_whois_data})${default}"
+						# no data found and not an IXP hop, try retrieving relevant info from a generic whois lookup
+						hop_whois_data=$(echo -e "$full_whois_data" | grep -i -m2 -E "^netname:|^orgname:|^org-name:|^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+						if [ -z "$hop_whois_data" ]; then
+							asn_data="${yellow}(No data)${default}"
+						else
+							asn_data="${yellow}(${hop_whois_data})${default}"
+						fi
 					fi
 				else
 					# lookup success
@@ -336,14 +372,15 @@ TraceASPath(){
 					fi
 				fi
 			fi
-			if [ "$DETAILED_TRACE" = "true" ]; then
-				if [ "$SKIP_PWHOIS" = false ]; then
-					PwhoisLookup "$hop_ip"
-				else
-					pwhois_asn="${red}N/A (address not announced)${default}"
-					# don't display this, we're being parsed off-screen
-					WhoisIP "$hop_ip" >/dev/null
-				fi
+			if [ "$DETAILED_TRACE" = "true" ] && [ "$UNANNOUNCED_PREFIX" = false ]; then
+				# run a pWhois lookup if the hop is within an announced prefix,
+				# otherwise we already have generic whois data stored (also in case of an IXP prefix)
+				PwhoisLookup "$hop_ip"
+				hop_asn="$pwhois_asn"
+				hop_org="$pwhois_org"
+				hop_net="$pwhois_net"
+				hop_geo="$pwhois_geo"
+				hop_prefix="$pwhois_prefix"
 			fi
 		fi
 
@@ -370,23 +407,29 @@ TraceASPath(){
 			ping_average_msec=$(echo "$ping_total_usec $mtr_rounds" | awk '{ avg = $1 / $2; printf( "%.1f\n", avg/1000) }')
 			ping_data="$ping_average_msec ms"
 		fi
-		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}$hop_ip${default}" "${ping_data}" "$asn_data")
-		if [ "$DETAILED_TRACE" = "true" ] && [ -n "$pwhois_output" ]; then
+
+		[[ -z "$ixp_tag" ]] && hop_color="${white}" || hop_color="${blue}"
+		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${hop_color}$hop_ip${default}" "${ping_data}" "$asn_data")
+
+		if [ "$DETAILED_TRACE" = "true" ] && [ -n "$hop_asn" ]; then
 			if [ "$RPKI_LOOKUP" = true ] && [ -n "$found_asname" ]; then # only run RPKI lookups if the prefix is announced
-				RPKILookup "$found_asn" "$pwhois_prefix"
+				RPKILookup "$found_asn" "$hop_prefix"
 				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default} \
 					\n     ├${bluebg}ORG${default} ${green}%s${default} \
 					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
 					\n     ├${bluebg}GEO${default} ${magenta}%s${default} \
 					\n     └${bluebg}ROA${default} %s" \
-					"$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo" "$rpki_output")
+					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo" "$rpki_output")
 					if [ "$INVALID_ROA" = true ]; then
 						# notify user of possible BGP hijack/route leak
 						aspath_array[-1]+=" ${redbg} ─> WARNING: POSSIBLE ROUTE LEAK / BGP HIJACK ${default}"
 					fi
 			else
-				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default}\n     ├${bluebg}ORG${default} ${green}%s${default}\n     ├${bluebg}NET${default} ${yellow}%s${default}\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
-					"$pwhois_asn" "$pwhois_org" "$pwhois_net" "$pwhois_geo")
+				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default} \
+					\n     ├${bluebg}ORG${default} ${green}%s${default} \
+					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
+					\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
+					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo")
 			fi
 			trace_output+="\n"
 		elif [ "$DETAILED_TRACE" = "true" ]; then
@@ -428,7 +471,6 @@ TraceASPath(){
 		fi
 	done
 	echo -e "\n"
-
 }
 
 SearchByOrg(){
@@ -800,6 +842,35 @@ RPKILookup(){
 	fi
 }
 
+IsIXP() {
+	# input ($1) is an IPv4/v6.
+	ixp_full_ix_data=""
+	ixp_data=""
+	ixp_geo=""
+	if [ "$IXP_DETECTION" = true ]; then
+		# Update IXP prefixes from PeeringDB if necessary
+		[[ -z "$peeringdb_dataset" ]] && peeringdb_dataset=$(curl -s https://www.peeringdb.com/api/ixpfx)
+		ixp_prefixes=$(echo -e "$peeringdb_dataset" | jq -r '.data[].prefix')
+		if echo -e "$ixp_prefixes" | grep -vq ':'; then
+			# if input is an IPv4, speedup grepcidr lookup by filtering out IPv6 IXP prefixes
+			ipv4_prefixes=$(echo -e "$ixp_prefixes" | grep -v ':')
+			ixp_prefixes="$ipv4_prefixes"
+		fi
+		for prefix in $ixp_prefixes; do
+			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
+				# the IP is part of an IXP prefix
+				# Query PeeringDB to match an IXP for that prefix.
+				#ixlan_id=$(curl -s "https://www.peeringdb.com/api/ixpfx?prefix__in=${prefix}" | jq '.data[0].ixlan_id')
+				ixlan_id=$(echo "$peeringdb_dataset" | jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id')
+				ixp_full_ix_data=$(curl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
+				ixp_data=$(echo "$ixp_full_ix_data" | jq -r '.data[0].name, .data[0].name_long' | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
+				ixp_geo=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.city, .data[0].org.state' | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
+				break
+			fi
+		done
+	fi
+}
+
 PrintErrorAndExit(){
 	echo -e "\n${redbg}${1}${default}\n"
 	tput sgr0
@@ -862,6 +933,10 @@ default=$'\e[0m'
 
 # External API token for Auth0 Signals (IP reputation lookup)
 SIGNALS_TOKEN_FILENAME="$HOME/.asn/signals_token"
+
+# PeeringDB list of IXP prefixes
+peeringdb_dataset=""
+IXP_DETECTION=true
 
 # Sigint trapping
 NO_ERROR_ON_INTERRUPT=false
@@ -933,6 +1008,12 @@ fi
 if [ -z "$(command -v curl)" ]; then
 	echo -e "\n${red}ERROR: ${white}program '${red}curl${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install curl${white} on Debian-based linux distributions)\n"
 	exit 1
+fi
+if [ -z "$(command -v grepcidr)" ]; then
+	# won't be able to parse data from PeeringDB in order to detect IXP prefixes, but no hard fail
+	echo -e "\n${yellow}WARNING: ${white}program '${red}grepcidr${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install grepcidr${white}" \
+		"on Debian-based linux distributions)\nto enable IXP prefix detection using PeeringDB data${default}"
+	IXP_DETECTION=false
 fi
 if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
 	echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
