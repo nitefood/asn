@@ -8,6 +8,11 @@ This script serves the purpose of having a quick OSINT command line tool at disp
 
 Features:
 
+* It will lookup relevant Autonomous System information for any given AS number, including:
+  * **Organization name**
+  * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
+  * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
+
 - It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
 - It will also detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
 - It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
@@ -53,9 +58,9 @@ Requires Bash v4.2+. Tested on:
 
 ![ipv6lookup](https://user-images.githubusercontent.com/24555810/96518993-4f3b8200-126c-11eb-97c4-2d5d89763fe6.png)
 
-* _Autonomous system number lookup with BGP stats_
+* _Autonomous system number lookup with BGP stats and peering informations_
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/95674499-e475b100-0bb0-11eb-89db-a670442462cf.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/97097178-c6f31d80-166d-11eb-9a6b-e9bad2a56510.png)
 
 * _Hostname lookup_
 
@@ -90,7 +95,7 @@ Requires Bash v4.2+. Tested on:
 
 ### Prerequisite packages
 
-Some packages are required for full functionality:
+This script requires **BASH v4.2** or later. Some additional packages are also required for full functionality:
 
 * **Debian/Ubuntu:**
 
@@ -111,6 +116,8 @@ Some packages are required for full functionality:
 * **MacOS** (using [Homebrew](https://brew.sh)):
 
   `brew install bash coreutils curl whois mtr jq ipcalc grepcidr && brew link mtr`
+  
+  *(Note for MacOS users: if `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it)*
 
 ### Script download
 
@@ -134,23 +141,35 @@ In order to do so, you can use the following command:
 
 ## Usage
 
+#####*Syntax*
+
 * `asn <ASnumber>` -- _to lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)_
 * `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6), IP reputation and ASN data_
 * `asn [-n|-d] <host.name.tld>` -- _to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)_
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
-* `asn <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
+* `asn [-o] <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
 
-Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPE RPKI Validator](https://rpki-validator.ripe.net/) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope. Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
+#####*Path tracing and reputation*
 
-The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
+- AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
+- Geolocation and organization data is taken from pWhois, while IP reputation data is taken from Auth0 Signals.
+- Tracing can be disabled altogether by passing the `[-n|--notrace]` command line switch.
 
-The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
+##### *Detailed mode (-d)*
 
-Geolocation and organization data is taken from pWhois, while IP reputation data is taken from Auth0 Signals.
+- Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPE RPKI Validator](https://rpki-validator.ripe.net/) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
 
-AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
+  Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
 
-Tracing can be disabled altogether by passing the `[-n|--notrace]` command line switch.
+##### *Organization search (-o)*
+
+* The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
+  In order to force an organization search (for example for Orgs containing `.` in their name), pass the `[-o|--organization]` command line switch.
+
+#####*IXP detection and unannounced prefixes*
+
+- The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes. 
+- The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with some [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
 
 ## Thanks
 

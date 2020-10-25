@@ -9,26 +9,7 @@
 #
 # Usage:
 #
-#  asn <ASnumber>              -- to lookup matching ASN and BGP announcements/neighbours
-#                                 data. Supports "as123" and "123" formats
-#                                 (case insensitive)
-#
-#  asn [-n|-d] <IPv4/IPv6>     -- to lookup matching route(4/6), IP reputation
-#                              -- and ASN data
-#
-#  asn [-n|-d] <host.name.tld> -- to lookup matching IP(v4/v6), route and ASN data
-#                                 (supports multiple IPs - e.g. DNS RR)
-#
-#  asn <Route>                 -- to lookup matching ASN data
-#
-#  asn <Organization Name>     -- to search by company name and lookup network ranges
-#                                 exported by (or related to) the company
-# -----------------------------------------------------------------------------------
-#
-# Command line switches:
-#
-#  -d | --detailed : Display detailed MTR hop data
-#  -n | --notrace  : Disable MTR tracing for lookup results
+#  (Launch the script without parameters or visit the project's homepage for usage info)
 #
 ########################################################################################
 
@@ -45,16 +26,85 @@ WhoisASN(){
 }
 
 QueryRipestat(){
-	BoxHeader "BGP statistics for AS${asn} (${found_asname})"
-	echo ""
-	StatusbarMessage "Querying RIPEstat for BGP data"
-	ripestat_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1")
-	StatusbarMessage ""
-	if [ -n "$ripestat_data" ]; then
-		ripestat_ipv4=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v4.prefixes')
-		ripestat_ipv6=$(echo -e "$ripestat_data" | jq -r '.data.announced_space.v6.prefixes')
-		ripestat_bgp=$(echo -e "$ripestat_data" | jq -r '.data.observed_neighbours')
+	StatusbarMessage "Retrieving BGP data for AS$1 ($found_asname)"
+	# BGP routing stats
+	ripestat_routing_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	if [ -n "$ripestat_routing_data" ]; then
+		ripestat_ipv4=$(echo -e "$ripestat_routing_data" | jq -r '.data.announced_space.v4.prefixes')
+		ripestat_ipv6=$(echo -e "$ripestat_routing_data" | jq -r '.data.announced_space.v6.prefixes')
+		ripestat_bgp=$(echo -e "$ripestat_routing_data" | jq -r '.data.observed_neighbours')
 	fi
+	# BGP neighbours list
+	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
+	ripestat_neighbours_data=$(curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	upstream_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="left") | .asn')
+	downstream_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="right") | .asn')
+	uncertain_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="uncertain") | .asn')
+
+	RESOLVE_COUNT=20
+	OUTPUT_PEERS_PER_LINE=4
+
+	# resolve AS names of the first n upstreams
+	upstream_peercount=$(echo "$upstream_peers" | wc -l)
+	resolved_upstream_peers=""
+	count=0
+	for peer in $(echo -e "$upstream_peers" | head -n $RESOLVE_COUNT); do
+		(( count++ ))
+		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+		resolved_upstream_peers+="${greenbg} $peername ($peer) ${default} "
+		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_upstream_peers+="\n"
+	done
+	# and add the remaining ones as AS numbers only
+	unresolved_peercount=$(( upstream_peercount - RESOLVE_COUNT ))
+	if [ "$unresolved_peercount" -ge 1 ]; then
+		resolved_upstream_peers+="and more: "
+		for peer in $(echo -e "$upstream_peers" | tail -n $unresolved_peercount ); do
+			resolved_upstream_peers+="${green}${peer}${default} "
+		done
+	fi
+	upstream_peers="$resolved_upstream_peers"
+
+	# resolve AS names of the first n downstreams
+	downstream_peercount=$(echo "$downstream_peers" | wc -l)
+	resolved_downstream_peers=""
+	count=0
+	for peer in $(echo -e "$downstream_peers" | head -n $RESOLVE_COUNT); do
+		(( count++ ))
+		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+		resolved_downstream_peers+="${yellowbg} $peername ($peer) ${default} "
+		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_downstream_peers+="\n"
+	done
+	# and add the remaining ones as AS numbers only
+	unresolved_peercount=$(( downstream_peercount - RESOLVE_COUNT ))
+	if [ "$unresolved_peercount" -ge 1 ]; then
+		resolved_downstream_peers+="and more: "
+		for peer in $(echo -e "$downstream_peers" | tail -n $unresolved_peercount ); do
+			resolved_downstream_peers+="${yellow}${peer}${default} "
+		done
+	fi
+	downstream_peers="$resolved_downstream_peers"
+
+	# resolve AS names of the first n uncertains
+	uncertain_peercount=$(echo "$uncertain_peers" | wc -l)
+	resolved_uncertain_peers=""
+	count=0
+	for peer in $(echo -e "$uncertain_peers" | head -n $RESOLVE_COUNT); do
+		(( count++ ))
+		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+		resolved_uncertain_peers+="${lightgreybg} $peername ($peer) ${default} "
+		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_uncertain_peers+="\n"
+	done
+	# and add the remaining ones as AS numbers only
+	unresolved_peercount=$(( uncertain_peercount - RESOLVE_COUNT ))
+	if [ "$unresolved_peercount" -ge 1 ]; then
+		resolved_uncertain_peers+="and more: "
+		for peer in $(echo -e "$uncertain_peers" | tail -n $unresolved_peercount ); do
+			resolved_uncertain_peers+="${white}${peer}${default} "
+		done
+	fi
+	uncertain_peers="$resolved_uncertain_peers"
+
+	StatusbarMessage ""
 }
 
 WhoisIP(){
@@ -119,6 +169,7 @@ LookupASNAndRouteFromIP(){
 	found_asn=""
 	found_route=""
 	found_asname=""
+	# TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed (esp. during traces)
 	output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
 	found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
 	if [ "$found_asn" = "NA" ]; then
@@ -145,19 +196,20 @@ ResolveHostnameToIPList(){
 
 PrintUsage(){
 	programname=$(basename "$0")
-	BoxHeader "ASN / BGP stats / IPv4v6 / Prefix / ASPath / Organization lookup tool"
-	echo -e "\
-	\nUsage:\n\t$programname ${green}[OPTIONS] ${blue}<TARGET>${default}\n\nOptions:\n\
-	\n  ${green}-d, --detailed\n\t${default}Output detailed hop info (collected from pWhois) during the AS path trace to the ${blue}TARGET${default}
-	\n  ${green}-n, --notrace\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}\n\nSupported targets:\
-	\n\n  ${blue}<AS Number>${default}\n\tLookup matching and BGP announcements/neighbours data.\
-	\n\t(Supports \"as123\" and \"123\" formats - case insensitive)\
-	\n\n  ${blue}<IPv4/IPv6>${default}\n\tLookup matching route and ASN data\
-	\n\n  ${blue}<Prefix>${default}\n\tLookup matching ASN data\
-	\n\n  ${blue}<host.name.tld>${default}\n\tLookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR\
-	\n\n  ${blue}<Organization Name>${default}\n\tSearch by company name and lookup network ranges exported by (or related to) the company\
-	\n\n\nProject homepage: ${red}https://github.com/nitefood/asn${default}\n
-	"
+	BoxHeader "ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool"
+	echo -e "\nUsage:\n\n  $programname ${green}[OPTIONS] ${blue}<TARGET>${default}\n\nOptions:" \
+			"\n\n  ${green}-d, --detailed\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
+			"\n\t(This option also enables RPKI validation/BGP hijacking detection for every hop)" \
+			"\n\n  ${green}-n, --notrace\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
+			"\n\n  ${green}-o, --organization\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
+			"\n\nSupported targets:" \
+			"\n\n  ${blue}<AS Number>${default}\n\tLookup matching and BGP announcements/neighbours data." \
+			"\n\t(Supports \"as123\" and \"123\" formats - case insensitive)" \
+			"\n\n  ${blue}<IPv4/IPv6>${default}\n\tLookup matching route(4/6), IP reputation and ASN data" \
+			"\n\n  ${blue}<Prefix>${default}\n\tLookup matching ASN data" \
+			"\n\n  ${blue}<host.name.tld>${default}\n\tLookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR" \
+			"\n\n  ${blue}<Organization Name>${default}\n\tSearch by company name and lookup network ranges exported by (or related to) the company" \
+			"\n\n\nProject homepage: ${yellow}https://github.com/nitefood/asn${default}\n"
 }
 
 PwhoisLookup(){
@@ -232,13 +284,25 @@ AbuseLookup(){
 	fi
 }
 
+HopPrint(){
+	StatusbarMessage ""
+	echo -e "$@"
+	StatusbarMessage "Analyzing collected trace output to ${bluebg}${host_to_trace}${lightgreybg}"
+}
+
 TraceASPath(){
 	starttime=$(date +%s)
 	host_to_trace="$1"
 	mtr_rounds=3
 	WhatIsMyIP
+	if [ "$DETAILED_TRACE" = true ]; then
+		headermsg="Detailed trace to $userinput"
+	else
+		headermsg="Trace to $userinput"
+	fi
+	BoxHeader "$headermsg"
 	echo ""
-	StatusbarMessage "Tracing path to ${bluebg}${host_to_trace}${lightgreybg}"
+	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
 	# cache the previously looked-up AS to save one lookup (target/last hop)
 	if [ -n "$ixp_data" ]; then
 		saved_asn="$ixp_data"
@@ -302,9 +366,8 @@ TraceASPath(){
 		fi
 	done
 	wait
-	# mtr finished, parse and format results
-	StatusbarMessage "Parsing collected trace output"
-	trace_output=$(printf "${lightgreybg}%4s %-72s%18s     %s     ${default}" "Hop" "IP Address" "Ping avg" "AS Information")
+	# mtr finished, analyze and output results
+	HopPrint "$(printf "${lightgreybg}%4s %-72s%20s     %s    ${default}" "Hop" "IP Address" "Ping avg" "AS Information")"
 	cur_hop_count=1
 	last_hop=false
 	for mtr_hopnum in "${!hostline_array[@]}"; do
@@ -344,7 +407,9 @@ TraceASPath(){
 					# No data in the Team Cymru DB. Check to see if the ip is assigned to an IXP, or fall back to generic whois.
 					WhoisIP "$hop_ip" >/dev/null # don't display this, we're being parsed off-screen
 					hop_asn="${red}N/A (address not announced)${default}"
+					hop_org="$pwhois_org"
 					hop_net="$pwhois_net"
+					[[ -n "$found_route" ]] && hop_net+=" ($found_route)"
 					hop_geo="$pwhois_geo"
 					if [ -n "$ixp_data" ]; then
 						# this hop is an IXP
@@ -393,10 +458,10 @@ TraceASPath(){
 		# PING data
 		# account for missing (no reply) hops
 		while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
-			trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
+			HopPrint "$(printf "%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")"
 			if [ "$DETAILED_TRACE" = "true" ]; then
 				# PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
-				trace_output+="\n"
+				HopPrint ""
 			fi
 			((cur_hop_count++))
 		done
@@ -409,32 +474,32 @@ TraceASPath(){
 		fi
 
 		[[ -z "$ixp_tag" ]] && hop_color="${white}" || hop_color="${blue}"
-		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${hop_color}$hop_ip${default}" "${ping_data}" "$asn_data")
+		HopPrint "$(printf "%3s. %-90s %10s   %s" "$cur_hop_count" "${hop_color}$hop_ip${default}" "${ping_data}" "$asn_data")"
 
 		if [ "$DETAILED_TRACE" = "true" ] && [ -n "$hop_asn" ]; then
 			if [ "$RPKI_LOOKUP" = true ] && [ -n "$found_asname" ]; then # only run RPKI lookups if the prefix is announced
 				RPKILookup "$found_asn" "$hop_prefix"
-				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default} \
+				HopPrint "$(printf "     ├${bluebg}ASN${default} ${red}%s${default} \
 					\n     ├${bluebg}ORG${default} ${green}%s${default} \
 					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
 					\n     ├${bluebg}GEO${default} ${magenta}%s${default} \
 					\n     └${bluebg}ROA${default} %s" \
-					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo" "$rpki_output")
+					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo" "$rpki_output")"
 					if [ "$INVALID_ROA" = true ]; then
 						# notify user of possible BGP hijack/route leak
 						aspath_array[-1]+=" ${redbg} ─> WARNING: POSSIBLE ROUTE LEAK / BGP HIJACK ${default}"
 					fi
 			else
-				trace_output+=$(printf "\n     ├${bluebg}ASN${default} ${red}%s${default} \
+				HopPrint "$(printf "     ├${bluebg}ASN${default} ${red}%s${default} \
 					\n     ├${bluebg}ORG${default} ${green}%s${default} \
 					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
 					\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
-					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo")
+					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo")"
 			fi
-			trace_output+="\n"
+			HopPrint ""
 		elif [ "$DETAILED_TRACE" = "true" ]; then
 			# PWHOIS lookups ON, but no valid data. Just add a newline for readability
-			trace_output+="\n"
+			HopPrint ""
 		fi
 		[[ "$last_hop" = true ]] && break
 		(( cur_hop_count++ ))
@@ -442,21 +507,14 @@ TraceASPath(){
 	# mtr output (hostlines) parsing complete
 	if [ "$last_hop" = false ]; then
 		# last hop wasn't our target IP. Add a missing last hop to the trace.
-		trace_output+=$(printf "\n%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")
-		[[ "$DETAILED_TRACE" = "true" ]] && trace_output+="\n"
+		HopPrint "$(printf "%3s. %-96s %10s   %s" "$cur_hop_count" "${redbg} destination host unreachable ${default}" "*" "${white}(No reply)${default}")"
+		[[ "$DETAILED_TRACE" = "true" ]] && HopPrint ""
 	fi
-	StatusbarMessage ""
 
-	if [ "$DETAILED_TRACE" = true ]; then
-		headermsg="Detailed trace to $userinput"
-	else
-		headermsg="Trace to $userinput"
-	fi
-	BoxHeader "$headermsg"
-	echo -e "\n${trace_output}"
 	endtime=$(date +%s)
 	runtime=$((endtime-starttime))
-	echo -e "\nTrace complete in $runtime seconds.\n\n"
+	StatusbarMessage ""
+	echo -e "\nTrace complete in $runtime seconds.\n"
 
 	BoxHeader "AS path to $userinput"
 	echo -en "\n  "
@@ -533,7 +591,7 @@ SearchByOrg(){
 
 	if [ ${#orgs[@]} -eq 0 ]; then
 		# company search yielded no results
-		PrintErrorAndExit "Error: organization not found"
+		PrintErrorAndExit "Error: no organizations found"
 	fi
 
 	# Menu showing loop
@@ -682,7 +740,7 @@ Choose an organization or enter:
 $IPCALC_WARNING
 >> "
 	echo -e "${yellow}────────────────────────────────────────────────────${green}"
-	COLUMNS=0
+	COLUMNS=1
 	set -o posix
 	select choice in "${orgs[@]}"; do
 		for org in "${orgs[@]}"; do
@@ -692,6 +750,7 @@ $IPCALC_WARNING
 		done
 		case "$REPLY" in
 			"q"|"Q")
+				echo ""
 				exit 0
 			;;
 			"-")
@@ -860,7 +919,6 @@ IsIXP() {
 			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
 				# the IP is part of an IXP prefix
 				# Query PeeringDB to match an IXP for that prefix.
-				#ixlan_id=$(curl -s "https://www.peeringdb.com/api/ixpfx?prefix__in=${prefix}" | jq '.data[0].ixlan_id')
 				ixlan_id=$(echo "$peeringdb_dataset" | jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id')
 				ixp_full_ix_data=$(curl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
 				ixp_data=$(echo "$ixp_full_ix_data" | jq -r '.data[0].name, .data[0].name_long' | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
@@ -917,6 +975,104 @@ WhatIsMyIP() {
 	fi
 }
 
+CheckPrerequisites() {
+	saveIFS="$IFS"
+	IFS=' '
+	prerequisite_tools="coproc whois host curl" # mandatory tools
+	optionals_tools="mtr jq ipcalc grepcidr"	# optional tools
+	missing_tools=""
+	disabled_features=""
+	HARD_FAIL=false
+
+	BGPSTAT_LOOKUP=true
+	RPKI_LOOKUP=true
+	REPUTATION_LOOKUP=true
+	HAVE_IPCALC=true
+	IXP_DETECTION=true
+
+	#* Mandatory tools checking (hard fail if not found)
+	for tool in $prerequisite_tools; do
+		if [ -z "$(command -v "$tool")" ]; then
+			missing_tools+="\n - $tool"
+			HARD_FAIL=true
+		fi
+	done
+
+	#* Optional tools checking (no hard fail if not found, but some features disabled)
+	for tool in $optionals_tools; do
+		if [ -z "$(command -v "$tool")" ]; then
+			missing_tools+="\n - $tool"
+			case "$tool" in
+				"mtr")
+					disabled_feat="AS path tracing"
+					TRACEASNPATH=false
+					;;
+				"jq")
+					disabled_feat="IP reputation, RIPEstat BGP info and RPKI ROA lookups"
+					BGPSTAT_LOOKUP=false
+					RPKI_LOOKUP=false
+					REPUTATION_LOOKUP=false
+					;;
+				"ipcalc")
+					disabled_feat="CIDR deaggregation"
+					HAVE_IPCALC=false
+					;;
+				"grepcidr")
+					disabled_feat="IXP prefix detection"
+					IXP_DETECTION=false
+					;;
+			esac
+
+			disabled_features+="\n - ${disabled_feat}"
+		fi
+	done
+
+	if [ -n "$missing_tools" ]; then
+		BoxHeader "! WARNING !"
+		echo -e "\nThe following tools were not found on this system:" \
+				"${red} ${missing_tools}${default}"
+
+		if [ -n "$disabled_features" ]; then
+			echo -e "\nThe following features will be disabled:" \
+					"${yellow}${disabled_features}${default}"
+		fi
+
+		echo -e "\nPlease install the necessary prerequisite packages\nfor your system by following these instructions:" \
+				"\n\n>> ${blue}https://github.com/nitefood/asn#prerequisite-packages${default} <<\n"
+
+		[[ "$HARD_FAIL" = true ]] && PrintErrorAndExit "Can not continue without (at least) the following tools: ${prerequisite_tools// /, }"
+
+		echo -n "${lightgreybg}Press ENTER to continue...${default}"
+		# shellcheck disable=SC2034
+		read -r key
+	fi
+
+	if [ "$REPUTATION_LOOKUP" = true ]; then
+		# Read Auth0 Signals (IP reputation API) token from file
+		SIGNALS_TOKEN=""
+		if [ -r "$SIGNALS_TOKEN_FILENAME" ]; then
+			SIGNALS_TOKEN=$(tr -d ' \n\r\t' < "$SIGNALS_TOKEN_FILENAME")
+		fi
+		if [ -z "$SIGNALS_TOKEN" ]; then
+			# warn the user about the limits of anonymous Signals queries
+			echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
+				"\n\nNo Auth0 Signals token found, so running anonymously.\n\nConsider registering at" \
+				"${blue}https://auth0.com/signals/api/signup${default}\nto obtain a free token and increase" \
+				"your IP reputation\nquery limit from 100 hits/day to 40000 hits/day.\n\nAfter getting your API token, copy and paste it inside" \
+				"\n${green}$SIGNALS_TOKEN_FILENAME${default} and it will be used automatically." \
+				"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
+		fi
+	fi
+
+	# check for `gdate` presence (MacOS coreutils), otherwise fall back to plain `date` (cheers @Antonio-Prado)
+	if [ -x "$(command -v gdate)" ]; then
+		date() { gdate "$@"; }
+		export -f date
+	fi
+
+	IFS="$saveIFS"
+}
+
 # Color scheme
 IFS=$'\n\t'
 green=$'\e[32m'
@@ -929,6 +1085,8 @@ black=$'\e[30m'
 lightgreybg=$'\e[47m\e[30m'
 bluebg=$'\e[44m\e[30m'
 redbg=$'\e[30m\e[101m'
+greenbg=$'\e[42m\e[30m'
+yellowbg=$'\e[43m\e[30m'
 default=$'\e[0m'
 
 # External API token for Auth0 Signals (IP reputation lookup)
@@ -936,7 +1094,6 @@ SIGNALS_TOKEN_FILENAME="$HOME/.asn/signals_token"
 
 # PeeringDB list of IXP prefixes
 peeringdb_dataset=""
-IXP_DETECTION=true
 
 # Sigint trapping
 NO_ERROR_ON_INTERRUPT=false
@@ -954,6 +1111,9 @@ if [[ $# -lt 1 ]]; then
 	PrintUsage
 	exit 1
 fi
+
+FORCE_ORGSEARCH=false
+
 case "$1" in
 	"-n"|"--notrace")
 		if [[ $# -lt 2 ]]; then
@@ -975,6 +1135,16 @@ case "$1" in
 		DETAILED_TRACE=true
 		userinput="$2"
 		;;
+	"-o"|"--organization")
+		if [[ $# -lt 2 ]]; then
+			PrintUsage
+			echo -e "Error: missing ${red}TARGET${default}\n"
+			exit 1
+		else
+			FORCE_ORGSEARCH=true
+			userinput=$(echo "$@" | cut -d ' ' -f 2- | sed -e 's/^[ \t]*//')
+		fi
+		;;
 	*)
 		if [ "${1:0:1}" = "-" ]; then
 			 PrintUsage
@@ -985,83 +1155,30 @@ case "$1" in
 			TRACEASNPATH=true
 			DETAILED_TRACE=false
 			ENABLE_ORGSEARCH=true
+			# shellcheck disable=2124
 			userinput="$@"
 		fi
 		;;
 esac
 
-# Check prerequisites
-# TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed
-if [ -z "$(command -v coproc)" ]; then
-	echo -e "\n${red}ERROR: ${white}program '${red}coproc${white}' not found on this system.\n${white}This script requires BASH v4.2+ to run.\nIf you're on MacOS please install an updated version with:" \
-		"\n\n${green}brew install bash${white}\n"
-	exit 1
-fi
-if [ -z "$(command -v whois)" ]; then
-	echo -e "\n${red}ERROR: ${white}program '${red}whois${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install whois${white} on Debian-based linux distributions)\n"
-	exit 1
-fi
-if [ -z "$(command -v host)" ]; then
-	echo -e "\n${red}ERROR: ${white}program '${red}host${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install bind9-host${white} on Debian-based linux distributions)\n"
-	exit 1
-fi
-if [ -z "$(command -v curl)" ]; then
-	echo -e "\n${red}ERROR: ${white}program '${red}curl${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install curl${white} on Debian-based linux distributions)\n"
-	exit 1
-fi
-if [ -z "$(command -v grepcidr)" ]; then
-	# won't be able to parse data from PeeringDB in order to detect IXP prefixes, but no hard fail
-	echo -e "\n${yellow}WARNING: ${white}program '${red}grepcidr${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install grepcidr${white}" \
-		"on Debian-based linux distributions)\nto enable IXP prefix detection using PeeringDB data${default}"
-	IXP_DETECTION=false
-fi
-if [ $TRACEASNPATH = true ] && [ -z "$(command -v mtr)" ]; then
-	echo -e "\n${yellow}WARNING: ${white}program '${red}mtr${white}' not found on this system.\nPlease install it (for example with ${green}sudo apt install mtr-tiny${white}" \
-		"\non Debian-based linux distributions) to enable AS path tracing"
-	TRACEASNPATH=false
-fi
-if [ -z "$(command -v jq)" ]; then
-	# won't be able to parse data from RIPEstat, RPKI Validator and IP reputation data, but no hard fail
-	echo -e "\n${yellow}WARNING: ${white}program '${red}jq${white}' not found on this system.\n\nPlease install it (for example with ${green}sudo apt install jq${white}" \
-		"on Debian-based linux distributions)\nto enable IP reputation, RIPEstat BGP info and RPKI ROA lookups${default}"
-	BGPSTAT_LOOKUP=false
-	RPKI_LOOKUP=false
-	REPUTATION_LOOKUP=false
-else
-	BGPSTAT_LOOKUP=true
-	RPKI_LOOKUP=true
-	REPUTATION_LOOKUP=true
-	# Read Auth0 Signals (IP reputation API) token from file
-	SIGNALS_TOKEN=""
-	if [ -r "$SIGNALS_TOKEN_FILENAME" ]; then
-		SIGNALS_TOKEN=$(tr -d ' \n\r\t' < "$SIGNALS_TOKEN_FILENAME")
-	fi
-	if [ -z "$SIGNALS_TOKEN" ]; then
-		# warn the user about the limits of anonymous Signals queries
-		echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
-			"\n\nNo Auth0 Signals token found, so running anonymously.\n\nConsider registering at" \
-			"${blue}https://auth0.com/signals/api/signup${default}\nto obtain a free token and increase" \
-			"your IP reputation\nquery limit from 100 hits/day to 40000 hits/day.\n\nAfter getting your API token, copy and paste it inside" \
-			"\n${green}$SIGNALS_TOKEN_FILENAME${default} and it will be used automatically." \
-			"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
-	fi
-fi
-if [ -z "$(command -v ipcalc)" ]; then
-	# won't be able to aggregate netblocks into CIDR prefixes during Search by Organization, but no hard fail
-	HAVE_IPCALC=false
-else
-	HAVE_IPCALC=true
-fi
-# check for `gdate` presence (MacOS coreutils), otherwise fall back to plain `date` (cheers @Antonio-Prado)
-if [ -x "$(command -v gdate)" ]; then
-	date() { gdate "$@"; }
-	export -f date
-fi
+#* Check prerequisite and optional tools
+CheckPrerequisites
 
 local_wanip=""
 HAVE_IPV6=false
 BoxHeader "ASN lookup for $userinput"
+
+if [ "$FORCE_ORGSEARCH" = true ]; then
+	# user passed the "-o|--organization" switch
+	ORG_FILTER=false
+	declare -a orgfilters_array
+	declare -a excl_orgfilters_array
+	SearchByOrg "$userinput"
+	exit 0
+fi
+
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
+
 if [ -z "$input" ]; then
 	# Input is not an IP Address. Check if it is a number (ASN)
 	asn=$(echo "$userinput" | sed 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
@@ -1071,8 +1188,9 @@ if [ -z "$input" ]; then
 			echo -e -n "\n${blue}- Resolving \"$userinput\"... "
 			ip=$(ResolveHostnameToIPList "$userinput")
 			if [ -z "$ip" ]; then
-				echo ""
-				PrintErrorAndExit "Error: unable to resolve hostname"
+				echo -e "${red}Error: unable to resolve hostname${default}" \
+						"\n\n(Hint: if you wanted to search by organization, try the ${blue}'-o'${default} switch)\n"
+				exit 1
 			fi
 			numips=$(echo "$ip" | wc -l)
 			[[ $numips = 1 ]] && s="" || s="es"
@@ -1109,7 +1227,7 @@ if [ -z "$input" ]; then
 			exit 0
 		else
 			# not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
-			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: Search by ORGANIZATION requires no command line switches"
+			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: To search by organization, please pass the [-o|--organization] command line switch (or no switch at all)"
 			ORG_FILTER=false
 			declare -a orgfilters_array
 			declare -a excl_orgfilters_array
@@ -1124,13 +1242,24 @@ if [ -z "$input" ]; then
 		echo -e "\n${bluebg} AS Number ──────>${default} ${red}${asn}"
 		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
 		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
-		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}\n"
+		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}"
 		if [ "$BGPSTAT_LOOKUP" = true ]; then
+			BoxHeader "BGP informations for AS${asn} (${found_asname})"
+			echo ""
 			QueryRipestat "${asn}"
-			if [ -n "$ripestat_data" ]; then
-				echo -e "${bluebg} IPv4 Prefixes ──>${default} ${green}${ripestat_ipv4}"
-				echo -e "${bluebg} IPv6 Prefixes ──>${default} ${yellow}${ripestat_ipv6}"
-				echo -e "${bluebg} BGP Neighbours ─>${default} ${blue}${ripestat_bgp}${default}\n"
+			if [ -n "$ripestat_routing_data" ]; then
+				echo -e "${bluebg} IPv4 Prefixes ─────>${default} ${green}${ripestat_ipv4}"
+				echo -e "${bluebg} IPv6 Prefixes ─────>${default} ${yellow}${ripestat_ipv6}"
+				echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}"
+			fi
+			if [ -n "$ripestat_neighbours_data" ]; then
+				[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
+				[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
+				[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
+				BoxHeader "Peering informations for AS${asn} (${found_asname})"
+				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
+				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
+				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n\n"
 			fi
 		fi
 		tput sgr0
