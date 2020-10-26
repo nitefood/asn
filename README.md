@@ -33,7 +33,7 @@ The script uses the following services for data retrieval:
 * [RIPE RPKI Validator](https://rpki-validator.ripe.net/)
 * [Auth0 Signals](https://auth0.com/signals)
 
-Requires Bash v4.2+. Tested on: 
+Requires Bash v4.2+. Tested on:
 
 * Linux
 * FreeBSD
@@ -73,7 +73,7 @@ Requires Bash v4.2+. Tested on:
 ![pathtrace](https://user-images.githubusercontent.com/24555810/96940658-9b86fc00-14d0-11eb-8a46-e8dc373f2537.png)
 
 
-* *ASPath trace traversing both a PNI (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> ROSTELECOM through DE-CIX at hop 14)*
+* *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> ROSTELECOM through DE-CIX at hop 14)*
 
 ![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/96941621-2e289a80-14d3-11eb-95b7-99c1bd3b2add.png)
 
@@ -116,7 +116,7 @@ This script requires **BASH v4.2** or later. Some additional packages are also r
 * **MacOS** (using [Homebrew](https://brew.sh)):
 
   `brew install bash coreutils curl whois mtr jq ipcalc grepcidr && brew link mtr`
-  
+
   *(Note for MacOS users: if `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it)*
 
 ### Script download
@@ -141,7 +141,7 @@ In order to do so, you can use the following command:
 
 ## Usage
 
-#####*Syntax*
+##### *Syntax*
 
 * `asn <ASnumber>` -- _to lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)_
 * `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6), IP reputation and ASN data_
@@ -149,7 +149,7 @@ In order to do so, you can use the following command:
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
 * `asn [-o] <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
 
-#####*Path tracing and reputation*
+##### *Path tracing and reputation*
 
 - AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
 - Geolocation and organization data is taken from pWhois, while IP reputation data is taken from Auth0 Signals.
@@ -163,12 +163,12 @@ In order to do so, you can use the following command:
 
 ##### *Organization search (-o)*
 
-* The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
+- The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
   In order to force an organization search (for example for Orgs containing `.` in their name), pass the `[-o|--organization]` command line switch.
 
-#####*IXP detection and unannounced prefixes*
+##### *IXP detection and unannounced prefixes*
 
-- The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes. 
+- The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
 - The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with some [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
 
 ## Thanks
