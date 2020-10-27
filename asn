@@ -609,7 +609,7 @@ SearchByOrg(){
 				netblocks_output=""
 				if [ "$ipversion" = "4" ]; then
 					# Parse IPv4 NETBLOCKS
-					netblocks=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^*>")
+					netblocks=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>")
 					netblocks_header="            IPv4 NET RANGE                | INFO"
 					for netblock in $netblocks; do
 						prefix=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 1)
