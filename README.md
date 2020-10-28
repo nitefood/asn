@@ -12,6 +12,7 @@ Features:
   * **Organization name**
   * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
   * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
+  * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
 
 - It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
 - It will also detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
@@ -38,7 +39,7 @@ Requires Bash v4.2+. Tested on:
 * Linux
 * FreeBSD
 * Windows (WSL2, Cygwin)
-* MacOS *(thanks [Antonio Prado](https://github.com/Antonio-Prado))*
+* MacOS *(thanks [Antonio Prado](https://github.com/Antonio-Prado) and Alessandro Barisone)*
 
 ---
 
@@ -58,9 +59,9 @@ Requires Bash v4.2+. Tested on:
 
 ![ipv6lookup](https://user-images.githubusercontent.com/24555810/96518993-4f3b8200-126c-11eb-97c4-2d5d89763fe6.png)
 
-* _Autonomous system number lookup with BGP stats and peering informations_
+* _Autonomous system number lookup with BGP stats, peering and prefix informations_
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/97097178-c6f31d80-166d-11eb-9a6b-e9bad2a56510.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/97374503-bf738480-18b8-11eb-8214-4cbcd39fd4fa.png)
 
 * _Hostname lookup_
 

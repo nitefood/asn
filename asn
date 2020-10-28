@@ -104,6 +104,27 @@ QueryRipestat(){
 	fi
 	uncertain_peers="$resolved_uncertain_peers"
 
+	StatusbarMessage "Retrieving prefix allocations and announcements for AS$1 ($found_asname)"
+	ipv4_inetnums=""
+	ipv6_inetnums=""
+	for prefix in $(curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes | .[] | .prefix'); do
+		if [[ "$prefix" == *':'* ]]; then
+			inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
+							grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
+			for inet6num in $inet6nums; do
+				# exclude RIR supernets
+				prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
+				[[ "$prefix_size" -lt 29 ]] && continue || ipv6_inetnums+="${inet6num}\n"
+			done
+		else
+			ipv4_inetnums+=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
+							grep -m1 inetnum | cut -d ':' -f 2 | sed 's/^[ \t]*//' | xargs ipcalc -r | grep -v "deaggregate")
+			ipv4_inetnums+="\n"
+		fi
+	done
+
+	[[ -n "$ipv4_inetnums" ]] && ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
+	[[ -n "$ipv6_inetnums" ]] && ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
 	StatusbarMessage ""
 }
 
@@ -1259,8 +1280,13 @@ if [ -z "$input" ]; then
 				BoxHeader "Peering informations for AS${asn} (${found_asname})"
 				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
 				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
-				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n\n"
+				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
 			fi
+			BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
+			echo -e "\n${green}───── IPv4 ─────${default}"
+			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg}NONE${default}"
+			echo -e "\n${yellow}───── IPv6 ─────${default}"
+			[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg}NONE${default}"
 		fi
 		tput sgr0
 		echo ""
