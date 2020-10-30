@@ -704,9 +704,9 @@ SearchByOrg(){
 					StatusbarMessage "Looking up data for ${bluebg}${input}${lightgreybg}"
 					LookupASNAndRouteFromIP "$input"
 					(( longest=${#input}+1 ))
-					output=$(WhoisIP "$input")
+					WhoisIP "$input"
+					[[ "$REPUTATION_LOOKUP" = true ]] && ReputationLookup "$input"
 					StatusbarMessage ""
-					echo -e "$output"
 					continue
 				else
 					continue
@@ -828,6 +828,8 @@ SignalsAPIQuery(){ # output saved to $signals_response
 }
 
 ReputationLookup(){
+	# invoking with "ReputationLookup <ip> no_details" turns off detailed blacklist report
+	[[ "$2" == "no_details" ]] && DETAILED_REPORT=false || DETAILED_REPORT=true
 	StatusbarMessage "Looking up reputation for IP address ${bluebg}$1${lightgreybg}"
 	SignalsAPIQuery "https://signals.api.auth0.com/badip/$1"
 	StatusbarMessage ""
@@ -849,37 +851,39 @@ ReputationLookup(){
 		return
 	fi
 	badip_output="${red}❌ BAD (Address found in ${black_count} blacklist${s})${default}"
-	BoxHeader "Detailed IP reputation report for $input"
-	echo ""
-	# parse blacklists and collect bad tags associated with the IP address
-	echo -e "${bluebg} IP ADDRESS────>${default} ${white}$1"
-	echo -e "${bluebg} REPUTATION────>${default} $badip_output"
-	StatusbarMessage "Collecting detailed reputation data"
-	global_tags=""
-	blacklist_output=""
-	blacklists=$(echo "$signals_response" | jq -r '.response[]')
-	for blacklist in $(echo "$blacklists" | sort); do
-		SignalsAPIQuery "https://signals.api.auth0.com/metadata/badip/lists/$blacklist"
-		if [ "$REPUTATION_LOOKUP" = false ]; then
-			# we hit an error during last Signals API query, notify and move on
-			StatusbarMessage ""
-			echo -e "$signals_response\n\n"
-			return
-		fi
-		blacklist_details="$signals_response"
-		name=$(echo "$blacklist_details" | jq -r '.name')
-		group=$(echo "$blacklist_details" | jq -r '.group')
-		site=$(echo "$blacklist_details" | jq -r '.site')
-		tags=$(echo "$blacklist_details" | jq -r '.tags')
-		[[ -z "$global_tags" ]] && global_tags="$tags" || global_tags+=",$tags"
-		blacklist_output+="${bluebg} BLACKLIST HIT─>${default} ${red}[$group] ${yellow}${blacklist} (${name} -- ${blue}${site}${yellow})\n"
-	done
-	StatusbarMessage ""
-	unique_tags=$(echo "$global_tags" | tr ',' '\n' | sort -u  | tr '[:lower:]' '[:upper:]')
-	output_tags=""
-	for tag in $unique_tags; do output_tags+="${redbg} ${tag} ${default} "; done
-	echo -e "${bluebg} ABUSE TAGS────>${default} ${output_tags}"
-	echo -e "${blacklist_output}"
+	if [ "$DETAILED_REPORT" = true ]; then
+		BoxHeader "Detailed IP reputation report for $1"
+		echo ""
+		# parse blacklists and collect bad tags associated with the IP address
+		echo -e "${bluebg} IP ADDRESS────>${default} ${white}$1"
+		echo -e "${bluebg} REPUTATION────>${default} $badip_output"
+		StatusbarMessage "Collecting detailed reputation data"
+		global_tags=""
+		blacklist_output=""
+		blacklists=$(echo "$signals_response" | jq -r '.response[]')
+		for blacklist in $(echo "$blacklists" | sort); do
+			SignalsAPIQuery "https://signals.api.auth0.com/metadata/badip/lists/$blacklist"
+			if [ "$REPUTATION_LOOKUP" = false ]; then
+				# we hit an error during last Signals API query, notify and move on
+				StatusbarMessage ""
+				echo -e "$signals_response\n\n"
+				return
+			fi
+			blacklist_details="$signals_response"
+			name=$(echo "$blacklist_details" | jq -r '.name')
+			group=$(echo "$blacklist_details" | jq -r '.group')
+			site=$(echo "$blacklist_details" | jq -r '.site')
+			tags=$(echo "$blacklist_details" | jq -r '.tags')
+			[[ -z "$global_tags" ]] && global_tags="$tags" || global_tags+=",$tags"
+			blacklist_output+="${bluebg} BLACKLIST HIT─>${default} ${red}[$group] ${yellow}${blacklist} (${name} -- ${blue}${site}${yellow})\n"
+		done
+		StatusbarMessage ""
+		unique_tags=$(echo "$global_tags" | tr ',' '\n' | sort -u  | tr '[:lower:]' '[:upper:]')
+		output_tags=""
+		for tag in $unique_tags; do output_tags+="${redbg} ${tag} ${default} "; done
+		echo -e "${bluebg} ABUSE TAGS────>${default} ${output_tags}"
+		echo -e "${blacklist_output}"
+	fi
 }
 
 RPKILookup(){
@@ -1228,7 +1232,13 @@ if [ -z "$input" ]; then
 			for singleip in $ip; do
 				LookupASNAndRouteFromIP "$singleip"
 				WhoisIP "$singleip"
-				[[ "$REPUTATION_LOOKUP" = true ]] && ReputationLookup "$singleip"
+				if [ "$REPUTATION_LOOKUP" = true ]; then
+					if [ "$numips" = 1 ]; then
+						ReputationLookup "$singleip"
+					else
+						ReputationLookup "$singleip" no_details
+					fi
+				fi
 				# save the first IP from the dns lookup result
 				[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
 			done
@@ -1284,9 +1294,9 @@ if [ -z "$input" ]; then
 			fi
 			BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
 			echo -e "\n${green}───── IPv4 ─────${default}"
-			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg}NONE${default}"
+			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
 			echo -e "\n${yellow}───── IPv6 ─────${default}"
-			[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg}NONE${default}"
+			[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
 		fi
 		tput sgr0
 		echo ""
