@@ -619,72 +619,75 @@ SearchByOrg(){
 	while true; do
 		ShowMenu
 		searchresults=""
-		orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
-		NO_ERROR_ON_INTERRUPT=true
-		for ipversion in 4 6; do
-			NO_RESULTS=true
-			searchresults+=$(BoxHeader "IPv${ipversion} networks for organization \"${org}\"")
-			# iterate over Org-IDs related to the company (in case of multiple Org-IDs for a single Org-Name)
-			for orgid in $orgids; do
-				StatusbarMessage "Looking up IPv${ipversion} networks for organization ${bluebg}$org${lightgreybg} (Org-ID: ${bluebg}${orgid}${lightgreybg})"
-				netblocks_output=""
-				if [ "$ipversion" = "4" ]; then
-					# Parse IPv4 NETBLOCKS
-					netblocks=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>")
-					netblocks_header="            IPv4 NET RANGE                | INFO"
-					for netblock in $netblocks; do
-						prefix=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 1)
-						netname=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 2 | tr -d ' ')
-						netblock_type=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 3 | tr -d ' ')
-						if [ "$netblock_type" = "unknown" ]; then
-							nettype=""
-						else
-							nettype=" (${yellow}$netblock_type${default})"
-						fi
-						regdate=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 4 | tr -d ' ')
-						if [ "$HAVE_IPCALC" = true ]; then
-							# deaggregate IPv4 netblocks into CIDR prefixes for readability
-							prefix_spacing=19
-							trimmed_prefix=$(echo "$prefix" | tr -d ' ')
-							prefix=$(ipcalc -r "$trimmed_prefix" | grep -A1 "deaggregate" | tail -n 1)
-						else
-							# no ipcalc, use direct pWhois output
-							prefix_spacing=41
-						fi
-						netblocks_output+=$(printf "\n${blue}%${prefix_spacing}s${default} | ${green}%-45s${default} - Registered: ${magenta}%s${default}%s" "$prefix" "$netname" "$regdate" "$nettype")
-					done
-					[[ "$HAVE_IPCALC" = true ]] && netblocks_header="    IPv4 PREFIX     |       INFO"
-				else
-					# Parse IPv6 NETBLOCKS
-					netblocks=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | grep -E "^Net-(Range|Name|Handle|Type)|^Register-Date" |\
-						cut -d ':' -f 2- |\
-						sed 's/^ //g' |\
-						awk '{if (NR%5) {ORS=""} else {ORS="\n"}{print $0"|"}}') # cheers https://stackoverflow.com/a/35315421/5377165
-					netblocks_header="                       IPv6 NET RANGE                         | INFO"
-					for netblock in $netblocks; do
-						prefix=$(echo -e "$netblock" | cut -d '|' -f 1)
-						netname=$(echo -e "$netblock" | cut -d '|' -f 2)
-						nethandle=$(echo -e "$netblock" | cut -d '|' -f 3)
-						netname+=" (${nethandle})"
-						netblock_type=$(echo -e "$netblock" | cut -d '|' -f 4)
-						if [ "$netblock_type" = "unknown" ]; then
-							nettype=""
-						else
-							nettype=" (${yellow}$netblock_type${default})"
-						fi
-						regdate=$(echo -e "$netblock" | cut -d '|' -f 5)
-						prefix_spacing=61
-						netblocks_output+=$(printf "\n${blue}%${prefix_spacing}s${default} | ${green}%-45s${default} - Registered: ${magenta}%s${default}%s" "$prefix" "$netname" "$regdate" "$nettype")
-					done
-				fi
-				if [ -n "$netblocks_output" ]; then
-					# Print out netblocks
-					NO_RESULTS=false
-					searchresults+=$(echo -e "\n${red}Org-ID: ${magenta}${orgid}${red}${default}\n${netblocks_header}${netblocks_output}")
-					searchresults+="\n"
-				fi
+		[[ "$LOOKUP_ALL_RESULTS" == true ]] && orgs_to_lookup=("${orgs[@]}") || orgs_to_lookup=("$org")
+		for org in "${orgs_to_lookup[@]}"; do
+			orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+			NO_ERROR_ON_INTERRUPT=true
+			for ipversion in 4 6; do
+				NO_RESULTS=true
+				searchresults+=$(BoxHeader "IPv${ipversion} networks for organization \"${org}\"")
+				# iterate over Org-IDs related to the company (in case of multiple Org-IDs for a single Org-Name)
+				for orgid in $orgids; do
+					StatusbarMessage "Looking up IPv${ipversion} networks for organization ${bluebg}$org${lightgreybg} (Org-ID: ${bluebg}${orgid}${lightgreybg})"
+					netblocks_output=""
+					if [ "$ipversion" = "4" ]; then
+						# Parse IPv4 NETBLOCKS
+						netblocks=$(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>")
+						netblocks_header="            IPv4 NET RANGE                | INFO"
+						for netblock in $netblocks; do
+							prefix=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 1)
+							netname=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 2 | tr -d ' ')
+							netblock_type=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 3 | tr -d ' ')
+							if [ "$netblock_type" = "unknown" ]; then
+								nettype=""
+							else
+								nettype=" (${yellow}$netblock_type${default})"
+							fi
+							regdate=$(echo -e "$netblock" | cut -d '>' -f 2 | cut -d '|' -f 4 | tr -d ' ')
+							if [ "$HAVE_IPCALC" = true ]; then
+								# deaggregate IPv4 netblocks into CIDR prefixes for readability
+								prefix_spacing=19
+								trimmed_prefix=$(echo "$prefix" | tr -d ' ')
+								prefix=$(ipcalc -r "$trimmed_prefix" | grep -A1 "deaggregate" | tail -n 1)
+							else
+								# no ipcalc, use direct pWhois output
+								prefix_spacing=41
+							fi
+							netblocks_output+=$(printf "\n${blue}%${prefix_spacing}s${default} | ${green}%-45s${default} - Registered: ${magenta}%s${default}%s" "$prefix" "$netname" "$regdate" "$nettype")
+						done
+						[[ "$HAVE_IPCALC" = true ]] && netblocks_header="    IPv4 PREFIX     |       INFO"
+					else
+						# Parse IPv6 NETBLOCKS
+						netblocks=$(whois -h whois.pwhois.org "netblock6 org-id=${orgid}" | grep -E "^Net-(Range|Name|Handle|Type)|^Register-Date" |\
+							cut -d ':' -f 2- |\
+							sed 's/^ //g' |\
+							awk '{if (NR%5) {ORS=""} else {ORS="\n"}{print $0"|"}}') # cheers https://stackoverflow.com/a/35315421/5377165
+						netblocks_header="                       IPv6 NET RANGE                         | INFO"
+						for netblock in $netblocks; do
+							prefix=$(echo -e "$netblock" | cut -d '|' -f 1)
+							netname=$(echo -e "$netblock" | cut -d '|' -f 2)
+							nethandle=$(echo -e "$netblock" | cut -d '|' -f 3)
+							netname+=" (${nethandle})"
+							netblock_type=$(echo -e "$netblock" | cut -d '|' -f 4)
+							if [ "$netblock_type" = "unknown" ]; then
+								nettype=""
+							else
+								nettype=" (${yellow}$netblock_type${default})"
+							fi
+							regdate=$(echo -e "$netblock" | cut -d '|' -f 5)
+							prefix_spacing=61
+							netblocks_output+=$(printf "\n${blue}%${prefix_spacing}s${default} | ${green}%-45s${default} - Registered: ${magenta}%s${default}%s" "$prefix" "$netname" "$regdate" "$nettype")
+						done
+					fi
+					if [ -n "$netblocks_output" ]; then
+						# Print out netblocks
+						NO_RESULTS=false
+						searchresults+=$(echo -e "\n${red}Org-ID: ${magenta}${orgid}${red}${default}\n${netblocks_header}${netblocks_output}")
+						searchresults+="\n"
+					fi
+				done
+				[[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
 			done
-			[[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
 		done
 		NO_ERROR_ON_INTERRUPT=false
 		StatusbarMessage ""
@@ -757,6 +760,7 @@ Choose an organization or enter:
 - <${green}text${default}> to FILTER FOR A STRING
 - <${blue}-${default}> to EXCLUDE A STRING
 - <${blue}x${default}> to REMOVE ALL FILTERS
+- <${blue}a${default}> to LOOKUP ALL RESULTS (max 10)
 - <${blue}q${default}> to QUIT
 $IPCALC_WARNING
 >> "
@@ -766,6 +770,7 @@ $IPCALC_WARNING
 	select choice in "${orgs[@]}"; do
 		for org in "${orgs[@]}"; do
 			if [[ "$org" = "$choice" ]]; then
+				LOOKUP_ALL_RESULTS=false
 				break 2
 			fi
 		done
@@ -791,6 +796,16 @@ $IPCALC_WARNING
 					declare -a excl_orgfilters_array
 					SearchByOrg
 				fi
+			;;
+			"a"|"A")
+				# lookup all results
+				if [ "${#orgs[@]}" -gt 10 ]; then
+					echo -en "\n${redbg}Too many results! Please add some filters!${default}\n"
+					sleep 2
+					continue
+				fi
+				LOOKUP_ALL_RESULTS=true
+				break
 			;;
 			*)
 				# apply filter to the results
