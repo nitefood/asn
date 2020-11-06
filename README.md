@@ -15,13 +15,14 @@ Features:
   * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
 
 - It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
-- It will also detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
+- It will detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
 - It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated against [RIPE RPKI Validator](https://rpki-validator.ripe.net/). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
-- It will also perform **IP reputation** lookups (especially useful when investigating foreign IPs from log files).
-- It is also possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
+- It will perform **IP reputation** lookups (especially useful when investigating foreign IPs from log files).
+- It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
+- It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
 
 Screenshots for every lookup option are below.
 
@@ -90,6 +91,12 @@ Requires Bash v4.2+. Tested on:
 
 ![search_by_org](https://user-images.githubusercontent.com/24555810/96520260-f7eae100-126e-11eb-8987-52b97c75faaf.png)
 
+### Suggested ASNs search ###
+
+* _Suggested ASNs for "google"_
+
+![asnsuggest](https://user-images.githubusercontent.com/24555810/98309344-7e6f2480-1fca-11eb-9ec6-df2cb63a62ce.png)
+
 ---
 
 ## Installation
@@ -149,6 +156,7 @@ In order to do so, you can use the following command:
 * `asn [-n|-d] <host.name.tld>` -- _to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)_
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
 * `asn [-o] <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
+* `asn [-s] <Name>` -- _to search for all ASNs matching a given name. Can be used to map all ASNs related to a given company_
 
 ##### *Path tracing and reputation*
 
@@ -166,6 +174,10 @@ In order to do so, you can use the following command:
 
 - The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
   In order to force an organization search (for example for Orgs containing `.` in their name), pass the `[-o|--organization]` command line switch.
+
+##### *ASN suggest (-s)*
+
+- The script will try to find ASNs matching the given search string, using the RIPEStat API.
 
 ##### *IXP detection and unannounced prefixes*
 

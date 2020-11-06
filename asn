@@ -128,6 +128,42 @@ QueryRipestat(){
 	StatusbarMessage ""
 }
 
+RIPESuggestASN(){
+	TRIM_WHITESPACES=false
+	input="$1"
+	while true; do
+		StatusbarMessage "Retrieving suggested ASNs for ${bluebg}${input}${lightgreybg}"
+		ripe_suggest_output=$(curl -s "https://stat.ripe.net/data/searchcomplete/data.json?resource=${input}&sourceapp=nitefood-asn" | \
+								jq -r '.data.categories | .[] | select ( .category == "ASNs" ) | .suggestions[]')
+		StatusbarMessage ""
+		if [ -n "$ripe_suggest_output" ]; then
+			found_suggestions=$(echo -e "$ripe_suggest_output" | jq -r '.description' | sort -u)
+			for suggestion in $found_suggestions; do
+				echo -e "\n${green}$suggestion${default}"
+				for suggestion_asn in $(echo -e "$ripe_suggest_output" | jq -r 'select (.description=="'"$suggestion"'") | .value'); do
+					echo -e "\t${yellow}$suggestion_asn${default}"
+				done
+			done
+			echo ""
+			return
+		elif [ "$TRIM_WHITESPACES" = false ]; then
+			TRIM_WHITESPACES=true
+			oldinput="$input"
+			# shellcheck disable=SC2001
+			input=$(echo "$oldinput" | sed 's/[ \t]*//g')
+			if [ "$input" = "$oldinput" ]; then
+				echo -e "\n${redbg}No suggestions found${default}\n"
+				return
+			else
+				continue
+			fi
+		else
+			echo -e "\n${redbg}No suggestions found${default}\n"
+			return
+		fi
+	done
+}
+
 WhoisIP(){
 	full_whois_data=$(whois "$1")
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
@@ -222,6 +258,7 @@ PrintUsage(){
 			"\n\n  ${green}-d, --detailed\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\t(This option also enables RPKI validation/BGP hijacking detection for every hop)" \
 			"\n\n  ${green}-n, --notrace\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
+			"\n\n  ${green}-s, --suggest\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
 			"\n\n  ${green}-o, --organization\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
 			"\n\nSupported targets:" \
 			"\n\n  ${blue}<AS Number>${default}\n\tLookup matching and BGP announcements/neighbours data." \
@@ -1024,7 +1061,7 @@ CheckPrerequisites() {
 	disabled_features=""
 	HARD_FAIL=false
 
-	BGPSTAT_LOOKUP=true
+	RIPESTAT_LOOKUP=true
 	RPKI_LOOKUP=true
 	REPUTATION_LOOKUP=true
 	HAVE_IPCALC=true
@@ -1048,8 +1085,8 @@ CheckPrerequisites() {
 					TRACEASNPATH=false
 					;;
 				"jq")
-					disabled_feat="IP reputation, RIPEstat BGP info and RPKI ROA lookups"
-					BGPSTAT_LOOKUP=false
+					disabled_feat="IP reputation, RIPEstat BGP info / ASN suggestions, and RPKI ROA lookups"
+					RIPESTAT_LOOKUP=false
 					RPKI_LOOKUP=false
 					REPUTATION_LOOKUP=false
 					;;
@@ -1153,6 +1190,7 @@ if [[ $# -lt 1 ]]; then
 fi
 
 FORCE_ORGSEARCH=false
+SUGGEST_SEARCH=false
 
 case "$1" in
 	"-n"|"--notrace")
@@ -1182,6 +1220,16 @@ case "$1" in
 			exit 1
 		else
 			FORCE_ORGSEARCH=true
+			userinput=$(echo "$@" | cut -d ' ' -f 2- | sed -e 's/^[ \t]*//')
+		fi
+		;;
+	"-s"|"--suggest")
+		if [[ $# -lt 2 ]]; then
+			PrintUsage
+			echo -e "Error: missing ${red}TARGET${default}\n"
+			exit 1
+		else
+			SUGGEST_SEARCH=true
 			userinput=$(echo "$@" | cut -d ' ' -f 2- | sed -e 's/^[ \t]*//')
 		fi
 		;;
@@ -1216,6 +1264,14 @@ if [ "$FORCE_ORGSEARCH" = true ]; then
 	SearchByOrg "$userinput"
 	exit 0
 fi
+
+if [ "$SUGGEST_SEARCH" = true ]; then
+	# user passed the "-s|--suggest" switch
+	[[ "$RIPESTAT_LOOKUP" = false ]] &&	PrintErrorAndExit "Please install the necessary prerequisite tool!"
+	RIPESuggestASN "$userinput"
+	exit 0
+fi
+
 
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 
@@ -1289,7 +1345,7 @@ if [ -z "$input" ]; then
 		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
 		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
 		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}"
-		if [ "$BGPSTAT_LOOKUP" = true ]; then
+		if [ "$RIPESTAT_LOOKUP" = true ]; then
 			BoxHeader "BGP informations for AS${asn} (${found_asname})"
 			echo ""
 			QueryRipestat "${asn}"
