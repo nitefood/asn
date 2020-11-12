@@ -1009,21 +1009,24 @@ IsIXP() {
 GetIXPresence(){
 	asn="$1"
 	ixps=""
+	outputix=""
 	netlist=$(curl -s "https://www.peeringdb.com/api/net?asn__in=$asn" | jq -r '.data[].id')
 	if [ -n "$netlist" ]; then
 		for net in $netlist; do
 			ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
 		done
-		outputix=""
-		for ix in $(echo "$ixps" | sort -u); do
-			[[ -n "$outputix" ]] && outputix+=" | "
-			outputix+="${blue}${ix}${default}"
-		done
-		echo -e "$outputix"
+		if [ -n "$ixps" ]; then
+			for ix in $(echo "$ixps" | sort -u); do
+				[[ -n "$outputix" ]] && outputix+=" | "
+				outputix+="${blue}${ix}${default}"
+			done
+		else
+			outputix="${redbg} NONE ${default}"
+		fi
 	else
-		echo -e "${redbg} NONE ${default}"
+		outputix="${redbg} NONE ${default}"
 	fi
-	echo ""
+	echo -e "$outputix"
 }
 
 PrintErrorAndExit(){
