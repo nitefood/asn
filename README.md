@@ -10,6 +10,7 @@ Features:
 
 * It will lookup relevant Autonomous System information for any given AS number, including:
   * **Organization name**
+  * **IXP Presence** (*Internet Exchange facilities where the AS is present*)
   * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
   * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
   * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
@@ -62,7 +63,7 @@ Requires Bash v4.2+. Tested on:
 
 * _Autonomous system number lookup with BGP stats, peering and prefix informations_
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/97374503-bf738480-18b8-11eb-8214-4cbcd39fd4fa.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/98995579-d3162080-2531-11eb-886a-c929ad9dc24c.png)
 
 * _Hostname lookup_
 

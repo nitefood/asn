@@ -1006,6 +1006,26 @@ IsIXP() {
 	fi
 }
 
+GetIXPresence(){
+	asn="$1"
+	ixps=""
+	netlist=$(curl -s "https://www.peeringdb.com/api/net?asn__in=$asn" | jq -r '.data[].id')
+	if [ -n "$netlist" ]; then
+		for net in $netlist; do
+			ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
+		done
+		outputix=""
+		for ix in $(echo "$ixps" | sort -u); do
+			[[ -n "$outputix" ]] && outputix+=" | "
+			outputix+="${blue}${ix}${default}"
+		done
+		echo -e "$outputix"
+	else
+		echo -e "${redbg} NONE ${default}"
+	fi
+	echo ""
+}
+
 PrintErrorAndExit(){
 	echo -e "\n${redbg}${1}${default}\n"
 	tput sgr0
@@ -1346,6 +1366,8 @@ if [ -z "$input" ]; then
 		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
 		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}"
 		if [ "$RIPESTAT_LOOKUP" = true ]; then
+			echo -en "${bluebg} Peering @IXPs ──>${default} "
+			GetIXPresence "$asn"
 			BoxHeader "BGP informations for AS${asn} (${found_asname})"
 			echo ""
 			QueryRipestat "${asn}"
