@@ -942,13 +942,13 @@ RPKILookup(){
 	# $1=asn, $2=prefix
 	found_rpkivalidity=""
 	INVALID_ROA=false
-	rpki_apioutput=$(curl -s "https://rpki-validator.ripe.net/api/bgp/validity/?asn=$1&prefix=$2")
+	rpki_apioutput=$(curl -s "https://stat.ripe.net/data/rpki-validation/data.json?resource=$1&prefix=$2&sourceapp=nitefood-asn")
 	is_valid_json=$(echo "$rpki_apioutput" | jq type 2>/dev/null)
 	if [ -n "$is_valid_json" ]; then
-		found_rpkivalidity=$(echo "$rpki_apioutput" | jq -r '.data.validity')
-		found_rpkiroacount=$(echo "$rpki_apioutput" | jq -r '.metadata.totalCount')
-		found_rpkiprefix=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].prefix')
-		found_rpkiorigins=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[] | select (.prefix=="'"$found_rpkiprefix"'") | .origin')
+		found_rpkivalidity=$(echo "$rpki_apioutput" | jq -r '.data.status' | tr '[:lower:]' '[:upper:]')
+		found_rpkiroacount=$(echo "$rpki_apioutput" | jq '.data.validating_roas | length')
+		found_rpkiprefix=$(echo "$rpki_apioutput" | jq -r '.data.validating_roas[0].prefix')
+		found_rpkiorigins=$(echo "$rpki_apioutput" | jq -r '.data.validating_roas[] | select (.prefix=="'"$found_rpkiprefix"'") | .origin')
 		found_rpkiorigin="["
 		origin_count=0
 		for origin in $found_rpkiorigins; do
@@ -958,7 +958,7 @@ RPKILookup(){
 		done
 		found_rpkiorigin+="]"
 
-		found_rpkimaxlength=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].maxLength')
+		found_rpkimaxlength=$(echo "$rpki_apioutput" | jq -r '.data.validating_roas[0].max_length')
 		# TODO: iterate over ROAs (.data.validatingRoas[]) to give deeper source RIR insight
 		#found_rpkisource=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].source')
 		case "$found_rpkivalidity" in
