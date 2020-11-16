@@ -947,8 +947,17 @@ RPKILookup(){
 	if [ -n "$is_valid_json" ]; then
 		found_rpkivalidity=$(echo "$rpki_apioutput" | jq -r '.data.validity')
 		found_rpkiroacount=$(echo "$rpki_apioutput" | jq -r '.metadata.totalCount')
-		found_rpkiorigin=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].origin')
 		found_rpkiprefix=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].prefix')
+		found_rpkiorigins=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[] | select (.prefix=="'"$found_rpkiprefix"'") | .origin')
+		found_rpkiorigin="["
+		origin_count=0
+		for origin in $found_rpkiorigins; do
+			[[ "$origin_count" -gt 0 ]] && found_rpkiorigin+=", "
+			found_rpkiorigin+="AS$origin"
+			(( origin_count++ ))
+		done
+		found_rpkiorigin+="]"
+
 		found_rpkimaxlength=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].maxLength')
 		# TODO: iterate over ROAs (.data.validatingRoas[]) to give deeper source RIR insight
 		#found_rpkisource=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].source')
@@ -965,7 +974,7 @@ RPKILookup(){
 				if [ "$found_rpkiorigin" = "0" ]; then
 					rpki_output="${red}❌ ${found_rpkivalidity} (no Origin authorized to announce Prefix '${found_rpkiprefix}' with Max-Length=${found_rpkimaxlength})${default}"
 				else
-					rpki_output="${red}❌ ${found_rpkivalidity} (expected Origin ${found_rpkiorigin} for Prefix '${found_rpkiprefix}' with Max-Length=${found_rpkimaxlength})${default}"
+					rpki_output="${red}❌ ${found_rpkivalidity} (expected Origin(s): ${found_rpkiorigin} for Prefix '${found_rpkiprefix}' with Max-Length=${found_rpkimaxlength})${default}"
 				fi
 				;;
 			"INVALID_LENGTH")
