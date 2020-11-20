@@ -178,10 +178,12 @@ WhoisIP(){
 		[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
 		found_asn="N/A (address not announced)"
 		found_asname=""
+		IPGeoRepLookup "$1"
 		# check if it's an IXP, otherwise fall back to generic whois
 		IsIXP "$1"
 		if [ -n "$ixp_data" ]; then
 			pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
+			ip_type_data=" ${yellowbg} Internet Exchange ${default}"
 		else
 			pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
 		fi
@@ -192,6 +194,8 @@ WhoisIP(){
 		[[ -z "$pwhois_net" ]] && pwhois_net="N/A"
 		if [ -n "$ixp_geo" ]; then
 			pwhois_geo="$ixp_geo"
+		elif [ -n "$ip_geo_data" ]; then
+			pwhois_geo="$ip_geo_data"
 		else
 			pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
 		fi
@@ -204,11 +208,13 @@ WhoisIP(){
 		output_asname=""
 	fi
 	rpki_output=""
-	if [ "$RPKI_LOOKUP" = true ] && [ "$UNANNOUNCED_PREFIX" = false ]; then
+	if [ "$UNANNOUNCED_PREFIX" = false ]; then
 		StatusbarMessage "Checking RPKI validity for ${bluebg}AS${found_asn}${lightgreybg} and prefix ${bluebg}${found_route}${lightgreybg}"
 		RPKILookup "$found_asn" "$found_route"
 		StatusbarMessage ""
 		echo ""
+	else
+		rpki_output="${red}N/A (address not announced)${default}"
 	fi
 
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
@@ -216,10 +222,9 @@ WhoisIP(){
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
-	[[ -n "$rpki_output" ]] && printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
-	[[ "$REPUTATION_LOOKUP" = true ]] && last_symbol="├" || last_symbol="└"
-	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "$last_symbol" "$pwhois_geo"
-	[[ "$REPUTATION_LOOKUP" = false ]] && echo ""
+	printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
+	[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "$ip_type_data"
+	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "├" "$pwhois_geo"
 }
 
 LookupASNAndRouteFromIP(){
@@ -283,23 +288,27 @@ PwhoisLookup(){
 		if [ -n "$pwhois_asorg" ] && [ "$pwhois_net" = "$pwhois_org" ]; then
 			pwhois_org="$pwhois_asorg"
 		fi
-		if echo "$pwhois_output" | grep -q -E "^Geo-"; then
-			# use "Geo-" fields in pWhois output
-			cityfield="Geo-City"
-			regionfield="Geo-Region"
-			ccfield="Geo-CC"
-		else
-			cityfield="City"
-			regionfield="Region"
-			ccfield="Country-Code"
-		fi
-		pwhois_city=$(echo "$pwhois_output" | grep -m1 -E "^${cityfield}" | cut -d ':' -f 2 | sed 's/^ //')
-		pwhois_region=$(echo "$pwhois_output" | grep -m1 -E "^${regionfield}" | cut -d ':' -f 2 | sed 's/^ //')
-		pwhois_cc=$(echo "$pwhois_output" | grep -m1 -E "^${ccfield}" | cut -d ':' -f 2 | sed 's/^ //')
-		if [ "$pwhois_city" = "NULL" ] || [ "$pwhois_region" = "NULL" ]; then
-			pwhois_geo="$pwhois_cc"
-		else
-			pwhois_geo="$pwhois_city, $pwhois_region ($pwhois_cc)"
+		IPGeoRepLookup "$1"
+		pwhois_geo="$ip_geo_data"
+		if [ -z "$ip_geo_data" ]; then
+			if echo "$pwhois_output" | grep -q -E "^Geo-"; then
+				# use "Geo-" fields in pWhois output
+				cityfield="Geo-City"
+				regionfield="Geo-Region"
+				ccfield="Geo-CC"
+			else
+				cityfield="City"
+				regionfield="Region"
+				ccfield="Country-Code"
+			fi
+			pwhois_city=$(echo "$pwhois_output" | grep -m1 -E "^${cityfield}" | cut -d ':' -f 2 | sed 's/^ //')
+			pwhois_region=$(echo "$pwhois_output" | grep -m1 -E "^${regionfield}" | cut -d ':' -f 2 | sed 's/^ //')
+			pwhois_cc=$(echo "$pwhois_output" | grep -m1 -E "^${ccfield}" | cut -d ':' -f 2 | sed 's/^ //')
+			if [ "$pwhois_city" = "NULL" ] || [ "$pwhois_region" = "NULL" ]; then
+				pwhois_geo="$pwhois_cc"
+			else
+				pwhois_geo="$pwhois_city, $pwhois_region ($pwhois_cc)"
+			fi
 		fi
 	else
 		pwhois_output="";
@@ -359,21 +368,15 @@ TraceASPath(){
 		headermsg="Trace to $userinput"
 	fi
 	BoxHeader "$headermsg"
+	# check if we're trying to trace an IPv6 from an IPv4-only box
+	echo "$host_to_trace" | grep -q ':' && is_ipv6=true || is_ipv6=false
+	if [ "$is_ipv6" = true ] && [ "$HAVE_IPV6" = false ]; then
+		PrintErrorAndExit "Error: cannot trace an IPv6 from this IPv4-only host!"
+	fi
 	echo ""
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
-	# cache the previously looked-up AS to save one lookup (target/last hop)
-	if [ -n "$ixp_data" ]; then
-		saved_asn="$ixp_data"
-		saved_asname=""
-		TARGET_IS_IXP=true
-	else
-		saved_asn="$found_asn"
-		saved_asname="$found_asname"
-		TARGET_IS_IXP=false
-	fi
 	# last_resolved_ip will save us one dns resolution (mtr returns the same last hop twice)
 	last_resolved_ip=""
-	privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
 	# start the mtr trace in a bash coprocess to parse its output asynchronously
 	coproc mtr -l -n -c"$mtr_rounds" "$host_to_trace"
 	declare -a hostline_array
@@ -427,82 +430,79 @@ TraceASPath(){
 	# mtr finished, analyze and output results
 	HopPrint "$(printf "${lightgreybg}%4s %-72s%20s     %s    ${default}" "Hop" "IP Address" "Ping avg" "AS Information")"
 	cur_hop_count=1
-	last_hop=false
+	LAST_HOP=false
+	ROUTING_LOOP=false
 	for mtr_hopnum in "${!hostline_array[@]}"; do
 		ixp_tag=""
 		hop_asn=""
 		hop_ip=${hostline_array[$mtr_hopnum]}
+		# check for routing loops, if so fail immediately
+		prev_hop=${hostline_array[$(( mtr_hopnum-1 ))]}
+		two_hops_ago=${hostline_array[$(( mtr_hopnum-2 ))]}
+		three_hops_ago=${hostline_array[$(( mtr_hopnum-3 ))]}
+		if 	[ "$hop_ip" = "$prev_hop" ] ||
+			{
+				[ "$hop_ip" = "$two_hops_ago" ]  &&
+				[ "$prev_hop" = "$three_hops_ago" ]
+			}; then
+			ROUTING_LOOP=true
+			break
+		fi
 		# AS DATA lookup
+		# check if it's the last hop
+		[[ "$hop_ip" = "$host_to_trace" ]] && LAST_HOP=true
 		# check if IP is in private addressing space
-		if [[ $hop_ip =~ $privateregex ]]; then
+		if [[ "$hop_ip" =~ $privateregex ]]; then
 			asn_data="${white}(Private network)${default}"
 			pwhois_output=""
 		else
-			# not a private address, try saving a lookup
-			# (if $hop_ip = our target, ie we're at the last hop)
-			if [ "$hop_ip" = "$host_to_trace" ]; then
-				found_asn=$saved_asn
-				found_asname=$saved_asname
-				# avoid adding the same AS multiple times in a row in the summary path
-				if [ "$TARGET_IS_IXP" = false ]; then
-					# last hop, not an IXP
-					aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "${found_asn}" "$(echo "${found_asname}" | cut -d ',' -f 1)" )
-					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
-				else
-					# last hop, and is an IXP
+			# Hop IP is not a private address. Lookup hop data
+			LookupASNAndRouteFromIP "$hop_ip"
+			if [ "$UNANNOUNCED_PREFIX" = true ]; then
+				# No data in the Team Cymru DB. Check to see if the ip is assigned to an IXP, or fall back to generic whois.
+				WhoisIP "$hop_ip" >/dev/null # don't display this, we're being parsed off-screen
+				hop_asn="${red}N/A (address not announced)${default}"
+				hop_org="$pwhois_org"
+				hop_net="$pwhois_net"
+				[[ -n "$found_route" ]] && hop_net+=" ($found_route)"
+				hop_typ="$ip_type_data"
+				hop_geo="$pwhois_geo"
+				hop_rep="$ip_rep_data"
+				if [ -n "$ixp_data" ]; then
+					# this hop is an IXP
 					ixp_tag="${bluebg} IXP ${default}"
-					asn_data="${ixp_tag} ${blue}${found_asn}${default}"
-					aspath_entry=$(printf "%-6s  ${blue}%s${default}" "$ixp_tag" "$found_asn")
+					asn_data="${ixp_tag} ${blue}${ixp_data}${default}"
+					hop_org="${ixp_tag} ${blue}${ixp_data}${default}"
+					aspath_entry=$(printf "%-6s  ${blue}%s${default}" "$ixp_tag" "$ixp_data")
+					aspath_array+=("$aspath_entry")
+				else
+					# no data found and not an IXP hop, try retrieving relevant info from a generic whois lookup
+					hop_whois_data=$(echo -e "$full_whois_data" | grep -i -m2 -E "^netname:|^orgname:|^org-name:|^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+					if [ -z "$hop_whois_data" ]; then
+						asn_data="${yellow}(No data)${default}"
+					else
+						asn_data="${yellow}(${hop_whois_data})${default}"
+					fi
 				fi
-				if [[ ${#aspath_array[@]} -eq 0 ]] || [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
+			else
+				# $hop_ip belongs to an announced prefix
+				asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+				# avoid adding the same AS multiple times in a row in the summary path
+				aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+				if [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
 					aspath_array+=("$aspath_entry")
 				fi
-				last_hop=true
-			else
-				# not the last hop. Lookup hop data
-				LookupASNAndRouteFromIP "$hop_ip"
-				if [ "$UNANNOUNCED_PREFIX" = true ]; then
-					# No data in the Team Cymru DB. Check to see if the ip is assigned to an IXP, or fall back to generic whois.
-					WhoisIP "$hop_ip" >/dev/null # don't display this, we're being parsed off-screen
-					hop_asn="${red}N/A (address not announced)${default}"
-					hop_org="$pwhois_org"
-					hop_net="$pwhois_net"
-					[[ -n "$found_route" ]] && hop_net+=" ($found_route)"
-					hop_geo="$pwhois_geo"
-					if [ -n "$ixp_data" ]; then
-						# this hop is an IXP
-						ixp_tag="${bluebg} IXP ${default}"
-						asn_data="${ixp_tag} ${blue}${ixp_data}${default}"
-						hop_org="${ixp_tag} ${blue}${ixp_data}${default}"
-						aspath_entry=$(printf "%-6s  ${blue}%s${default}" "$ixp_tag" "$ixp_data")
-						aspath_array+=("$aspath_entry")
-					else
-						# no data found and not an IXP hop, try retrieving relevant info from a generic whois lookup
-						hop_whois_data=$(echo -e "$full_whois_data" | grep -i -m2 -E "^netname:|^orgname:|^org-name:|^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
-						if [ -z "$hop_whois_data" ]; then
-							asn_data="${yellow}(No data)${default}"
-						else
-							asn_data="${yellow}(${hop_whois_data})${default}"
-						fi
-					fi
-				else
-					# lookup success
-					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
-					# avoid adding the same AS multiple times in a row in the summary path
-					aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
-					if [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
-						aspath_array+=("$aspath_entry")
-					fi
-				fi
 			fi
-			if [ "$DETAILED_TRACE" = "true" ] && [ "$UNANNOUNCED_PREFIX" = false ]; then
+			if [ "$DETAILED_TRACE" = true ] && [ "$UNANNOUNCED_PREFIX" = false ]; then
 				# run a pWhois lookup if the hop is within an announced prefix,
 				# otherwise we already have generic whois data stored (also in case of an IXP prefix)
 				PwhoisLookup "$hop_ip"
 				hop_asn="$pwhois_asn"
 				hop_org="$pwhois_org"
 				hop_net="$pwhois_net"
+				hop_typ="$ip_type_data"
 				hop_geo="$pwhois_geo"
+				hop_rep="$ip_rep_data"
 				hop_prefix="$pwhois_prefix"
 			fi
 		fi
@@ -517,7 +517,7 @@ TraceASPath(){
 		# account for missing (no reply) hops
 		while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
 			HopPrint "$(printf "%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")"
-			if [ "$DETAILED_TRACE" = "true" ]; then
+			if [ "$DETAILED_TRACE" = true ]; then
 				# PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
 				HopPrint ""
 			fi
@@ -534,39 +534,45 @@ TraceASPath(){
 		[[ -z "$ixp_tag" ]] && hop_color="${white}" || hop_color="${blue}"
 		HopPrint "$(printf "%3s. %-90s %10s   %s" "$cur_hop_count" "${hop_color}$hop_ip${default}" "${ping_data}" "$asn_data")"
 
-		if [ "$DETAILED_TRACE" = "true" ] && [ -n "$hop_asn" ]; then
-			if [ "$RPKI_LOOKUP" = true ] && [ -n "$found_asname" ]; then # only run RPKI lookups if the prefix is announced
+		if [ "$DETAILED_TRACE" = true ] && [ -n "$hop_asn" ]; then
+			if [ -n "$found_asname" ]; then
+				# only run RPKI lookups if the prefix is announced
 				RPKILookup "$found_asn" "$hop_prefix"
-				HopPrint "$(printf "     ├${bluebg}ASN${default} ${red}%s${default} \
-					\n     ├${bluebg}ORG${default} ${green}%s${default} \
-					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
-					\n     ├${bluebg}GEO${default} ${magenta}%s${default} \
-					\n     └${bluebg}ROA${default} %s" \
-					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo" "$rpki_output")"
-					if [ "$INVALID_ROA" = true ]; then
-						# notify user of possible BGP hijack/route leak
-						aspath_array[-1]+=" ${redbg} ─> WARNING: POSSIBLE ROUTE LEAK / BGP HIJACK ${default}"
-					fi
+				if [ "$INVALID_ROA" = true ]; then
+					# notify user of possible BGP hijack/route leak
+					aspath_array[-1]+=" ${redbg} ─> WARNING: POSSIBLE ROUTE LEAK / BGP HIJACK ${default}"
+				fi
 			else
-				HopPrint "$(printf "     ├${bluebg}ASN${default} ${red}%s${default} \
-					\n     ├${bluebg}ORG${default} ${green}%s${default} \
-					\n     ├${bluebg}NET${default} ${yellow}%s${default} \
-					\n     └${bluebg}GEO${default} ${magenta}%s${default}" \
-					"$hop_asn" "$hop_org" "$hop_net" "$hop_geo")"
+				rpki_output="${red}N/A (hop address not announced)${default}"
 			fi
-			HopPrint ""
-		elif [ "$DETAILED_TRACE" = "true" ]; then
-			# PWHOIS lookups ON, but no valid data. Just add a newline for readability
+			# compose hop detail output
+			# 1. hop ASN, ORG, NET, ROA
+			hop_details="     ├${bluebg}ASN${default} ${red}${hop_asn}${default}\n"
+			hop_details+="     ├${bluebg}ORG${default} ${green}${hop_org}${default}\n"
+			hop_details+="     ├${bluebg}NET${default} ${yellow}${hop_net}${default}\n"
+			hop_details+="     ├${bluebg}ROA${default} ${rpki_output}\n"
+			# 2. hop TYP (optional, only if hop is a particular IP type (anycast/hosting/etc))
+			[[ -n "$hop_typ" ]] && hop_details+="     ├${bluebg}TYP${default}${hop_typ}${default}\n"
+			# 3. hop GEO, REP
+			hop_details+="     ├${bluebg}GEO${default} ${magenta}${hop_geo}${default}\n"
+			hop_details+="     └${bluebg}REP${default} ${hop_rep}${default}\n"
+			# display hop details on screen
+			HopPrint "$hop_details"
+		elif [ "$DETAILED_TRACE" = true ]; then
+			# PWHOIS lookups ON, but no valid hop data (e.g. no-reply hop). Just add a newline for readability
 			HopPrint ""
 		fi
-		[[ "$last_hop" = true ]] && break
+		[[ "$LAST_HOP" = true ]] && break
 		(( cur_hop_count++ ))
 	done
 	# mtr output (hostlines) parsing complete
-	if [ "$last_hop" = false ]; then
+	if [ "$LAST_HOP" = false ]; then
 		# last hop wasn't our target IP. Add a missing last hop to the trace.
-		HopPrint "$(printf "%3s. %-96s %10s   %s" "$cur_hop_count" "${redbg} destination host unreachable ${default}" "*" "${white}(No reply)${default}")"
-		[[ "$DETAILED_TRACE" = "true" ]] && HopPrint ""
+		mtr_end_msg="${redbg} no route to host"
+		[[ "$ROUTING_LOOP" = true ]] && mtr_end_msg+=" (routing loop detected)"
+		mtr_end_msg+=" ${default}"
+		HopPrint "$(printf "%3s. %-96s %10s   %s" "$cur_hop_count" "$mtr_end_msg" "*" "${white}(No reply)${default}")"
+		[[ "$DETAILED_TRACE" = true ]] && HopPrint ""
 	fi
 
 	endtime=$(date +%s)
@@ -723,7 +729,7 @@ SearchByOrg(){
 						searchresults+="\n"
 					fi
 				done
-				[[ "$NO_RESULTS" = "true" ]] && searchresults+="\n\t${red}No results found${default}\n"
+				[[ "$NO_RESULTS" = true ]] && searchresults+="\n\t${red}No results found${default}\n"
 			done
 		done
 		NO_ERROR_ON_INTERRUPT=false
@@ -745,7 +751,7 @@ SearchByOrg(){
 					LookupASNAndRouteFromIP "$input"
 					(( longest=${#input}+1 ))
 					WhoisIP "$input"
-					[[ "$REPUTATION_LOOKUP" = true ]] && ReputationLookup "$input"
+					PrintReputation "$input"
 					StatusbarMessage ""
 					continue
 				else
@@ -856,86 +862,9 @@ $IPCALC_WARNING
 	echo ""
 }
 
-SignalsAPIQuery(){ # output saved to $signals_response
-	signals_response=""
-	# Authenticate to Auth0 Signals API, otherwise run anonymously
-	if [ -n "$SIGNALS_TOKEN" ]; then
-		signals_response=$(curl -s --request GET --url "$1" --header "accept: application/json" --header "x-auth-token: ${SIGNALS_TOKEN}")
-	else
-		signals_response=$(curl -s --request GET --url "$1" --header "accept: application/json")
-	fi
-	# check Signals output to make sure we didn't receive invalid data (eg. quota exceeded etc)
-	# if it's not valid json...
-	is_valid_json=$(echo "$signals_response" | jq type 2>/dev/null)
-	if [ -z "$is_valid_json" ]; then
-		# ...and it's not a "clean ip" reply...
-		if echo "$signals_response" | grep -vq "Resource not found"; then
-			# then fail
-			StatusbarMessage ""
-			server_errormsg="$signals_response"
-			signals_response="${redbg}ERROR: Could not query Signals API${default} (Server said: \"${server_errormsg}\")"
-			REPUTATION_LOOKUP=false
-		fi
-	fi
-}
-
-ReputationLookup(){
-	# invoking with "ReputationLookup <ip> no_details" turns off detailed blacklist report
-	[[ "$2" == "no_details" ]] && DETAILED_REPORT=false || DETAILED_REPORT=true
-	StatusbarMessage "Looking up reputation for IP address ${bluebg}$1${lightgreybg}"
-	SignalsAPIQuery "https://signals.api.auth0.com/badip/$1"
-	StatusbarMessage ""
-	if [ "$REPUTATION_LOOKUP" = false ]; then
-		# we hit an error during last Signals API query, notify and move on
-		IS_BADIP=false
-		badip_output="$signals_response"
-	elif echo "$signals_response" | grep -q "Resource not found"; then
-		IS_BADIP=false
-		badip_output="${green}✓ GOOD${default}"
-	else
-		IS_BADIP=true
-		black_count=$(echo "$signals_response" | jq '.response | length')
-		[[ "$black_count" -gt 1 ]] && s="s" || s=""
-		badip_output="${red}❌ BAD${default}"
-	fi
-	printf "${white}%${indent}s${bluebg}REP${default} ${magenta}%s${default}\n\n" "└" "$badip_output"
-	if [ "$IS_BADIP" = false ]; then
-		return
-	fi
-	badip_output="${red}❌ BAD (Address found in ${black_count} blacklist${s})${default}"
-	if [ "$DETAILED_REPORT" = true ]; then
-		BoxHeader "Detailed IP reputation report for $1"
-		echo ""
-		# parse blacklists and collect bad tags associated with the IP address
-		echo -e "${bluebg} IP ADDRESS────>${default} ${white}$1"
-		echo -e "${bluebg} REPUTATION────>${default} $badip_output"
-		StatusbarMessage "Collecting detailed reputation data"
-		global_tags=""
-		blacklist_output=""
-		blacklists=$(echo "$signals_response" | jq -r '.response[]')
-		for blacklist in $(echo "$blacklists" | sort); do
-			SignalsAPIQuery "https://signals.api.auth0.com/metadata/badip/lists/$blacklist"
-			if [ "$REPUTATION_LOOKUP" = false ]; then
-				# we hit an error during last Signals API query, notify and move on
-				StatusbarMessage ""
-				echo -e "$signals_response\n\n"
-				return
-			fi
-			blacklist_details="$signals_response"
-			name=$(echo "$blacklist_details" | jq -r '.name')
-			group=$(echo "$blacklist_details" | jq -r '.group')
-			site=$(echo "$blacklist_details" | jq -r '.site')
-			tags=$(echo "$blacklist_details" | jq -r '.tags')
-			[[ -z "$global_tags" ]] && global_tags="$tags" || global_tags+=",$tags"
-			blacklist_output+="${bluebg} BLACKLIST HIT─>${default} ${red}[$group] ${yellow}${blacklist} (${name} -- ${blue}${site}${yellow})\n"
-		done
-		StatusbarMessage ""
-		unique_tags=$(echo "$global_tags" | tr ',' '\n' | sort -u  | tr '[:lower:]' '[:upper:]')
-		output_tags=""
-		for tag in $unique_tags; do output_tags+="${redbg} ${tag} ${default} "; done
-		echo -e "${bluebg} ABUSE TAGS────>${default} ${output_tags}"
-		echo -e "${blacklist_output}"
-	fi
+PrintReputation(){
+	# We already have it in $ip_rep_data since we called IPGeoRepLookup() previously
+	printf "${white}%${indent}s${bluebg}REP${default} ${magenta}%s${default}\n\n" "└" "$ip_rep_data"
 }
 
 RPKILookup(){
@@ -967,7 +896,7 @@ RPKILookup(){
 				rpki_output="${green}✓ VALID (${found_rpkiroacount} ROA$s found)${default}"
 				;;
 			"UNKNOWN")
-				rpki_output="✓ UNKNOWN"
+				rpki_output="${yellow}✓ UNKNOWN (no ROAs found)${default}"
 				;;
 			"INVALID_ASN")
 				INVALID_ROA=true
@@ -992,15 +921,14 @@ IsIXP() {
 	ixp_full_ix_data=""
 	ixp_data=""
 	ixp_geo=""
+	input_is_ipv6=false
 	if [ "$IXP_DETECTION" = true ]; then
 		# Update IXP prefixes from PeeringDB if necessary
 		[[ -z "$peeringdb_dataset" ]] && peeringdb_dataset=$(curl -s https://www.peeringdb.com/api/ixpfx)
 		ixp_prefixes=$(echo -e "$peeringdb_dataset" | jq -r '.data[].prefix')
-		if echo -e "$ixp_prefixes" | grep -vq ':'; then
-			# if input is an IPv4, speedup grepcidr lookup by filtering out IPv6 IXP prefixes
-			ipv4_prefixes=$(echo -e "$ixp_prefixes" | grep -v ':')
-			ixp_prefixes="$ipv4_prefixes"
-		fi
+		# if input is an IPv4, speedup grepcidr lookup by filtering out IPv6 IXP prefixes
+		echo -e "$1" | grep -q ':' && input_is_ipv6=true
+		[[ "$input_is_ipv6" = false ]] && ixp_prefixes=$(echo -e "$ixp_prefixes" | grep -v ':')
 		for prefix in $ixp_prefixes; do
 			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
 				# the IP is part of an IXP prefix
@@ -1008,7 +936,10 @@ IsIXP() {
 				ixlan_id=$(echo "$peeringdb_dataset" | jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id')
 				ixp_full_ix_data=$(curl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
 				ixp_data=$(echo "$ixp_full_ix_data" | jq -r '.data[0].name, .data[0].name_long' | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
-				ixp_geo=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.city, .data[0].org.state' | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
+				ixp_geo=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.city')
+				ixp_state=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.state')
+				ip_type_data=" ${lightgreybg} IXP ${default}"
+				[[ -n "$ixp_state" ]] && ixp_geo+=" ($ixp_state)"
 				break
 			fi
 		done
@@ -1036,6 +967,118 @@ GetIXPresence(){
 		outputix="${redbg} NONE ${default}"
 	fi
 	echo -e "$outputix"
+}
+
+IPGeoRepLookup(){
+	# check if it's a private address
+	if [[ "$1" =~ $privateregex ]]; then
+		ip_geo_data="${lightgreybg} N/A ${default} (Private IP Address)"
+		ip_rep_data="$ip_geo_data"
+		return
+	fi
+
+	# fetch preferred geolocation and anycast data from RIPE IPmap
+	ipmap_output=$(curl -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
+
+	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
+	ipapi_output=$(curl -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
+	ipapi_status=$(echo "$ipapi_output" | jq -r '.status')
+	if [ "$ipapi_status" = "fail" ]; then
+		ipapi_errmsg=$(echo "$ipapi_output" | jq -r '.message')
+		ip_rep_data="${red}IP-API ERROR:${default} ${ipapi_errmsg}"
+	fi
+
+	IS_ANYCAST=$(echo "$ipmap_output" | jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast')
+	IS_MOBILE=$(echo "$ipapi_output" | jq -r '.mobile')
+	IS_PROXY=$(echo "$ipapi_output" | jq -r '.proxy')
+	IS_HOSTING=$(echo "$ipapi_output" | jq -r '.hosting')
+
+	ip_geo_data=""
+	ipmap_location_data=$(echo "$ipmap_output" | jq 'select (.location != null) | .location')
+	if [ -n "$ipmap_location_data" ]; then
+		# RIPE IPmap has geo data about this address
+		ipmap_city=$(echo "$ipmap_location_data" | jq -r '.cityNameAscii')
+		ipmap_region=$(echo "$ipmap_location_data" | jq -r '.stateName')
+		ipmap_cc=$(echo "$ipmap_location_data" | jq -r '.countryCodeAlpha2')
+		ipmap_country_name=$(echo "$ipmap_location_data" | jq -r '.countryName')
+		if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ] && [ -n "$ipmap_cc" ]; then
+			ip_geo_data="$ipmap_city, $ipmap_region ($ipmap_cc)"
+		elif [ -n "$ipmap_region" ] && [ -n "$ipmap_country_name" ]; then
+			ip_geo_data="$ipmap_region ($ipmap_country_name)"
+		elif [ -n "$ipmap_country_name" ]; then
+			ip_geo_data="$ipmap_country_name"
+		fi
+	elif [ "$ipapi_status" = "success" ]; then
+		# IPmap has no data about this address, fallback to ip-api.com
+		ipapi_city=$(echo "$ipapi_output" | jq -r '.city')
+		ipapi_region=$(echo "$ipapi_output" | jq -r '.regionName')
+		ipapi_cc=$(echo "$ipapi_output" | jq -r '.countryCode')
+		ipapi_countryname=$(echo "$ipapi_output" | jq -r '.country')
+		if [ -n "$ipapi_city" ] && [ -n "$ipapi_region" ] && [ -n "$ipapi_cc" ]; then
+			ip_geo_data="$ipapi_city, $ipapi_region ($ipapi_cc)"
+		elif [ -n "$ipapi_region" ] && [ -n "$ipapi_countryname" ]; then
+			ip_geo_data="$ipapi_region ($ipapi_countryname)"
+		elif [ -n "$ipapi_countryname" ]; then
+			ip_geo_data="$ipapi_countryname"
+		fi
+	fi
+
+	# IP type identification
+	ip_type_data=""
+	[[ "$IS_ANYCAST" = true ]] && ip_type_data+=" ${yellowbg} Anycast IP ${default}"
+	[[ "$IS_MOBILE" = true ]] && ip_type_data+=" ${yellowbg} Mobile network ${default}"
+	[[ "$IS_PROXY" = true ]] && ip_type_data+=" ${yellowbg} Proxy host ${default}"
+	[[ "$IS_HOSTING" = true ]] && ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
+
+	# Reputation lookup (IPv4: blocklist.de -> ipqualityscore.com | IPv6: ipqualityscore.com)
+	ip_rep_data="${green}✓ GOOD${default}"
+	is_blacklisted=false
+	echo "$1" | grep -q ':' && is_ipv6=true || is_ipv6=false
+	if [ "$is_ipv6" = false ]; then
+		# (IPv4 only) perform a quick dns lookup on blocklist.de in order to see if the host is blacklisted
+		rev=$(echo "$1" | awk -F '.' '{print $4 "." $3 "." $2 "." $1 ".bl.blocklist.de"}')
+		host "$rev" | grep -q "has address" && is_blacklisted=true
+	fi
+	if [ "$is_blacklisted" = true ] || [ "$is_ipv6" = true ]; then
+		# input is either an IPv6, or blocklist.de has this IPv4 in their blacklist. Lookup detailed reputation data on ipqualityscore.com
+		ip_rep_data="${red}❌ BAD (on blocklist.de)${default}"
+		if [ -n "$IQS_TOKEN" ]; then
+			iqs_output=$(curl -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
+			iqs_success=$(echo "$iqs_output" | jq -r '.success')
+			if [ "$iqs_success" = true ]; then
+				iqs_score=$(echo "$iqs_output" | jq -r '.fraud_score')
+				iqs_proxy=$(echo "$iqs_output" | jq -r '.proxy')
+				iqs_vpn=$(echo "$iqs_output" | jq -r '.active_vpn')
+				iqs_tor=$(echo "$iqs_output" | jq -r '.active_tor')
+				iqs_recentabuse=$(echo "$iqs_output" | jq -r '.recent_abuse')
+				iqs_bot=$(echo "$iqs_output" | jq -r '.bot_status')
+				iqs_crawler=$(echo "$iqs_output" | jq -r '.is_crawler')
+				if [ "$iqs_score" -lt 40 ]; then
+					ip_rep_data="✓ GOOD"
+					ip_rep_color="$green"
+				elif [ "$iqs_score" -lt 75 ]; then
+					ip_rep_data="✓ AVERAGE"
+					ip_rep_color="$green"
+				elif [ "$iqs_score" -lt 85 ]; then
+					ip_rep_data="! SUSPICIOUS"
+					ip_rep_color="$yellow"
+				else
+					ip_rep_data="❌ BAD"
+					ip_rep_color="$red"
+				fi
+				ip_rep_data="${ip_rep_color}${ip_rep_data} (Threat Score ${iqs_score}%)${default}"
+				[[ "$iqs_recentabuse" = true ]] && ip_rep_data+=" ${redbg} RECENT ABUSER ${default}"
+				[[ "$iqs_bot" = true ]] && ip_rep_data+=" ${redbg} BOT ${default}"
+				[[ "$iqs_proxy" = true ]] && ip_rep_data+=" ${redbg} PROXY ${default}"
+				[[ "$iqs_vpn" = true ]] && ip_rep_data+=" ${redbg} VPN ${default}"
+				[[ "$iqs_tor" = true ]] && ip_rep_data+=" ${redbg} TOR EXIT NODE ${default}"
+				[[ "$iqs_crawler" = true ]] && ip_rep_data+=" ${redbg} CRAWLER ${default}"
+			else
+				iqs_errmsg=$(echo "$iqs_output" | jq -r '.message')
+				ip_rep_data+=" ${redbg} ERR ${default} (IpQualityScore API said: $iqs_errmsg)"
+			fi
+		fi
+	fi
 }
 
 PrintErrorAndExit(){
@@ -1087,15 +1130,12 @@ WhatIsMyIP() {
 CheckPrerequisites() {
 	saveIFS="$IFS"
 	IFS=' '
-	prerequisite_tools="coproc whois host curl" # mandatory tools
-	optionals_tools="mtr jq ipcalc grepcidr"	# optional tools
+	prerequisite_tools="coproc jq whois host curl" # mandatory tools
+	optionals_tools="mtr ipcalc grepcidr"	# optional tools
 	missing_tools=""
 	disabled_features=""
 	HARD_FAIL=false
 
-	RIPESTAT_LOOKUP=true
-	RPKI_LOOKUP=true
-	REPUTATION_LOOKUP=true
 	HAVE_IPCALC=true
 	IXP_DETECTION=true
 
@@ -1115,12 +1155,6 @@ CheckPrerequisites() {
 				"mtr")
 					disabled_feat="AS path tracing"
 					TRACEASNPATH=false
-					;;
-				"jq")
-					disabled_feat="IP reputation, RIPEstat BGP info / ASN suggestions, and RPKI ROA lookups"
-					RIPESTAT_LOOKUP=false
-					RPKI_LOOKUP=false
-					REPUTATION_LOOKUP=false
 					;;
 				"ipcalc")
 					disabled_feat="CIDR deaggregation"
@@ -1156,21 +1190,19 @@ CheckPrerequisites() {
 		read -r key
 	fi
 
-	if [ "$REPUTATION_LOOKUP" = true ]; then
-		# Read Auth0 Signals (IP reputation API) token from file
-		SIGNALS_TOKEN=""
-		if [ -r "$SIGNALS_TOKEN_FILENAME" ]; then
-			SIGNALS_TOKEN=$(tr -d ' \n\r\t' < "$SIGNALS_TOKEN_FILENAME")
-		fi
-		if [ -z "$SIGNALS_TOKEN" ]; then
-			# warn the user about the limits of anonymous Signals queries
-			echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
-				"\n\nNo Auth0 Signals token found, so running anonymously.\n\nConsider registering at" \
-				"${blue}https://auth0.com/signals/api/signup${default}\nto obtain a free token and increase" \
-				"your IP reputation\nquery limit from 100 hits/day to 40000 hits/day.\n\nAfter getting your API token, copy and paste it inside" \
-				"\n${green}$SIGNALS_TOKEN_FILENAME${default} and it will be used automatically." \
-				"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
-		fi
+	IQS_TOKEN=""
+	# Read ipqualityscore.com token from file
+	if [ -r "$IQS_TOKEN_FILENAME" ]; then
+		IQS_TOKEN=$(tr -d ' \n\r\t' < "$IQS_TOKEN_FILENAME")
+	fi
+	if [ -z "$IQS_TOKEN" ]; then
+		# warn the user about the absence of in-depth IP reputation API token
+		echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
+			"\n\n${white}No IPQualityScore token found, so disabling in-depth threat" \
+			"\nanalysis and IP reputation lookups. Please visit" \
+			"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
+			"\nfor instructions on how to enable it." \
+			"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
 	fi
 
 	# check for `gdate` presence (MacOS coreutils), otherwise fall back to plain `date` (cheers @Antonio-Prado)
@@ -1198,8 +1230,8 @@ greenbg=$'\e[42m\e[30m'
 yellowbg=$'\e[43m\e[30m'
 default=$'\e[0m'
 
-# External API token for Auth0 Signals (IP reputation lookup)
-SIGNALS_TOKEN_FILENAME="$HOME/.asn/signals_token"
+# External API token for ipqualityscore.com (IP reputation & threat analisys lookup)
+IQS_TOKEN_FILENAME="$HOME/.asn/iqs_token"
 
 # PeeringDB list of IXP prefixes
 peeringdb_dataset=""
@@ -1214,6 +1246,8 @@ ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:)
 ':((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|'\
 '(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|'\
 '1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
+
+privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
 
 # Check cmdline parameters
 if [[ $# -lt 1 ]]; then
@@ -1299,7 +1333,6 @@ fi
 
 if [ "$SUGGEST_SEARCH" = true ]; then
 	# user passed the "-s|--suggest" switch
-	[[ "$RIPESTAT_LOOKUP" = false ]] &&	PrintErrorAndExit "Please install the necessary prerequisite tool!"
 	RIPESuggestASN "$userinput"
 	exit 0
 fi
@@ -1335,13 +1368,7 @@ if [ -z "$input" ]; then
 			for singleip in $ip; do
 				LookupASNAndRouteFromIP "$singleip"
 				WhoisIP "$singleip"
-				if [ "$REPUTATION_LOOKUP" = true ]; then
-					if [ "$numips" = 1 ]; then
-						ReputationLookup "$singleip"
-					else
-						ReputationLookup "$singleip" no_details
-					fi
-				fi
+				PrintReputation "$singleip"
 				# save the first IP from the dns lookup result
 				[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
 			done
@@ -1377,32 +1404,30 @@ if [ -z "$input" ]; then
 		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
 		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
 		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}"
-		if [ "$RIPESTAT_LOOKUP" = true ]; then
-			echo -en "${bluebg} Peering @IXPs ──>${default} "
-			GetIXPresence "$asn"
-			BoxHeader "BGP informations for AS${asn} (${found_asname})"
-			echo ""
-			QueryRipestat "${asn}"
-			if [ -n "$ripestat_routing_data" ]; then
-				echo -e "${bluebg} IPv4 Prefixes ─────>${default} ${green}${ripestat_ipv4}"
-				echo -e "${bluebg} IPv6 Prefixes ─────>${default} ${yellow}${ripestat_ipv6}"
-				echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}"
-			fi
-			if [ -n "$ripestat_neighbours_data" ]; then
-				[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
-				[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
-				[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
-				BoxHeader "Peering informations for AS${asn} (${found_asname})"
-				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
-				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
-				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
-			fi
-			BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
-			echo -e "\n${green}───── IPv4 ─────${default}"
-			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
-			echo -e "\n${yellow}───── IPv6 ─────${default}"
-			[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
+		echo -en "${bluebg} Peering @IXPs ──>${default} "
+		GetIXPresence "$asn"
+		BoxHeader "BGP informations for AS${asn} (${found_asname})"
+		echo ""
+		QueryRipestat "${asn}"
+		if [ -n "$ripestat_routing_data" ]; then
+			echo -e "${bluebg} IPv4 Prefixes ─────>${default} ${green}${ripestat_ipv4}"
+			echo -e "${bluebg} IPv6 Prefixes ─────>${default} ${yellow}${ripestat_ipv6}"
+			echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}"
 		fi
+		if [ -n "$ripestat_neighbours_data" ]; then
+			[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
+			[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
+			[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
+			BoxHeader "Peering informations for AS${asn} (${found_asname})"
+			echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
+			echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
+			echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
+		fi
+		BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
+		echo -e "\n${green}───── IPv4 ─────${default}"
+		[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
+		echo -e "\n${yellow}───── IPv6 ─────${default}"
+		[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
 		tput sgr0
 		echo ""
 		exit 0
@@ -1413,8 +1438,7 @@ else
 	LookupASNAndRouteFromIP "$input"
 	(( longest=${#input}+1 ))
 	WhoisIP "$input"
-	# Perform reputation lookup if requested
-	[[ "$REPUTATION_LOOKUP" = true ]] && ReputationLookup "$input"
+	PrintReputation "$input"
 	# Perform AS path tracing if requested
 	[[ "$TRACEASNPATH" = true ]] && TraceASPath "$input"
 	tput sgr0

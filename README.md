@@ -21,7 +21,8 @@ Features:
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
-- It will perform **IP reputation** lookups (especially useful when investigating foreign IPs from log files).
+- It will perform **IP reputation** lookups and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
+- It will perform **IP classification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
 - It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 - It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
 
@@ -33,7 +34,10 @@ The script uses the following services for data retrieval:
 * [PeeringDB](https://www.peeringdb.com/)
 * [ipify](https://www.ipify.org/)
 * [RIPEStat](https://stat.ripe.net/)
-* [Auth0 Signals](https://auth0.com/signals)
+* [RIPE IPmap](https://ipmap.ripe.net/)
+* [ip-api](https://ip-api.com/)
+* [Blocklist.de](http://www.blocklist.de/en/index.html)
+* [IP Quality Score](https://www.ipqualityscore.com)
 
 Requires Bash v4.2+. Tested on:
 
@@ -48,17 +52,17 @@ Requires Bash v4.2+. Tested on:
 
 ### Generic usage ###
 
-* _IPv4 lookup_
+* _IPv4 lookup with IP type detection (Anycast, Hosting/DC)_
 
-![ipv4lookup](https://user-images.githubusercontent.com/24555810/96518776-dc320b80-126b-11eb-9fb8-cfc874be09b0.png)
+![ipv4lookup](https://user-images.githubusercontent.com/24555810/99828678-906ccd80-2b5b-11eb-829c-73e212155851.png)
 
-* _IPv4 lookup (bad reputation IP)_
+* _IPv4 lookup (bad reputation IP) with threat analysis and scoring_
 
-![ipv4badlookup](https://user-images.githubusercontent.com/24555810/96518877-1ef3e380-126c-11eb-8036-043a8d45aabc.png)
+![ipv4badlookup](https://user-images.githubusercontent.com/24555810/99828886-d1fd7880-2b5b-11eb-8206-b8b2ad9b1306.png)
 
 * _IPv6 lookup_
 
-![ipv6lookup](https://user-images.githubusercontent.com/24555810/96518993-4f3b8200-126c-11eb-97c4-2d5d89763fe6.png)
+![ipv6lookup](https://user-images.githubusercontent.com/24555810/99829009-0113ea00-2b5c-11eb-9f7c-b225c76db124.png)
 
 * _Autonomous system number lookup with BGP stats, peering and prefix informations_
 
@@ -66,13 +70,13 @@ Requires Bash v4.2+. Tested on:
 
 * _Hostname lookup_
 
-![hostnamelookup](https://user-images.githubusercontent.com/24555810/96519069-7bef9980-126c-11eb-92a3-6270c1b863cf.png)
+![hostnamelookup](https://user-images.githubusercontent.com/24555810/99829094-230d6c80-2b5c-11eb-9abf-0732399cdf99.png)
 
 ### AS Path tracing ###
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/96940658-9b86fc00-14d0-11eb-8a46-e8dc373f2537.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/99842940-03347380-2b71-11eb-9165-f8520888b17f.png)
 
 
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> ROSTELECOM through DE-CIX at hop 14)*
@@ -82,14 +86,14 @@ Requires Bash v4.2+. Tested on:
 
 * _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/96940972-7b0b7180-14d1-11eb-8132-456521123e6a.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/99844398-4bed2c00-2b73-11eb-8ecd-6266bee99166.png)
 
 
 ### Network search by organization ###
 
 * _Organization search for "github"_
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/96520260-f7eae100-126e-11eb-8987-52b97c75faaf.png)
+![search_by_org](https://user-images.githubusercontent.com/24555810/99845076-5b20a980-2b74-11eb-9312-986867034cc9.png)
 
 ### Suggested ASNs search ###
 
@@ -137,15 +141,17 @@ You can then use the script by running `./asn`.
 
 ### IP reputation API token
 
-The script will perform anonymous IPv4/v6 IP reputation lookups without the need for an API token, using the [Auth0 Signals API](https://auth0.com/signals/).
+##### *NOTICE: Auth0 recently [announced](https://auth0.com/blog/auth0-sunsets-signals/) their plans to deprecate the Signals API on Feb 8, 2021. `asn` now uses the [IPQualityScore](https://www.ipqualityscore.com/) API instead, read below for more info.*
 
-Nevertheless, it's strongly recommended to [sign up](https://auth0.com/signals/api/signup) for their service (it's free) and get an API token, which will raise the daily query quota from 100 hits to 40000 hits.
-Once obtained, the api token should be written to the `$HOME/.asn/signals_token` file.
+The script will perform IP reputation lookups using [Blocklist.de](http://www.blocklist.de/en/index.html) (IPv4-only) and in-depth threat analysis for targets and trace hops using the [IPQualityScore](https://www.ipqualityscore.com/) API (IPv4 and IPv6).
+
+In order to use the IPQualityScore API, it's necessary to [sign up](https://www.ipqualityscore.com/create-account) for their service (it's free) and get an API token (it will be emailed to you on sign-up), which will entitle you to 5000 free lookups per month.
+Once obtained, the api token should be written to the `$HOME/.asn/iqs_token` file.
 In order to do so, you can use the following command:
 
-`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/signals_token" && chmod -R 600 "$HOME/.asn/"`
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/iqs_token" && chmod -R 600 "$HOME/.asn/"`
 
-`asn` will pick up your token on the next run, and use it to query the Signals API.
+`asn` will pick up your token on the next run, and use it to query the IPQualityScore API.
 
 ## Usage
 
@@ -179,6 +185,25 @@ In order to do so, you can use the following command:
 
 - The script will try to find ASNs matching the given search string, using the RIPEStat API.
 
+## Notes
+
+##### *Geolocation*
+
+The script will perform IP and trace hop geolocation with this logic:
+
+1. Using the [RIPE IPmap](https://ipmap.ripe.net/) service as a primary source of geolocation data. It offers extremely precise latency-based geolocation data and is extremely reliable
+2. Using the [ip-api](https://ip-api.com/) service as a fallback source of geolocation data
+3. Using the [Prefix Whois](https://pwhois.org/) service as a last-resort source of geolocation data
+
+##### *IP Classification*
+
+The script will use the ip-api and PeeringDB services to classify target IPs and trace hops into these categories:
+
+- Mobile network
+- Proxy host (TOR exit node/VPN/etc)
+- Hosting network (datacenter/hosting provider/etc)
+- IXP network
+
 ##### *IXP detection and unannounced prefixes*
 
 - The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
@@ -187,6 +212,8 @@ In order to do so, you can use the following command:
 ## Thanks
 
 This script was featured in the **Security Trails** blog post "[_ASN Lookup Tools, Strategies and Techniques_](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
+
+Thanks [Massimo Candela](https://github.com/massimocandela/) for your support and excellent work on [IPmap](https://ipmap.ripe.net/), [BGPlay](https://github.com/massimocandela/BGPlay) and [TraceMON](https://github.com/RIPE-NCC/tracemon)!
 
 ## Feedback and contributing
 
