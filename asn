@@ -167,40 +167,57 @@ RIPESuggestASN(){
 WhoisIP(){
 	full_whois_data=$(whois "$1")
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
-	abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
-	hostname=$(RdnsLookup "$1")
-	abusecontacts=$(AbuseLookup "$abuse_whois_data")
-	[[ -z "$hostname" ]] && hostname="-"
-	if [ "$UNANNOUNCED_PREFIX" = false ]; then
-		PwhoisLookup "$1"
+	# Check if input is a bogon address
+	if [ "$IS_BOGON" = false ]; then
+		abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
+		hostname=$(RdnsLookup "$1")
+		abusecontacts=$(AbuseLookup "$abuse_whois_data")
+		[[ -z "$hostname" ]] && hostname="-"
+		if [ "$UNANNOUNCED_PREFIX" = false ]; then
+			# Prefix found in the Team Cymru DB
+			PwhoisLookup "$1"
+		else
+			# No data in the Team Cymru DB for this IP
+			[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
+			found_asn="N/A (address not announced)"
+			found_asname=""
+			IPGeoRepLookup "$1"
+			# check if it's an IXP, otherwise fall back to generic whois
+			IsIXP "$1"
+			if [ -n "$ixp_data" ]; then
+				pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
+				ip_type_data=" ${yellowbg} Internet Exchange ${default}"
+			else
+				pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+			fi
+			[[ -z "$pwhois_org" ]] && pwhois_org="N/A"
+			found_route=$(echo -e "$network_whois_data" | grep -i -m2 -E "^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do if [ -n "$line" ]; then echo -n "$line / "; fi; done | sed 's/ \/ $//')
+			[[ -z "$found_route" ]] && found_route="N/A"
+			pwhois_net=$(echo -e "$network_whois_data" | grep -i -E "^netname:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
+			[[ -z "$pwhois_net" ]] && pwhois_net="N/A"
+			if [ -n "$ixp_geo" ]; then
+				pwhois_geo="$ixp_geo"
+			elif [ -n "$ip_geo_data" ]; then
+				pwhois_geo="$ip_geo_data"
+			else
+				pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
+			fi
+			[[ -z "$pwhois_geo" ]] && pwhois_geo="N/A"
+		fi
 	else
-		# No data in the Team Cymru DB for this IP
-		[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
-		found_asn="N/A (address not announced)"
-		found_asname=""
-		IPGeoRepLookup "$1"
-		# check if it's an IXP, otherwise fall back to generic whois
-		IsIXP "$1"
-		if [ -n "$ixp_data" ]; then
-			pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
-			ip_type_data=" ${yellowbg} Internet Exchange ${default}"
-		else
-			pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
-		fi
-		[[ -z "$pwhois_org" ]] && pwhois_org="N/A"
-		found_route=$(echo -e "$network_whois_data" | grep -i -m2 -E "^descr:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do if [ -n "$line" ]; then echo -n "$line / "; fi; done | sed 's/ \/ $//')
-		[[ -z "$found_route" ]] && found_route="N/A"
+		# bogon address, skip lookups
+		hostname="-"
+		found_asn="-"
+		pwhois_org="IANA"
+		found_route="N/A"
+		abusecontacts="-"
 		pwhois_net=$(echo -e "$network_whois_data" | grep -i -E "^netname:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
-		[[ -z "$pwhois_net" ]] && pwhois_net="N/A"
-		if [ -n "$ixp_geo" ]; then
-			pwhois_geo="$ixp_geo"
-		elif [ -n "$ip_geo_data" ]; then
-			pwhois_geo="$ip_geo_data"
-		else
-			pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
-		fi
-		[[ -z "$pwhois_geo" ]] && pwhois_geo="N/A"
+		found_asname=""
+		ip_type_data=" $bogon_tag"
+		pwhois_geo="-"
+		ip_rep_data="-"
 	fi
+
 	indent=$(( longest+4 ))
 	if [ -n "$found_asname" ]; then
 		output_asname="${green}($found_asname)"
@@ -213,8 +230,10 @@ WhoisIP(){
 		RPKILookup "$found_asn" "$found_route"
 		StatusbarMessage ""
 		echo ""
-	else
+	elif [ "$IS_BOGON" = false ]; then
 		rpki_output="${red}N/A (address not announced)${default}"
+	else
+		rpki_output="-"
 	fi
 
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
@@ -227,21 +246,76 @@ WhoisIP(){
 	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "├" "$pwhois_geo"
 }
 
+IsBogon(){
+	bogon_tag=""
+	IS_BOGON=false
+	# Bogon regex patterns
+	localhostregex='(^127\.)' # RFC 1122 localhost
+	thisnetregex='(^0\.)' # RFC 1122 'this' network
+	privateregex='(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])' # RFC 1918 private space - cheers https://stackoverflow.com/a/11327345/5377165
+	cgnregex='(^100\.6[4-9]\.)|(^100\.[7-9][0-9]\.)|(^100\.1[0-1][0-9]\.)|(^100\.12[0-7]\.)' # RFC 6598 Carrier grade nat space
+	llregex='(^169\.254\.)' # RFC 3927 link local
+	ietfprotoregex='(^192\.0\.0\.)' # IETF protocol assignments
+	testnetregex='(^192\.0\.2\.)|(^198\.51\.100\.)|(^203\.0\.113\.)' # RFC 5737 TEST-NET
+	benchmarkregex='(^192\.1[8-9]\.)' # RFC 2544 Network interconnect device benchmark testing
+	sixtofouranycast='(^192\.88\.99\.)' # RFC 7526 6to4 anycast relay
+	multicastregex='(^22[4-9]\.)|(^23[0-9]\.)' # Multicast
+	reservedregex='(^24[0-9]\.)|(^25[0-5]\.)' # Reserved for future use/limited broadcast (255.255.255.255)
+
+	if [[ "$1" =~ $localhostregex ]]; then
+		bogon_tag="rfc1122 (Localhost)"
+		TRACEASNPATH=false
+	elif [[ "$1" =~ $thisnetregex ]]; then
+		bogon_tag="rfc1122 ('this' network)"
+		TRACEASNPATH=false
+	elif [[ "$1" =~ $privateregex ]]; then
+		bogon_tag="rfc1918 (Private Space)"
+	elif [[ "$1" =~ $cgnregex ]]; then
+		bogon_tag="rfc6598 (CGN Space)"
+	elif [[ "$1" =~ $llregex ]]; then
+		bogon_tag="rfc3927 (Link-Local)"
+	elif [[ "$1" =~ $ietfprotoregex ]]; then
+		bogon_tag="(Reserved for IETF protocol assignments)"
+	elif [[ "$1" =~ $testnetregex ]]; then
+		bogon_tag="rfc5737 (Reserved for Test Networks)"
+	elif [[ "$1" =~ $benchmarkregex ]]; then
+		bogon_tag="rfc2544 (Reserved for Network device benchmark testing)"
+	elif [[ "$1" =~ $sixtofouranycast ]]; then
+		bogon_tag="rfc7526 (6to4 anycast relay)"
+	elif [[ "$1" =~ $multicastregex ]]; then
+		bogon_tag="(Multicast Address)"
+		TRACEASNPATH=false
+	elif [[ "$1" =~ $reservedregex ]]; then
+		bogon_tag="(Reserved Address)"
+		TRACEASNPATH=false
+	fi
+	if [ -n "$bogon_tag" ]; then
+		IS_BOGON=true
+		bogon_tag="${yellowbg} BOGON ${default} ${bogon_tag}"
+	fi
+}
+
 LookupASNAndRouteFromIP(){
 	found_asn=""
 	found_route=""
 	found_asname=""
-	# TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed (esp. during traces)
-	output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
-	found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
-	if [ "$found_asn" = "NA" ]; then
-		# Team Cymru has no data for this IP. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
-		found_asn=""
-		UNANNOUNCED_PREFIX=true
+	IsBogon "$1"
+	if [ "$IS_BOGON" = false ]; then
+		# TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed (esp. during traces)
+		output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
+		found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
+		if [ "$found_asn" = "NA" ]; then
+			# Team Cymru has no data for this IP. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
+			found_asn=""
+			UNANNOUNCED_PREFIX=true
+		else
+			found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
+			found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
+			UNANNOUNCED_PREFIX=false
+		fi
 	else
-		found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
-		found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
-		UNANNOUNCED_PREFIX=false
+		# bogon address, consider it unannounced
+		UNANNOUNCED_PREFIX=true
 	fi
 }
 
@@ -428,7 +502,7 @@ TraceASPath(){
 	done
 	wait
 	# mtr finished, analyze and output results
-	HopPrint "$(printf "${lightgreybg}%4s %-72s%20s     %s    ${default}" "Hop" "IP Address" "Ping avg" "AS Information")"
+	HopPrint "$(printf "${lightgreybg}%4s %-72s%20s     %s                ${default}" "Hop" "IP Address" "Ping avg" "AS Information")"
 	cur_hop_count=1
 	LAST_HOP=false
 	ROUTING_LOOP=false
@@ -451,16 +525,13 @@ TraceASPath(){
 		# AS DATA lookup
 		# check if it's the last hop
 		[[ "$hop_ip" = "$host_to_trace" ]] && LAST_HOP=true
-		# check if IP is in private/cgn addressing space
-		if [[ "$hop_ip" =~ $privateregex ]]; then
-			asn_data="${white}(Private network - rfc1918)${default}"
-			pwhois_output=""
-		elif [[ "$hop_ip" =~ $cgnregex ]]; then
-			asn_data="${white}(CGN network - rfc6598)${default}"
+		LookupASNAndRouteFromIP "$hop_ip"
+		# check if IP is a bogon
+		if [ "$IS_BOGON" = true ]; then
+			asn_data="$bogon_tag"
 			pwhois_output=""
 		else
-			# Hop IP is not a private/cgn address. Lookup hop data
-			LookupASNAndRouteFromIP "$hop_ip"
+			# Hop IP is not a bogon address. Proceed with lookup of hop data
 			if [ "$UNANNOUNCED_PREFIX" = true ]; then
 				# No data in the Team Cymru DB. Check to see if the ip is assigned to an IXP, or fall back to generic whois.
 				WhoisIP "$hop_ip" >/dev/null # don't display this, we're being parsed off-screen
@@ -973,17 +1044,6 @@ GetIXPresence(){
 }
 
 IPGeoRepLookup(){
-	# check if it's a private/CGN address
-	if [[ $1 =~ $privateregex ]]; then
-		ip_geo_data="${lightgreybg} N/A ${default} (Private IP Address - rfc1918)"
-		ip_rep_data="$ip_geo_data"
-		return
-	elif [[ $1 =~ $cgnregex ]]; then
-		ip_geo_data="${lightgreybg} N/A ${default} (CGN IP Address - rfc6598)"
-		ip_rep_data="$ip_geo_data"
-		return
-	fi
-
 	# fetch preferred geolocation and anycast data from RIPE IPmap
 	ipmap_output=$(curl -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
 
@@ -999,14 +1059,20 @@ IPGeoRepLookup(){
 		IS_HOSTING=$(echo "$ipapi_output" | jq -r '.hosting')
 	fi
 
-	IS_ANYCAST=$(echo "$ipmap_output" | jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast')
+	IS_ANYCAST=""
+	if [[ -z $(echo "$ipmap_output" | jq 'select (.error != null) | .error') ]]; then
+		IS_ANYCAST=$(echo "$ipmap_output" | jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast')
+	fi
 
 	ip_geo_data=""
 	ipmap_location_data=$(echo "$ipmap_output" | jq 'select (.location != null) | .location')
 	if [ -n "$ipmap_location_data" ]; then
-		# RIPE IPmap has geo data about this address
-		ipmap_city=$(echo "$ipmap_location_data" | jq -r '.cityNameAscii')
-		ipmap_region=$(echo "$ipmap_location_data" | jq -r '.stateName')
+		# RIPE IPmap has (at least some) geo data about this address, check city/region
+		ipmap_city=$(echo "$ipmap_location_data" | jq -r 'select (.cityNameAscii != null) | .cityNameAscii')
+		ipmap_region=$(echo "$ipmap_location_data" | jq -r 'select (.stateName != null) | .stateName')
+	fi
+	if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ]; then
+		# RIPE IPmap has full geo data, continue
 		ipmap_cc=$(echo "$ipmap_location_data" | jq -r '.countryCodeAlpha2')
 		ipmap_country_name=$(echo "$ipmap_location_data" | jq -r '.countryName')
 		if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ] && [ -n "$ipmap_cc" ]; then
@@ -1017,7 +1083,7 @@ IPGeoRepLookup(){
 			ip_geo_data="$ipmap_country_name"
 		fi
 	elif [ "$ipapi_status" = "success" ]; then
-		# IPmap has no data about this address, fallback to ip-api.com
+		# IPmap has incomplete/no data about this address, fallback to ip-api.com
 		ipapi_city=$(echo "$ipapi_output" | jq -r '.city')
 		ipapi_region=$(echo "$ipapi_output" | jq -r '.regionName')
 		ipapi_cc=$(echo "$ipapi_output" | jq -r '.countryCode')
@@ -1248,9 +1314,6 @@ ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:)
 ':((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|'\
 '(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|'\
 '1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
-
-privateregex='(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])' # cheers https://stackoverflow.com/a/11327345/5377165
-cgnregex='(^100\.6[4-9]\.)|(^100\.[7-9][0-9]\.)|(^100\.1[0-1][0-9]\.)|(^100\.12[0-7]\.)' # CGN (https://tools.ietf.org/html/rfc6598) address space
 
 # Check cmdline parameters
 if [[ $# -lt 1 ]]; then

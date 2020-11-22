@@ -23,6 +23,7 @@ Features:
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
 - It will perform **IP reputation** lookups and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 - It will perform **IP classification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
+  - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
 - It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 - It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
 
@@ -76,17 +77,17 @@ Requires Bash v4.2+. Tested on:
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/99842940-03347380-2b71-11eb-9165-f8520888b17f.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/99915402-c0ef6b80-2d03-11eb-8411-2f6ef7bf05c1.png)
 
 
-* *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> ROSTELECOM through DE-CIX at hop 14)*
+* *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
 
-![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/96941621-2e289a80-14d3-11eb-95b7-99c1bd3b2add.png)
+![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/99916817-a8d01a00-2d0c-11eb-886e-8a2cd348316c.png)
 
 
 * _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/99844398-4bed2c00-2b73-11eb-8ecd-6266bee99166.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/99917042-35c7a300-2d0e-11eb-8a82-fd4bc80b62f3.png)
 
 
 ### Network search by organization ###
