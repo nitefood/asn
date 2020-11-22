@@ -451,12 +451,15 @@ TraceASPath(){
 		# AS DATA lookup
 		# check if it's the last hop
 		[[ "$hop_ip" = "$host_to_trace" ]] && LAST_HOP=true
-		# check if IP is in private addressing space
+		# check if IP is in private/cgn addressing space
 		if [[ "$hop_ip" =~ $privateregex ]]; then
-			asn_data="${white}(Private network)${default}"
+			asn_data="${white}(Private network - rfc1918)${default}"
+			pwhois_output=""
+		elif [[ "$hop_ip" =~ $cgnregex ]]; then
+			asn_data="${white}(CGN network - rfc6598)${default}"
 			pwhois_output=""
 		else
-			# Hop IP is not a private address. Lookup hop data
+			# Hop IP is not a private/cgn address. Lookup hop data
 			LookupASNAndRouteFromIP "$hop_ip"
 			if [ "$UNANNOUNCED_PREFIX" = true ]; then
 				# No data in the Team Cymru DB. Check to see if the ip is assigned to an IXP, or fall back to generic whois.
@@ -970,9 +973,13 @@ GetIXPresence(){
 }
 
 IPGeoRepLookup(){
-	# check if it's a private address
-	if [[ "$1" =~ $privateregex ]]; then
-		ip_geo_data="${lightgreybg} N/A ${default} (Private IP Address)"
+	# check if it's a private/CGN address
+	if [[ $1 =~ $privateregex ]]; then
+		ip_geo_data="${lightgreybg} N/A ${default} (Private IP Address - rfc1918)"
+		ip_rep_data="$ip_geo_data"
+		return
+	elif [[ $1 =~ $cgnregex ]]; then
+		ip_geo_data="${lightgreybg} N/A ${default} (CGN IP Address - rfc6598)"
 		ip_rep_data="$ip_geo_data"
 		return
 	fi
@@ -986,12 +993,13 @@ IPGeoRepLookup(){
 	if [ "$ipapi_status" = "fail" ]; then
 		ipapi_errmsg=$(echo "$ipapi_output" | jq -r '.message')
 		ip_rep_data="${red}IP-API ERROR:${default} ${ipapi_errmsg}"
+	else
+		IS_MOBILE=$(echo "$ipapi_output" | jq -r '.mobile')
+		IS_PROXY=$(echo "$ipapi_output" | jq -r '.proxy')
+		IS_HOSTING=$(echo "$ipapi_output" | jq -r '.hosting')
 	fi
 
 	IS_ANYCAST=$(echo "$ipmap_output" | jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast')
-	IS_MOBILE=$(echo "$ipapi_output" | jq -r '.mobile')
-	IS_PROXY=$(echo "$ipapi_output" | jq -r '.proxy')
-	IS_HOSTING=$(echo "$ipapi_output" | jq -r '.hosting')
 
 	ip_geo_data=""
 	ipmap_location_data=$(echo "$ipmap_output" | jq 'select (.location != null) | .location')
@@ -1030,18 +1038,12 @@ IPGeoRepLookup(){
 	[[ "$IS_PROXY" = true ]] && ip_type_data+=" ${yellowbg} Proxy host ${default}"
 	[[ "$IS_HOSTING" = true ]] && ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
 
-	# Reputation lookup (IPv4: blocklist.de -> ipqualityscore.com | IPv6: ipqualityscore.com)
+	# Reputation lookup (stopforumspam.org) and threat analisys (ipqualityscore.com)
 	ip_rep_data="${green}✓ GOOD${default}"
-	is_blacklisted=false
-	echo "$1" | grep -q ':' && is_ipv6=true || is_ipv6=false
-	if [ "$is_ipv6" = false ]; then
-		# (IPv4 only) perform a quick dns lookup on blocklist.de in order to see if the host is blacklisted
-		rev=$(echo "$1" | awk -F '.' '{print $4 "." $3 "." $2 "." $1 ".bl.blocklist.de"}')
-		host "$rev" | grep -q "has address" && is_blacklisted=true
-	fi
-	if [ "$is_blacklisted" = true ] || [ "$is_ipv6" = true ]; then
-		# input is either an IPv6, or blocklist.de has this IPv4 in their blacklist. Lookup detailed reputation data on ipqualityscore.com
-		ip_rep_data="${red}❌ BAD (on blocklist.de)${default}"
+	is_blacklisted=$(curl -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
+	if [ "$is_blacklisted" = "1" ]; then
+		# IP is blacklisted by StopForumSpam. Lookup detailed reputation data on IPQualityScore
+		ip_rep_data="${red}❌ BAD (on stopforumspam.org)${default}"
 		if [ -n "$IQS_TOKEN" ]; then
 			iqs_output=$(curl -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
 			iqs_success=$(echo "$iqs_output" | jq -r '.success')
@@ -1247,7 +1249,8 @@ ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:)
 '(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|'\
 '1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
 
-privateregex='/(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])/' # cheers https://stackoverflow.com/a/11327345/5377165
+privateregex='(^127\.)|(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])' # cheers https://stackoverflow.com/a/11327345/5377165
+cgnregex='(^100\.6[4-9]\.)|(^100\.[7-9][0-9]\.)|(^100\.1[0-1][0-9]\.)|(^100\.12[0-7]\.)' # CGN (https://tools.ietf.org/html/rfc6598) address space
 
 # Check cmdline parameters
 if [[ $# -lt 1 ]]; then

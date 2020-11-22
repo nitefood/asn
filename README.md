@@ -36,7 +36,7 @@ The script uses the following services for data retrieval:
 * [RIPEStat](https://stat.ripe.net/)
 * [RIPE IPmap](https://ipmap.ripe.net/)
 * [ip-api](https://ip-api.com/)
-* [Blocklist.de](http://www.blocklist.de/en/index.html)
+* [StopForumSpam](https://www.stopforumspam.com/)
 * [IP Quality Score](https://www.ipqualityscore.com)
 
 Requires Bash v4.2+. Tested on:
@@ -141,11 +141,11 @@ You can then use the script by running `./asn`.
 
 ### IP reputation API token
 
-##### *NOTICE: Auth0 recently [announced](https://auth0.com/blog/auth0-sunsets-signals/) their plans to deprecate the Signals API on Feb 8, 2021. `asn` now uses the [IPQualityScore](https://www.ipqualityscore.com/) API instead, read below for more info.*
+##### *NOTICE: Auth0 recently [announced](https://auth0.com/blog/auth0-sunsets-signals/) their plans to deprecate the Signals API on Feb 8, 2021. `asn` now combines results from the [StopForumSpam](https://www.stopforumspam.com/) and [IPQualityScore](https://www.ipqualityscore.com/) APIs instead, read below for more info.*
 
-The script will perform IP reputation lookups using [Blocklist.de](http://www.blocklist.de/en/index.html) (IPv4-only) and in-depth threat analysis for targets and trace hops using the [IPQualityScore](https://www.ipqualityscore.com/) API (IPv4 and IPv6).
+The script will perform first-level IPv4/v6 reputation lookups using [StopForumSpam](https://www.stopforumspam.com/), and in case of a match it will perform a second-level, in-depth threat analysis for targets and trace hops using the [IPQualityScore](https://www.ipqualityscore.com/) API. The StopForumSpam API is free and requires no sign-up, and the service aggregates a [huge](https://www.stopforumspam.com/contributors) amount of blacklist feeds.
 
-In order to use the IPQualityScore API, it's necessary to [sign up](https://www.ipqualityscore.com/create-account) for their service (it's free) and get an API token (it will be emailed to you on sign-up), which will entitle you to 5000 free lookups per month.
+Still, in order to use the IPQualityScore API for in-depth threat reporting, it's necessary to [sign up](https://www.ipqualityscore.com/create-account) for their service (it's free) and get an API token (it will be emailed to you on sign-up), which will entitle you to 5000 free lookups per month.
 Once obtained, the api token should be written to the `$HOME/.asn/iqs_token` file.
 In order to do so, you can use the following command:
 
