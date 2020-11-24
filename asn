@@ -434,7 +434,22 @@ HopPrint(){
 TraceASPath(){
 	starttime=$(date +%s)
 	host_to_trace="$1"
-	mtr_rounds=3
+	mtr_rounds=5
+	border_color=$'\e[38;5;109m'
+	# attepmt to be as responsive as possible
+	# ideal output width : 150 (size of headers in normal traces)
+	# ideal border width : 100 (used in detailed traces only)
+	if [ "$terminal_width" -ge 153 ]; then
+		output_width=150
+		border_width=100
+	elif [ "$terminal_width" -ge 103 ]; then
+		output_width=$((terminal_width-3))
+		border_width=100
+	else
+		output_width=$((terminal_width-3))
+		border_width=$((terminal_width-3))
+	fi
+
 	WhatIsMyIP
 	if [ "$DETAILED_TRACE" = true ]; then
 		headermsg="Detailed trace to $userinput"
@@ -449,13 +464,10 @@ TraceASPath(){
 	fi
 	echo ""
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
-	# last_resolved_ip will save us one dns resolution (mtr returns the same last hop twice)
-	last_resolved_ip=""
-	# start the mtr trace in a bash coprocess to parse its output asynchronously
-	coproc mtr -l -n -c"$mtr_rounds" "$host_to_trace"
-	declare -a hostline_array
-	declare -a dnsline_array
-	declare -a pingline_array
+
+	# start the mtr trace
+	mtr_output=$(mtr -j -n -c"$mtr_rounds" "$host_to_trace" | jq '.report.hubs[]')
+	declare -a tracehops_array
 	declare -a aspath_array
 	# initialize the aspath array with our source AS
 	# TODO: improve local WAN IPv6 ASN lookup (Cymru and pWhois sometimes fail to correctly retrieve matching prefix. Consider RIPEstat/direct whois?)
@@ -466,61 +478,60 @@ TraceASPath(){
 	fi
 	aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
 	aspath_array+=("$aspath_entry")
-	while true; do
-		# read mtr output from the bash coprocess pipe,
-		# parsing raw mtr results beginning with :
-		# - h ("hostline", or IPs)
-		# - p ("pingline", or latencies)
-		# see https://github.com/traviscross/mtr/blob/master/FORMATS
-		if read -r -u "${COPROC[0]}" raw_mtr_line 2>/dev/null; then
-			mtr_type=$(echo "$raw_mtr_line" | cut -d ' ' -f 1)
-			mtr_hopnum=$(echo "$raw_mtr_line" | cut -d ' ' -f 2)
-			mtr_data=$(echo "$raw_mtr_line" | cut -d ' ' -f 3)
-			case "$mtr_type" in
-				"h")
-					# this is a hostline ($mtr_data is an IP address)
-					hostline_array["$mtr_hopnum"]="$mtr_data"
-					# do a reverse DNS lookup for the IP instead of relying on
-					# mtr's dnsline results since it proved unreliable in dnsmasq scenarios.
-					# See https://github.com/nitefood/asn/pull/3
-					if [ "$mtr_data" != "$last_resolved_ip" ]; then
-						last_resolved_ip="$mtr_data"
-						hostname=$(RdnsLookup "$mtr_data")
-						[[ -n "$hostname" ]] && dnsline_array["$mtr_hopnum"]="$hostname"
-					fi
-					;;
-				"p")
-					# this is a pingline ($mtr_data is a latency value in microseconds)
-					cur_latency_sum=${pingline_array["$mtr_hopnum"]}
-					pingline_array["$mtr_hopnum"]=$(echo "$cur_latency_sum $mtr_data" |\
-					awk '{ sum = $1 + $2; printf ("%.1f\n", sum) }') # we store the total sum of reply times in the array, and will average it at display time
-					;;
-			esac
-		else
-			break
-		fi
-	done
-	wait
+
 	# mtr finished, analyze and output results
-	HopPrint "$(printf "${lightgreybg}%4s %-72s%20s     %s                ${default}" "Hop" "IP Address" "Ping avg" "AS Information")"
-	cur_hop_count=1
+	# print trace headers (only non-detailed trace)
+	if [ "$DETAILED_TRACE" = false ]; then
+		HopPrint "$(printf "${lightgreybg}%4s %-$((output_width-61))s %7s %13s     %s                ${default}" "Hop" "IP Address" "Loss%" "Ping avg" "AS Information")"
+	fi
 	LAST_HOP=false
 	ROUTING_LOOP=false
-	for mtr_hopnum in "${!hostline_array[@]}"; do
+
+	# parse mtr output (json)
+	mtr_hopnum=0
+	while true; do
+		((mtr_hopnum++))
+		cur_hop_data=$(echo "$mtr_output" | jq 'select (.count=="'"${mtr_hopnum}"'") | .')
+		[[ -z "$cur_hop_data" ]] && break # we're past the last trace hop, quit the loop
+		hop_ip=$(echo "$cur_hop_data" | jq -r '.host')
+		hop_ping=$(echo "$cur_hop_data" | jq -r '.Avg' | awk '{ printf ("%.1f\n", $1) }')
+		hop_loss=$(echo "$cur_hop_data" | jq -r '.["Loss%"]')
+		tracehops_array["$mtr_hopnum"]="$hop_ip"
 		ixp_tag=""
 		hop_asn=""
-		hop_ip=${hostline_array[$mtr_hopnum]}
+		if [ "$hop_ip" = "???" ]; then
+			# print no reply hop info
+			if [ "$DETAILED_TRACE" = true ]; then
+				trailing_line=$(printf '%.0s═' $(seq $((border_width-9-${#hop_ip}))) )
+				hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$mtr_hopnum" "$hop_ip" "$trailing_line")"
+				hop_output+="\n        ├${bluebg}PNG${default} ${white}* (No reply)${default}\n"
+				hop_output+="        └${bluebg}LOS${default} ${white}${hop_loss}% packet loss${default}\n"
+			else
+				hop_output="$(printf "%3s. %-$((output_width-60))s %6s %10s ms   %s" "$mtr_hopnum" "$hop_ip" "$hop_loss%" "*" "${white}(No reply)${default}")"
+			fi
+			HopPrint "${hop_output}"
+			continue # jump to the next hop
+		fi
+
+		# do a reverse DNS lookup for the IP
+		hostname=$(RdnsLookup "$hop_ip")
+
 		# check for routing loops, if so fail immediately
-		prev_hop=${hostline_array[$(( mtr_hopnum-1 ))]}
-		two_hops_ago=${hostline_array[$(( mtr_hopnum-2 ))]}
-		three_hops_ago=${hostline_array[$(( mtr_hopnum-3 ))]}
-		if 	[ "$hop_ip" = "$prev_hop" ] ||
-			{
-				[ "$hop_ip" = "$two_hops_ago" ]  &&
-				[ "$prev_hop" = "$three_hops_ago" ]
-			}; then
-			ROUTING_LOOP=true
-			break
+		if [ "$mtr_hopnum" -ge 2 ]; then
+			prev_hop=${tracehops_array[$(( mtr_hopnum-1 ))]}
+			if [ "$hop_ip" = "$prev_hop" ]; then
+				ROUTING_LOOP=true
+				break
+			fi
+		fi
+		if [ "$mtr_hopnum" -ge 4 ]; then
+			# detect routing loops
+			two_hops_ago=${tracehops_array[$(( mtr_hopnum-2 ))]}
+			three_hops_ago=${tracehops_array[$(( mtr_hopnum-3 ))]}
+			if [ "$hop_ip" = "$two_hops_ago" ] && [ "$prev_hop" = "$three_hops_ago" ]; then
+				ROUTING_LOOP=true
+				break
+			fi
 		fi
 		# AS DATA lookup
 		# check if it's the last hop
@@ -582,31 +593,29 @@ TraceASPath(){
 		fi
 
 		# DNS data (only used if a hostname was resolved)
-		if [ -n "${dnsline_array[$mtr_hopnum]}" ]; then
-			saveip=$hop_ip
-			hop_ip="${dnsline_array[$mtr_hopnum]} ($saveip)"
-		fi
+		[[ -n "$hostname" ]] && hop_ip="$hostname ($hop_ip)"
+		# IXP coloring
+		[[ -z "$ixp_tag" ]] && hop_ip="${white}${hop_ip}${default}" || hop_ip="${blue}${hop_ip}${default}"
 
-		# PING data
-		# account for missing (no reply) hops
-		while [ "$mtr_hopnum" -ge "$((cur_hop_count))" ]; do
-			HopPrint "$(printf "%3s. %-90s %10s   %s" "$cur_hop_count" "${white}???${default}" "*" "${white}(No reply)${default}")"
-			if [ "$DETAILED_TRACE" = true ]; then
-				# PWHOIS lookups ON, but no valid data (no reply hop). Just add a newline for readability
-				HopPrint ""
+		# print trace hop info
+		if [ "$DETAILED_TRACE" = false ]; then
+			hop_output="$(printf "%3s. %-$((output_width-51))s %6s %10s ms   %s" "$mtr_hopnum" "${hop_ip}" "$hop_loss%" "${hop_ping}" "$asn_data")"
+		else
+			trailing_line=$(printf '%.0s═' $(seq $((border_width-${#hop_ip}))) )
+			hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$mtr_hopnum" "${hop_ip}" "$trailing_line")"
+			hop_output+="\n        ├${bluebg}PNG${default} ${white}${hop_ping} ms${default}\n"
+			hop_output+="        ├${bluebg}LOS${default} ${white}${hop_loss}% packet loss${default}"
+			# only add ASN data when not an IXP, otherwise we'll have duplicate data when ORG gets printed later
+			if [ -z "$ixp_tag" ]; then
+				# if it's a bogon address it's going to be the last branch of the displayed tree
+				if [ "$IS_BOGON" = true ]; then
+					hop_output+="\n        └${bluebg}TYP${default} $asn_data${default}"
+				else
+					hop_output+="\n        ├${bluebg}ASN${default} $asn_data${default}"
+				fi
 			fi
-			((cur_hop_count++))
-		done
-		# data in the array item is the total sum of mtr latencies collected for this hop in microseconds.
-		# convert it to milliseconds, and round it to 1 digit precision (mtr's output style)
-		ping_total_usec=${pingline_array[$mtr_hopnum]}
-		if [ -n "$ping_total_usec" ]; then
-			ping_average_msec=$(echo "$ping_total_usec $mtr_rounds" | awk '{ avg = $1 / $2; printf( "%.1f\n", avg/1000) }')
-			ping_data="$ping_average_msec ms"
 		fi
-
-		[[ -z "$ixp_tag" ]] && hop_color="${white}" || hop_color="${blue}"
-		HopPrint "$(printf "%3s. %-90s %10s   %s" "$cur_hop_count" "${hop_color}$hop_ip${default}" "${ping_data}" "$asn_data")"
+		HopPrint "$hop_output"
 
 		if [ "$DETAILED_TRACE" = true ] && [ -n "$hop_asn" ]; then
 			if [ -n "$found_asname" ]; then
@@ -621,32 +630,41 @@ TraceASPath(){
 			fi
 			# compose hop detail output
 			# 1. hop ASN, ORG, NET, ROA
-			hop_details="     ├${bluebg}ASN${default} ${red}${hop_asn}${default}\n"
-			hop_details+="     ├${bluebg}ORG${default} ${green}${hop_org}${default}\n"
-			hop_details+="     ├${bluebg}NET${default} ${yellow}${hop_net}${default}\n"
-			hop_details+="     ├${bluebg}ROA${default} ${rpki_output}\n"
+			hop_details=""
+			[[ "$DETAILED_TRACE" = false ]] && hop_details="       ├${bluebg}ASN${default} ${red}${hop_asn}${default}\n"
+			hop_details+="        ├${bluebg}ORG${default} ${green}${hop_org}${default}\n"
+			hop_details+="        ├${bluebg}NET${default} ${yellow}${hop_net}${default}\n"
+			hop_details+="        ├${bluebg}ROA${default} ${rpki_output}\n"
 			# 2. hop TYP (optional, only if hop is a particular IP type (anycast/hosting/etc))
-			[[ -n "$hop_typ" ]] && hop_details+="     ├${bluebg}TYP${default}${hop_typ}${default}\n"
+			[[ -n "$hop_typ" ]] && hop_details+="        ├${bluebg}TYP${default}${hop_typ}${default}\n"
 			# 3. hop GEO, REP
-			hop_details+="     ├${bluebg}GEO${default} ${magenta}${hop_geo}${default}\n"
-			hop_details+="     └${bluebg}REP${default} ${hop_rep}${default}\n"
+			hop_details+="        ├${bluebg}GEO${default} ${magenta}${hop_geo}${default}\n"
+			hop_details+="        └${bluebg}REP${default} ${hop_rep}${default}"
+			[[ "$DETAILED_TRACE" = false ]] && hop_details+="\n"
 			# display hop details on screen
 			HopPrint "$hop_details"
+			[[ "$DETAILED_TRACE" = true ]] && HopPrint "\n"
 		elif [ "$DETAILED_TRACE" = true ]; then
-			# PWHOIS lookups ON, but no valid hop data (e.g. no-reply hop). Just add a newline for readability
-			HopPrint ""
+			# PWHOIS lookups ON, but no valid hop data (e.g. no-reply hop). Just add a newline
+			[[ "$DETAILED_TRACE" = true ]] && HopPrint "\n"
 		fi
 		[[ "$LAST_HOP" = true ]] && break
-		(( cur_hop_count++ ))
 	done
-	# mtr output (hostlines) parsing complete
+	# mtr output parsing complete
 	if [ "$LAST_HOP" = false ]; then
 		# last hop wasn't our target IP. Add a missing last hop to the trace.
 		mtr_end_msg="${redbg} no route to host"
 		[[ "$ROUTING_LOOP" = true ]] && mtr_end_msg+=" (routing loop detected)"
 		mtr_end_msg+=" ${default}"
-		HopPrint "$(printf "%3s. %-96s %10s   %s" "$cur_hop_count" "$mtr_end_msg" "*" "${white}(No reply)${default}")"
-		[[ "$DETAILED_TRACE" = true ]] && HopPrint ""
+		# print hop info with final error message
+		if [ "$DETAILED_TRACE" = false ]; then
+			HopPrint "$(printf "%3s. %-$((output_width-51))s %12s %13s   %s" "$mtr_hopnum" "$mtr_end_msg" "100%" "*" "${white}(No reply)${default}")"
+		else
+			upper_border="${border_color}╔$(printf '%.0s═' $(seq "$border_width"))╗${default}"
+			lower_border="${border_color}╔$(printf '%.0s═' $(seq "$border_width"))╗${default}"
+			HopPrint "${upper_border}\n  ${mtr_end_msg}\n${lower_border}"
+		fi
+		aspath_array+=("${mtr_end_msg}${default}")
 	fi
 
 	endtime=$(date +%s)
@@ -986,7 +1004,7 @@ RPKILookup(){
 				;;
 		esac
 	else
-		rpki_output="${yellow}? (WRONG RPKI DATA, invalid prefix?)${default}"
+		rpki_output="${yellow}? (WRONG RPKI DATA or problem accessing RIPEStat API)${default}"
 	fi
 }
 
@@ -1176,10 +1194,18 @@ BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
 StatusbarMessage() { # invoke without parameters to delete the status bar message
 	if [ -n "$statusbar_message" ]; then
 		# delete previous status bar message
-		printf "\r%${#statusbar_message}s\r" " "
+		blank_line=$(printf "%.0s " $(seq "$terminal_width"))
+		printf "\r%s\r" "$blank_line"
 	fi
 	if [ -n "$1" ]; then
-		statusbar_message="${lightgreybg}$1 (press CTRL-C to cancel)...${default}"
+		statusbar_message="$1"
+		max_msg_size=$((terminal_width-23))
+		if [ "${#statusbar_message}" -gt "${max_msg_size}" ]; then
+			statusbar_message="${lightgreybg}${statusbar_message:0:$max_msg_size}${lightgreybg}..."
+		else
+			statusbar_message="${lightgreybg}${statusbar_message}"
+		fi
+		statusbar_message+="${lightgreybg} (press CTRL-C to cancel)...${default}"
 		echo -en "$statusbar_message"
 	fi
 }
@@ -1282,6 +1308,9 @@ CheckPrerequisites() {
 	IFS="$saveIFS"
 }
 
+# Get terminal width
+terminal_width=$(tput cols)
+
 # Color scheme
 IFS=$'\n\t'
 green=$'\e[32m'
@@ -1304,9 +1333,10 @@ IQS_TOKEN_FILENAME="$HOME/.asn/iqs_token"
 # PeeringDB list of IXP prefixes
 peeringdb_dataset=""
 
-# Sigint trapping
+# Signals trapping (interrupt/terminal resize)
 NO_ERROR_ON_INTERRUPT=false
 trap Ctrl_C INT
+trap 'terminal_width=$(tput cols)' SIGWINCH
 
 ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
 '([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|'\

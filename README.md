@@ -15,7 +15,7 @@ Features:
   * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
   * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
 
-- It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) in raw mode and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
+- It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
 - It will detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
 - It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
@@ -77,17 +77,17 @@ Requires Bash v4.2+. Tested on:
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/99915402-c0ef6b80-2d03-11eb-8411-2f6ef7bf05c1.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/100091817-6fef8c80-2e55-11eb-985b-7ab3a5a865ac.png)
 
 
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
 
-![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/99916817-a8d01a00-2d0c-11eb-886e-8a2cd348316c.png)
+![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100092137-dffe1280-2e55-11eb-8ae3-7c54bb0c8e14.png)
 
 
 * _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/99917042-35c7a300-2d0e-11eb-8a82-fd4bc80b62f3.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/100092531-8518eb00-2e56-11eb-8a77-8a2e0b02ca8b.png)
 
 
 ### Network search by organization ###
