@@ -14,14 +14,13 @@
 ########################################################################################
 
 WhoisASN(){
-	found_asname=$(whois -h whois.cymru.com " -f -w -c -p -u as$1" | sed 's/\ *|\ */|/g' | awk -F '[|]' '{print $3}')
-	if [ "$found_asname" = "NO_NAME" ]; then
-		found_asname=""
-	else
+	found_asname=$(host -t TXT "AS${1}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
+	if [ -n "$found_asname" ]; then
 		pwhois_asn_info=$(whois -h whois.pwhois.org "registry source-as=$1" | grep -E "^Org-Name:|^Create-Date:")
 		found_org=$(echo -e "$pwhois_asn_info" | grep -E "^Org-Name:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
+		[[ -z "$found_org" ]] && found_org="N/A"
 		pwhois_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
-		found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%d %H:%M:%S")
+		[[ -z "$pwhois_createdate" ]] && found_createdate="N/A" || found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%d %H:%M:%S")
 	fi
 }
 
@@ -165,25 +164,33 @@ RIPESuggestASN(){
 }
 
 WhoisIP(){
+	# $1: (mandatory) IP to lookup
+	# $2: (optional) if set to anything, only perform a generic whois lookup (skip pWhois/RPKI/IXP lookups)
+	GENERIC_WHOIS_LOOKUP_ONLY=false
+	[[ "$#" -gt 1 ]] && GENERIC_WHOIS_LOOKUP_ONLY=true
 	full_whois_data=$(whois "$1")
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
 	# Check if input is a bogon address
 	if [ "$IS_BOGON" = false ]; then
-		abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
-		hostname=$(RdnsLookup "$1")
-		abusecontacts=$(AbuseLookup "$abuse_whois_data")
-		[[ -z "$hostname" ]] && hostname="-"
-		if [ "$UNANNOUNCED_PREFIX" = false ]; then
+		if [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
+			abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
+			hostname=$(RdnsLookup "$1")
+			abusecontacts=$(AbuseLookup "$abuse_whois_data")
+			[[ -z "$hostname" ]] && hostname="-"
+		fi
+		if [ "$UNANNOUNCED_PREFIX" = false ] && [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
 			# Prefix found in the Team Cymru DB
 			PwhoisLookup "$1"
 		else
-			# No data in the Team Cymru DB for this IP
-			[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
-			found_asn="N/A (address not announced)"
-			found_asname=""
+			# No data in the Team Cymru DB for this IP (unannounced prefix), or pWhois being skipped
+			if [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
+				[[ -z "$network_whois_data" ]] && PrintErrorAndExit "Error: no data found for $input"
+				found_asn="N/A (address not announced)"
+				found_asname=""
+			fi
 			IPGeoRepLookup "$1"
 			# check if it's an IXP, otherwise fall back to generic whois
-			IsIXP "$1"
+			[[ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]] && IsIXP "$1" || ixp_data=""; ixp_geo=""
 			if [ -n "$ixp_data" ]; then
 				pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
 				ip_type_data=" ${yellowbg} Internet Exchange ${default}"
@@ -225,7 +232,9 @@ WhoisIP(){
 		output_asname=""
 	fi
 	rpki_output=""
-	if [ "$UNANNOUNCED_PREFIX" = false ]; then
+	if [ "$UNANNOUNCED_PREFIX" = false ] && [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
+		# we skip RPKI lookup in both cases because if SKIP_WHOIS=true then we're being
+		# called from TraceASPath, and RPKI lookup will be performed there subsequently
 		StatusbarMessage "Checking RPKI validity for ${bluebg}AS${found_asn}${lightgreybg} and prefix ${bluebg}${found_route}${lightgreybg}"
 		RPKILookup "$found_asn" "$found_route"
 		StatusbarMessage ""
@@ -301,17 +310,32 @@ LookupASNAndRouteFromIP(){
 	found_asname=""
 	IsBogon "$1"
 	if [ "$IS_BOGON" = false ]; then
-		# TODO: consider switching to DNS lookups (ie dig instead of whois) to improve speed (esp. during traces)
-		output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
-		found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
-		if [ "$found_asn" = "NA" ]; then
-			# Team Cymru has no data for this IP. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
-			found_asn=""
-			UNANNOUNCED_PREFIX=true
+		if echo "$1" | grep -q ':'; then
+			# whois query for IPv6 addresses
+			output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
+			found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}')
+			if [ "$found_asn" = "NA" ]; then
+				# Team Cymru has no data for this IPv6. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
+				found_asn=""
+				UNANNOUNCED_PREFIX=true
+			else
+				found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
+				found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
+				UNANNOUNCED_PREFIX=false
+			fi
 		else
-			found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
-			found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
-			UNANNOUNCED_PREFIX=false
+			# DNS query (faster) for IPv4 addresses
+			rev=$(echo "$1" | awk -F'.' '{printf $4 "." $3 "." $2 "." $1}')
+			output=$(host -t TXT "$rev.origin.asn.cymru.com" | awk -F'"' 'NR==1{print $2}' | sed 's/\ *|\ */|/g')
+			found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}' | cut -d ' ' -f 1) # final cut gets first origin AS only if cymru has multiple
+			if [ -n "$found_asn" ]; then
+				found_asname=$(host -t TXT "AS$found_asn.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
+				found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $2}')
+				UNANNOUNCED_PREFIX=false
+			else
+				# Team Cymru has no data for this IPv4. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
+				UNANNOUNCED_PREFIX=true
+			fi
 		fi
 	else
 		# bogon address, consider it unannounced
@@ -350,10 +374,12 @@ PrintUsage(){
 }
 
 PwhoisLookup(){
+	StatusbarMessage "Collecting pWhois data"
 	pwhois_output=$(whois -h whois.pwhois.org "$1")
+	StatusbarMessage ""
 	if echo "$pwhois_output" | grep -vq "That IP address doesn't appear"; then
-		pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
-		pwhois_prefix=$(echo "$pwhois_output" | grep -E "^Prefix" | cut -d ':' -f 2 | sed 's/^ //')
+		# pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
+		# pwhois_prefix=$(echo "$pwhois_output" | grep -E "^Prefix" | cut -d ':' -f 2 | sed 's/^ //')
 		pwhois_asorg=$(echo "$pwhois_output" | grep -E "^AS-Org-Name" | cut -d ':' -f 2 | sed 's/^ //')
 		# group all "Org-Name" fields on a single line
 		pwhois_org=$(echo "$pwhois_output" | grep -E "^Org-Name" | cut -d ':' -f 2 | sed 's/^[ \t]*//g' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
@@ -393,7 +419,7 @@ RdnsLookup(){
 	# reverse DNS (PTR) lookup.
 	# get first lookup result only (in case of multiple PTR records) and remove trailing dot and CR (Cygwin) from hostname
 	rdns=$(host "$1" | awk 'NR==1{sub(/\.\r?$/, "", $NF); print $NF}')
-	if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL|^record$"; then rdns=""; fi
+	if echo "$rdns" | grep -E -q "NXDOMAIN|SERVFAIL|REFUSED|^record$"; then rdns=""; fi
 	echo "$rdns"
 }
 
@@ -466,7 +492,7 @@ TraceASPath(){
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
 
 	# start the mtr trace
-	mtr_output=$(mtr -j -n -c"$mtr_rounds" "$host_to_trace" | jq '.report.hubs[]')
+	mtr_output=$(mtr -C -n -c"$mtr_rounds" "$host_to_trace" | tail -n +2)
 	declare -a tracehops_array
 	declare -a aspath_array
 	# initialize the aspath array with our source AS
@@ -487,27 +513,37 @@ TraceASPath(){
 	LAST_HOP=false
 	ROUTING_LOOP=false
 
-	# parse mtr output (json)
-	mtr_hopnum=0
+	# parse mtr output (csv)
+	hop_num=0
 	while true; do
-		((mtr_hopnum++))
-		cur_hop_data=$(echo "$mtr_output" | jq 'select (.count=="'"${mtr_hopnum}"'") | .')
-		[[ -z "$cur_hop_data" ]] && break # we're past the last trace hop, quit the loop
-		hop_ip=$(echo "$cur_hop_data" | jq -r '.host')
-		hop_ping=$(echo "$cur_hop_data" | jq -r '.Avg' | awk '{ printf ("%.1f\n", $1) }')
-		hop_loss=$(echo "$cur_hop_data" | jq -r '.["Loss%"]')
-		tracehops_array["$mtr_hopnum"]="$hop_ip"
+		((hop_num++))
+		IFS=',' read -ra cur_hop_data <<< "$(echo "$mtr_output" | head -n "$hop_num" | tail -n 1)"
+		mtr_hopnum=${cur_hop_data[4]}
+		[[ "$hop_num" -gt "$mtr_hopnum" ]] && break # we're past the last trace hop, quit the loop
+		hop_ip=${cur_hop_data[5]}
+		hop_loss=${cur_hop_data[6]%.*}
+		hop_ping=$(echo "${cur_hop_data[10]}" | awk '{ printf ("%.1f\n", $1) }')
+		if [ "$hop_loss" -ne 0 ]; then
+			# color packet loss yellow if between 1% and 50%, or red if > 50%
+			[[ "$hop_loss" -le 50 ]] && loss_color="$lightyellow" || loss_color="$lightred"
+			if [ "$DETAILED_TRACE" = false ]; then
+				hop_loss=$(printf "${loss_color}%5s" "$hop_loss") # packet loss position in normal path trace (spacing to fit the column alignment)
+			else
+				hop_loss="${loss_color}${hop_loss}" # packet loss position in detailed path trace (no spacing)
+			fi
+		fi
+		tracehops_array["$hop_num"]="$hop_ip"
 		ixp_tag=""
 		hop_asn=""
 		if [ "$hop_ip" = "???" ]; then
 			# print no reply hop info
 			if [ "$DETAILED_TRACE" = true ]; then
 				trailing_line=$(printf '%.0s═' $(seq $((border_width-9-${#hop_ip}))) )
-				hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$mtr_hopnum" "$hop_ip" "$trailing_line")"
+				hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$hop_num" "$hop_ip" "$trailing_line")"
 				hop_output+="\n        ├${bluebg}PNG${default} ${white}* (No reply)${default}\n"
-				hop_output+="        └${bluebg}LOS${default} ${white}${hop_loss}% packet loss${default}\n"
+				hop_output+="        └${bluebg}LOS${default} ${hop_loss}%${default} packet loss\n"
 			else
-				hop_output="$(printf "%3s. %-$((output_width-60))s %6s %10s ms   %s" "$mtr_hopnum" "$hop_ip" "$hop_loss%" "*" "${white}(No reply)${default}")"
+				hop_output="$(printf "%3s. %-$((output_width-60))s %6s${default} %13s   %s" "$hop_num" "$hop_ip" "$hop_loss%" "*" "${white}(No reply)${default}")"
 			fi
 			HopPrint "${hop_output}"
 			continue # jump to the next hop
@@ -517,17 +553,17 @@ TraceASPath(){
 		hostname=$(RdnsLookup "$hop_ip")
 
 		# check for routing loops, if so fail immediately
-		if [ "$mtr_hopnum" -ge 2 ]; then
-			prev_hop=${tracehops_array[$(( mtr_hopnum-1 ))]}
+		if [ "$hop_num" -ge 2 ]; then
+			prev_hop=${tracehops_array[$(( hop_num-1 ))]}
 			if [ "$hop_ip" = "$prev_hop" ]; then
 				ROUTING_LOOP=true
 				break
 			fi
 		fi
-		if [ "$mtr_hopnum" -ge 4 ]; then
+		if [ "$hop_num" -ge 4 ]; then
 			# detect routing loops
-			two_hops_ago=${tracehops_array[$(( mtr_hopnum-2 ))]}
-			three_hops_ago=${tracehops_array[$(( mtr_hopnum-3 ))]}
+			two_hops_ago=${tracehops_array[$(( hop_num-2 ))]}
+			three_hops_ago=${tracehops_array[$(( hop_num-3 ))]}
 			if [ "$hop_ip" = "$two_hops_ago" ] && [ "$prev_hop" = "$three_hops_ago" ]; then
 				ROUTING_LOOP=true
 				break
@@ -579,32 +615,38 @@ TraceASPath(){
 				fi
 			fi
 			if [ "$DETAILED_TRACE" = true ] && [ "$UNANNOUNCED_PREFIX" = false ]; then
-				# run a pWhois lookup if the hop is within an announced prefix,
-				# otherwise we already have generic whois data stored (also in case of an IXP prefix)
+				hop_asn="$found_asn"
+				hop_prefix="$found_route"
+
+				# run a pWhois lookup if the hop is within an announced prefix
 				PwhoisLookup "$hop_ip"
-				hop_asn="$pwhois_asn"
+
+				# in the event where Cymru has data, but pWhois doesn't, run a WhoisIP to fetch generic whois info
+				# specifying the "generic_whois_lookup_only" parameter in order not to run pWhois/IXP lookups again
+				[[ -z "$pwhois_output" ]] && WhoisIP "$hop_ip" "generic_whois_lookup_only" >/dev/null # don't display this, we're being parsed off-screen
 				hop_org="$pwhois_org"
 				hop_net="$pwhois_net"
 				hop_typ="$ip_type_data"
 				hop_geo="$pwhois_geo"
 				hop_rep="$ip_rep_data"
-				hop_prefix="$pwhois_prefix"
 			fi
 		fi
 
 		# DNS data (only used if a hostname was resolved)
-		[[ -n "$hostname" ]] && hop_ip="$hostname ($hop_ip)"
+		if [ -n "$hostname" ] && [ ! "$hostname" = "-" ]; then
+			hop_ip="$hostname ($hop_ip)"
+		fi
 		# IXP coloring
 		[[ -z "$ixp_tag" ]] && hop_ip="${white}${hop_ip}${default}" || hop_ip="${blue}${hop_ip}${default}"
 
 		# print trace hop info
 		if [ "$DETAILED_TRACE" = false ]; then
-			hop_output="$(printf "%3s. %-$((output_width-51))s %6s %10s ms   %s" "$mtr_hopnum" "${hop_ip}" "$hop_loss%" "${hop_ping}" "$asn_data")"
+			hop_output="$(printf "%3s. %-$((output_width-51))s %6s${default} %10s ms   %s" "$hop_num" "${hop_ip}" "$hop_loss%" "${hop_ping}" "$asn_data")"
 		else
 			trailing_line=$(printf '%.0s═' $(seq $((border_width-${#hop_ip}))) )
-			hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$mtr_hopnum" "${hop_ip}" "$trailing_line")"
+			hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$hop_num" "${hop_ip}" "$trailing_line")"
 			hop_output+="\n        ├${bluebg}PNG${default} ${white}${hop_ping} ms${default}\n"
-			hop_output+="        ├${bluebg}LOS${default} ${white}${hop_loss}% packet loss${default}"
+			hop_output+="        ├${bluebg}LOS${default} ${hop_loss}%${default} packet loss${default}"
 			# only add ASN data when not an IXP, otherwise we'll have duplicate data when ORG gets printed later
 			if [ -z "$ixp_tag" ]; then
 				# if it's a bogon address it's going to be the last branch of the displayed tree
@@ -658,10 +700,10 @@ TraceASPath(){
 		mtr_end_msg+=" ${default}"
 		# print hop info with final error message
 		if [ "$DETAILED_TRACE" = false ]; then
-			HopPrint "$(printf "%3s. %-$((output_width-51))s %12s %13s   %s" "$mtr_hopnum" "$mtr_end_msg" "100%" "*" "${white}(No reply)${default}")"
+			HopPrint "$(printf "%3s. %-$((output_width-51))s ${lightred}%11s%%${default} %13s   %s" "$hop_num" "$mtr_end_msg" "100" "*" "${white}(No reply)${default}")"
 		else
 			upper_border="${border_color}╔$(printf '%.0s═' $(seq "$border_width"))╗${default}"
-			lower_border="${border_color}╔$(printf '%.0s═' $(seq "$border_width"))╗${default}"
+			lower_border="${border_color}╚$(printf '%.0s═' $(seq "$border_width"))╝${default}"
 			HopPrint "${upper_border}\n  ${mtr_end_msg}\n${lower_border}"
 		fi
 		aspath_array+=("${mtr_end_msg}${default}")
@@ -1015,12 +1057,22 @@ IsIXP() {
 	ixp_geo=""
 	input_is_ipv6=false
 	if [ "$IXP_DETECTION" = true ]; then
-		# Update IXP prefixes from PeeringDB if necessary
-		[[ -z "$peeringdb_dataset" ]] && peeringdb_dataset=$(curl -s https://www.peeringdb.com/api/ixpfx)
-		ixp_prefixes=$(echo -e "$peeringdb_dataset" | jq -r '.data[].prefix')
-		# if input is an IPv4, speedup grepcidr lookup by filtering out IPv6 IXP prefixes
 		echo -e "$1" | grep -q ':' && input_is_ipv6=true
-		[[ "$input_is_ipv6" = false ]] && ixp_prefixes=$(echo -e "$ixp_prefixes" | grep -v ':')
+		# Update IXP prefixes from PeeringDB if necessary
+		# use the appropriate (v4/v6) IXP prefix dataset
+		if [ "$input_is_ipv6" = false ]; then
+			# if input is an IPv4, speedup lookups further by grabbing only IXP prefixes starting with the same two octets
+			# we can afford filtering based on the first two octets since the largest individual IXP prefix is around /20
+			first_octets=$(echo "${1}." | cut -d '.' -f 1,2)
+			peeringdb_ipv4_dataset=$(curl -s "https://www.peeringdb.com/api/ixpfx?prefix__startswith=$first_octets&protocol__in=IPv4")
+			peeringdb_dataset="$peeringdb_ipv4_dataset"
+		else
+			# only fetch IPv6 dataset once, since we don't filter it for prefixes
+			[[ -z "$peeringdb_ipv6_dataset" ]] && peeringdb_ipv6_dataset=$(curl -s "https://www.peeringdb.com/api/ixpfx?protocol__in=IPv6")
+			peeringdb_dataset="$peeringdb_ipv6_dataset"
+		fi
+		ixp_prefixes=$(echo -e "$peeringdb_dataset" | jq -r '.data[].prefix')
+		# search for input prefix through PeeringDB IXP prefix list
 		for prefix in $ixp_prefixes; do
 			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
 				# the IP is part of an IXP prefix
@@ -1062,8 +1114,10 @@ GetIXPresence(){
 }
 
 IPGeoRepLookup(){
+	StatusbarMessage "Collecting geolocation and classification data"
 	# fetch preferred geolocation and anycast data from RIPE IPmap
-	ipmap_output=$(curl -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
+	ipmap_output=$(curl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
+	#ipmap_output="" # TODO: riabilitare IPMAP (hang su 184.104.204.90) cancellando questa riga e decommentando la precedente riga
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
 	ipapi_output=$(curl -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
@@ -1165,6 +1219,7 @@ IPGeoRepLookup(){
 			fi
 		fi
 	fi
+	StatusbarMessage ""
 }
 
 PrintErrorAndExit(){
@@ -1224,7 +1279,7 @@ WhatIsMyIP() {
 CheckPrerequisites() {
 	saveIFS="$IFS"
 	IFS=' '
-	prerequisite_tools="coproc jq whois host curl" # mandatory tools
+	prerequisite_tools="jq whois host curl" # mandatory tools
 	optionals_tools="mtr ipcalc grepcidr"	# optional tools
 	missing_tools=""
 	disabled_features=""
@@ -1232,6 +1287,17 @@ CheckPrerequisites() {
 
 	HAVE_IPCALC=true
 	IXP_DETECTION=true
+
+	#* BASH version check
+	bash_major=$(echo "${BASH_VERSION}" | cut -d '.' -f 1)
+	bash_minor=$(echo "${BASH_VERSION}" | cut -d '.' -f 2)
+	bash_version_too_low=false
+	if [ "$bash_major" -lt 4 ]; then
+		bash_version_too_low=true
+	elif [ "$bash_major" -eq 4 ] && [ "$bash_minor" -lt 2 ]; then
+		bash_version_too_low=true
+	fi
+	[[ "$bash_version_too_low" = true ]] && PrintErrorAndExit "Error: BASH version must be >= 4.2 (you are running v${BASH_VERSION})"
 
 	#* Mandatory tools checking (hard fail if not found)
 	for tool in $prerequisite_tools; do
@@ -1320,6 +1386,8 @@ white=$'\e[97m'
 blue=$'\e[94m'
 red=$'\e[31m'
 black=$'\e[30m'
+lightyellow=$'\e[38;5;220m'
+lightred=$'\e[91m'
 lightgreybg=$'\e[47m\e[30m'
 bluebg=$'\e[44m\e[30m'
 redbg=$'\e[30m\e[101m'
@@ -1332,6 +1400,7 @@ IQS_TOKEN_FILENAME="$HOME/.asn/iqs_token"
 
 # PeeringDB list of IXP prefixes
 peeringdb_dataset=""
+peeringdb_ipv6_dataset=""
 
 # Signals trapping (interrupt/terminal resize)
 NO_ERROR_ON_INTERRUPT=false

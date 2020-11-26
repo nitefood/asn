@@ -6,7 +6,7 @@ ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP r
 
 This script serves the purpose of having a quick OSINT command line tool at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
-Features:
+#### Features:
 
 * It will lookup relevant Autonomous System information for any given AS number, including:
   * **Organization name**
@@ -77,12 +77,12 @@ Requires Bash v4.2+. Tested on:
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/100091817-6fef8c80-2e55-11eb-985b-7ab3a5a865ac.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/100301315-36736a00-2f98-11eb-8e13-e720e147c663.png)
 
 
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
 
-![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100092137-dffe1280-2e55-11eb-8ae3-7c54bb0c8e14.png)
+![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100301579-b4d00c00-2f98-11eb-82c5-047c190ffcd6.png)
 
 
 * _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
@@ -198,8 +198,9 @@ The script will perform IP and trace hop geolocation with this logic:
 
 ##### *IP Classification*
 
-The script will use the ip-api and PeeringDB services to classify target IPs and trace hops into these categories:
+The script will use the ip-api, RIPE IPmap and PeeringDB services to classify target IPs and trace hops into these categories:
 
+- [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
 - Mobile network
 - Proxy host (TOR exit node/VPN/etc)
 - Hosting network (datacenter/hosting provider/etc)
