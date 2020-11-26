@@ -156,6 +156,10 @@ In order to do so, you can use the following command:
 
 ## Usage
 
+AS path tracing is enabled by default for all lookups involving an IP or hostname. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
+
+Tracing can be disabled altogether by passing the `[-n|--notrace]` command line switch.
+
 ##### *Syntax*
 
 * `asn <ASnumber>` -- _to lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)_
@@ -164,12 +168,6 @@ In order to do so, you can use the following command:
 * `asn <Route>` -- _to lookup matching ASN data for the given prefix_
 * `asn [-o] <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
 * `asn [-s] <Name>` -- _to search for all ASNs matching a given name. Can be used to map all ASNs related to a given company_
-
-##### *Path tracing and reputation*
-
-- AS path tracing is enabled by default for all lookups. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
-- Geolocation and organization data is taken from pWhois, while IP reputation data is taken from Auth0 Signals.
-- Tracing can be disabled altogether by passing the `[-n|--notrace]` command line switch.
 
 ##### *Detailed mode (-d)*
 
@@ -187,6 +185,11 @@ In order to do so, you can use the following command:
 - The script will try to find ASNs matching the given search string, using the RIPEStat API.
 
 ## Notes
+
+##### *Organization data and IP Reputation*
+
+- Organization data is taken from pWhois
+- IP reputation data is taken from StopForumSpam and IpQualityScore
 
 ##### *Geolocation*
 

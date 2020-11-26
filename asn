@@ -540,7 +540,7 @@ TraceASPath(){
 			if [ "$DETAILED_TRACE" = true ]; then
 				trailing_line=$(printf '%.0s═' $(seq $((border_width-9-${#hop_ip}))) )
 				hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$hop_num" "$hop_ip" "$trailing_line")"
-				hop_output+="\n        ├${bluebg}PNG${default} ${white}* (No reply)${default}\n"
+				hop_output+="\n        ├${bluebg}RTT${default} ${white}* (No reply)${default}\n"
 				hop_output+="        └${bluebg}LOS${default} ${hop_loss}%${default} packet loss\n"
 			else
 				hop_output="$(printf "%3s. %-$((output_width-60))s %6s${default} %13s   %s" "$hop_num" "$hop_ip" "$hop_loss%" "*" "${white}(No reply)${default}")"
@@ -645,7 +645,7 @@ TraceASPath(){
 		else
 			trailing_line=$(printf '%.0s═' $(seq $((border_width-${#hop_ip}))) )
 			hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$hop_num" "${hop_ip}" "$trailing_line")"
-			hop_output+="\n        ├${bluebg}PNG${default} ${white}${hop_ping} ms${default}\n"
+			hop_output+="\n        ├${bluebg}RTT${default} ${white}${hop_ping} ms${default}\n"
 			hop_output+="        ├${bluebg}LOS${default} ${hop_loss}%${default} packet loss${default}"
 			# only add ASN data when not an IXP, otherwise we'll have duplicate data when ORG gets printed later
 			if [ -z "$ixp_tag" ]; then
@@ -1117,7 +1117,6 @@ IPGeoRepLookup(){
 	StatusbarMessage "Collecting geolocation and classification data"
 	# fetch preferred geolocation and anycast data from RIPE IPmap
 	ipmap_output=$(curl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
-	#ipmap_output="" # TODO: riabilitare IPMAP (hang su 184.104.204.90) cancellando questa riga e decommentando la precedente riga
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
 	ipapi_output=$(curl -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
