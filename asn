@@ -369,6 +369,7 @@ PrintUsage(){
 			"\n\n  ${blue}<IPv4/IPv6>${default}\n\tLookup matching route(4/6), IP reputation and ASN data" \
 			"\n\n  ${blue}<Prefix>${default}\n\tLookup matching ASN data" \
 			"\n\n  ${blue}<host.name.tld>${default}\n\tLookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR" \
+			"\n\n  ${blue}<URL>${default}\n\tExtract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and prepended credentials" \
 			"\n\n  ${blue}<Organization Name>${default}\n\tSearch by company name and lookup network ranges exported by (or related to) the company" \
 			"\n\n\nProject homepage: ${yellow}https://github.com/nitefood/asn${default}\n"
 }
@@ -1501,7 +1502,6 @@ if [ "$SUGGEST_SEARCH" = true ]; then
 	exit 0
 fi
 
-
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 
 if [ -z "$input" ]; then
@@ -1510,12 +1510,18 @@ if [ -z "$input" ]; then
 	if [ -z "$asn" ]; then
 		# Input is not an ASN either. See if it's a hostname (includes at least one dot)
 		if echo "$userinput" | grep -q "\."; then
-			echo -e -n "\n${blue}- Resolving \"$userinput\"... "
-			ip=$(ResolveHostnameToIPList "$userinput")
+			# filter the input in case it's a URL, extracting relevant hostname/IP data
+			userinput=$(awk -F[/:] '{gsub(".*//", ""); gsub(".*:.*@", ""); print $1}' <<<"$userinput")
+			# run the IP regex again in case input is an IP(v6) URL (e.g. https://1.2.3.4/) and skip resolution if an IP is found
+			ip=$(echo "$userinput" | grep -Eo "$ipv4v6regex")
 			if [ -z "$ip" ]; then
-				echo -e "${red}Error: unable to resolve hostname${default}" \
-						"\n\n(Hint: if you wanted to search by organization, try the ${blue}'-o'${default} switch)\n"
-				exit 1
+				echo -e -n "\n${blue}- Resolving \"$userinput\"... "
+				ip=$(ResolveHostnameToIPList "$userinput")
+				if [ -z "$ip" ]; then
+					echo -e "${red}Error: unable to resolve hostname${default}" \
+							"\n\n(Hint: if you wanted to search by organization, try the ${blue}'-o'${default} switch)\n"
+					exit 1
+				fi
 			fi
 			numips=$(echo "$ip" | wc -l)
 			[[ $numips = 1 ]] && s="" || s="es"

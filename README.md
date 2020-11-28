@@ -156,18 +156,29 @@ In order to do so, you can use the following command:
 
 ## Usage
 
-AS path tracing is enabled by default for all lookups involving an IP or hostname. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
-
-Tracing can be disabled altogether by passing the `[-n|--notrace]` command line switch.
-
 ##### *Syntax*
 
-* `asn <ASnumber>` -- _to lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)_
-* `asn [-n|-d] <IPv4/IPv6>` -- _to lookup matching route(4/6), IP reputation and ASN data_
-* `asn [-n|-d] <host.name.tld>` -- _to lookup matching IP(v4/v6), route and ASN data (supports multiple IPs - e.g. DNS RR)_
-* `asn <Route>` -- _to lookup matching ASN data for the given prefix_
-* `asn [-o] <Organization Name>` -- _to search by company name and lookup network ranges exported by (or related to) the company_
-* `asn [-s] <Name>` -- _to search for all ASNs matching a given name. Can be used to map all ASNs related to a given company_
+`asn [OPTIONS] <TARGET>`
+
+where `TARGET` can be one of the following:
+
+* **AS number** -- lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)
+* **IPv4/IPv6/Prefix** -- lookup matching route(4/6), IP reputation and ASN data
+* **Hostname** -- resolve the host and lookup data (same as IPv4/IPv6 lookup. Supports multiple IPs - e.g. DNS RR)
+* **URL** -- extract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and [prepended credentials](https://en.wikipedia.org/wiki/Basic_access_authentication#URL_encoding)
+* **Organization name** -- search by company name and lookup network ranges exported by (or related to) the company
+
+Options:
+
+* `[-d|--detailed]` -- enables *detailed mode* (more info below)
+* `[-n|--notrace]` -- disables path tracing and only outputs lookup info
+* `[-o|--organization]` -- forces a Search-By-Organization lookup and skip all target identification checks
+* `[-s|--suggest]` -- enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+
+Default behavior:
+
+* The script will attempt to automatically identify the `TARGET` type, if invoked with `-d` , `-n` or without options, 
+* AS path tracing is **enabled by default** for all lookups involving an IP or hostname. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
 
 ##### *Detailed mode (-d)*
 
@@ -182,7 +193,7 @@ Tracing can be disabled altogether by passing the `[-n|--notrace]` command line 
 
 ##### *ASN suggest (-s)*
 
-- The script will try to find ASNs matching the given search string, using the RIPEStat API.
+- The script will try to find ASNs matching the given search string, using the RIPEStat API. This mode can be used to map all the autonomous systems related to a given company.
 
 ## Notes
 
