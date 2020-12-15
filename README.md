@@ -1,10 +1,14 @@
-# ASN Lookup Tool (Bash)
+# ASN Lookup Tool and Traceroute Server (Bash)
+
+
 
 ## Description
 
-ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool.
+ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation & geolocation lookup tool / Web traceroute server.
 
 This script serves the purpose of having a quick OSINT command line tool at disposal when investigating network data, which can come in handy in incident response scenarios as well.
+
+It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](https://github.com/nitefood/asn#running-lookups-from-the-browser) for more information about  server mode functionality.
 
 #### Features:
 
@@ -21,6 +25,7 @@ This script serves the purpose of having a quick OSINT command line tool at disp
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
+- It will perform **IP geolocation** lookups according to the logic described [below](https://github.com/nitefood/asn#geolocation).
 - It will perform **IP reputation** lookups and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 - It will perform **IP classification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
   - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
@@ -112,23 +117,24 @@ This script requires **BASH v4.2** or later. Some additional packages are also r
 
 * **Debian/Ubuntu:**
 
-  `apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr`
+  `apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc && git clone https://github.com/theZiz/aha.git && make install -C aha/ `
 
 * **CentOS 7/8:**
 
   ```
-  yum -y install curl whois bind-utils mtr jq perl && \
+  yum -y install curl whois bind-utils mtr jq perl nmap git gcc && \
   rpm -ivh http://www6.atomicorp.com/channels/atomic/centos/7/x86_64/RPMS/grepcidr-2.0-1.el7.art.x86_64.rpm \
-  https://ftp.tu-chemnitz.de/pub/linux/dag/redhat/el7/en/x86_64/rpmforge/RPMS/ipcalc-0.41-1.el7.rf.x86_64.rpm
+  https://ftp.tu-chemnitz.de/pub/linux/dag/redhat/el7/en/x86_64/rpmforge/RPMS/ipcalc-0.41-1.el7.rf.x86_64.rpm; \
+  git clone https://github.com/theZiz/aha.git && make install -C aha/
   ```
 
 * **FreeBSD**:
 
-  `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr`
+  `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
 
 * **MacOS** (using [Homebrew](https://brew.sh)):
 
-  `brew install bash coreutils curl whois mtr jq ipcalc grepcidr && brew link mtr`
+  `brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr`
 
   *(Note for MacOS users: if `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it)*
 
@@ -158,7 +164,11 @@ In order to do so, you can use the following command:
 
 ##### *Syntax*
 
-`asn [OPTIONS] <TARGET>`
+`asn [OPTIONS] [TARGET]`
+
+`asn [-v] -l [SERVER OPTIONS]`
+
+
 
 where `TARGET` can be one of the following:
 
@@ -168,32 +178,79 @@ where `TARGET` can be one of the following:
 * **URL** -- extract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and [prepended credentials](https://en.wikipedia.org/wiki/Basic_access_authentication#URL_encoding)
 * **Organization name** -- search by company name and lookup network ranges exported by (or related to) the company
 
-Options:
 
-* `[-d|--detailed]` -- enables *detailed mode* (more info below)
-* `[-n|--notrace]` -- disables path tracing and only outputs lookup info
-* `[-o|--organization]` -- forces a Search-By-Organization lookup and skip all target identification checks
-* `[-s|--suggest]` -- enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+
+<u>Options</u>:
+
+* `[-d]`
+  * enables *detailed mode* (more info below)
+* `[-n]`
+  * disables path tracing and only outputs lookup info
+* `[-o]`
+  * forces a Search-By-Organization lookup and skip all target identification checks
+* `[-s]`
+  * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+* `[-h]`
+  *  Show usage information.
+* `[-l]`
+  * Launch the script in *server mode*. See **Server Options** below
+
+
+
+<u>Server Options</u>:
+
+* `BIND_ADDRESS`
+  * IP address (v4/v6) to bind the listening server to (e.g. `asn -l 0.0.0.0`)
+* `BIND_PORT` 
+  * TCP Port to bind the listening server to (e.g. `asn -l 12345`)
+* `BIND_ADDRESS BIND_PORT`
+  * IP address and port to bind the listening server to (e.g. `asn -l ::1 12345`)
+* `-v`
+  * Enable verbose output and debug messages in server mode
+* `--allow host[,host,...]`
+  * Allow only given hosts to connect to the server
+* `--allowfile file`
+  * A file of hosts allowed to connect to the server
+* `--deny host[,host,...]`
+  * Deny given hosts from connecting to the server
+* `--denyfile file`
+  * A file of hosts denied from connecting to the server
+* `-m, --max-conns <n>`
+  * The maximum number of simultaneous connections accepted by the server. 100 is the default.
+
+*Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
+*Unless specified, the default IP:PORT values of **127.0.0.1:49200** will be used (e.g.* `asn -l`*)*
+
+
 
 Default behavior:
 
 * The script will attempt to automatically identify the `TARGET` type, if invoked with `-d` , `-n` or without options, 
 * AS path tracing is **enabled by default** for all lookups involving an IP or hostname. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
 
-##### *Detailed mode (-d)*
+##### *Detailed mode (`-d`)*
 
 - Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
 
   Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
 
-##### *Organization search (-o)*
+##### *Organization search (`-o`)*
 
 - The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
   In order to force an organization search (for example for Orgs containing `.` in their name), pass the `[-o|--organization]` command line switch.
 
-##### *ASN suggest (-s)*
+##### *ASN suggest (`-s`)*
 
 - The script will try to find ASNs matching the given search string, using the RIPEStat API. This mode can be used to map all the autonomous systems related to a given company.
+
+##### *Server mode (`-l`)*
+
+- The script will start up a webserver allowing the user to run remote lookups and traceroutes directly from the browser.
+  The web server is actually an [ncat](https://nmap.org/ncat/) listener waiting for requests, responding to browsers querying through the HTTP protocol. This interface makes for a straightforward integration into user workflow and no need to download any client-side tools.
+  By simply using a Javascript [bookmarklet](https://en.wikipedia.org/wiki/Bookmarklet) or custom [search engine](https://www.howtogeek.com/114176/how-to-easily-create-search-plugins-add-any-search-engine-to-your-browser/), it will be possible to launch remote traces and lookups without ever leaving the browser.
+  Refer to the [this section](https://github.com/nitefood/asn#running-lookups-from-the-browser) for more information.
+
+##### 
 
 ## Notes
 
@@ -225,9 +282,141 @@ The script will use the ip-api, RIPE IPmap and PeeringDB services to classify ta
 - The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
 - The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with some [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
 
+
+
+## Running lookups from the browser
+
+##### *Prerequisites tools for server mode*
+
+Server mode requires two tools for its functionality: `nmap` and `aha`. Specifically, [aha](https://github.com/theZiz/aha) (the ANSI->HTML converter) v0.5+ is required. Nmap is only required since it includes the `ncat` network tool in the same package. The actual script requirement is just `ncat`, not the full nmap package.
+
+Please refer to the [prerequisite packages](https://github.com/nitefood/asn#prerequisite-packages) section and run the appropriate commands to install the required packages for your operating system.
+
+#### Server side
+
+Once started in **server mode**, `asn` will spin up a custom webserver waiting for browser requests. This is what the server-side console looks like:
+
+![server_console](https://user-images.githubusercontent.com/24555810/102154363-80ee5500-3e79-11eb-840f-53e3619be2e4.png)
+
+The server is now ready to accept browser requests (only from the local machine, in this case - since I've launched it with no command line switches, which defaults to listening on **127.0.0.1:49200**. Refer to the [usage](https://github.com/nitefood/asn#usage) section for more information about the available server options).
+
+#### Client side
+
+Visit [this page](http://127.0.0.1:49200/asn_bookmarklet) in your browser and follow the instructions to copy the bookmarklet to your bookmarks toolbar:
+
+![bookmarklet_install](https://user-images.githubusercontent.com/24555810/102159720-640b4f00-3e84-11eb-8360-afa79b6f0f5f.png)
+
+##### *How it works*
+
+The bookmarklet is actually a small piece of Javascript code which will grab the hostname of the website you're currently visiting in the browser, and pass it to the server through a simple *HTTP GET* request. The server then proceeds to perform the lookup and traceroute (from its own viewpoint, just like it does when ran interactively from the command line), and feed the results to your browser through an HTML page, mimicking the effect of a scrolling terminal.
+
+The link you drag to the bookmarks bar is actually a *minified* (i.e.: compacted) version of the source javascript code, but for reference, here's the full source:
+
+```javascript
+javascript:(function () {
+	var asnserver = "localhost:49200";
+    var target = window.location.hostname;
+    var width = screen.width - screen.width / 7;
+    var height= screen.height - screen.height / 4;
+    var left = window.innerWidth / 2 - width / 2;
+    var top = window.innerHeight / 2 - height / 2;
+    window.open("http://" + asnserver + "/asn_lookup&" + target, "newWindow", "width=" + width + ",height=" + height + ",top=" + top + ",left=" + left);
+})();
+```
+
+If you want to "un-minify" the actual bookmarklet code, you can refer to [this site](https://unminify.com/).
+
+Once the trace is finished, an option to share the output on [termbin](https://termbin.com/) is given to the user. This makes for quick sharing of the traceroute or lookup output with other people:
+
+![termbin](https://user-images.githubusercontent.com/24555810/102160506-dc264480-3e85-11eb-9e14-8c851f261172.png)
+
+![termbin_2](https://user-images.githubusercontent.com/24555810/102168101-f49b5c80-3e8f-11eb-8bc6-9f0592fa9624.png)
+
+
+
+#### Search engine setup
+
+In order to take full advantage of having `asn` inside the browser, it is possible to install it as a custom search engine for the browser search bar. This allows to leverage the server to  search for **ASNs**, **URLs**, **IPs**, **Hostnames**, and so on, depending on the search string.
+
+Generally speaking, this implies instructing the browser that when a certain **keyword** is prepended to a search, the following characters (the actual **search string**, identified by `%s`) have to be passed to a certain URL. The URL is then constructed according to this logic, and opened just like a normal webpage.
+
+I've used `@asn` for my keyword, but anything would do. In order to speed up things, one could very well use a shorter tag (e.g. `#`) that, when used in the address bar, automatically switches your search engine to the ASN Lookup server.
+Note that the leading `@` sign is not mandatory, just handy since it doesn't get in the way of normal searches, but there's much freedom with that.
+
+For quick reference, the search string to enter (for both Firefox and Chrome) is: `http://127.0.0.1:49200/asn_lookup&%s`. Of course that sends lookup requests to the *locally* running ASN server.
+
+Here's how to add a search engine in Firefox and Chrome:
+
+***Firefox***:
+
+* Simply create a new bookmark and fill its details like this:
+
+  ![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
+
+  Afterwards, you will be able to run queries and traceroutes by simply entering, for example, `@asn 8.8.8.8` in the browser's location bar.
+
+***Chrome:***
+
+1. Right click the location bar and select ***Manage search engines...***
+
+   ![searchsetup_chrome_1](https://user-images.githubusercontent.com/24555810/102161929-87d09400-3e88-11eb-9e42-70087e3fab87.png)
+   
+   2.Click **Add**:
+
+   ![searchsetup_chrome_2](https://user-images.githubusercontent.com/24555810/102162100-dc740f00-3e88-11eb-8037-528fbcc636e9.png)
+   
+   
+
+   3.Fill in the details as shown below:
+   
+   ![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
+
+As usual, the keyword is entierly customizable to your preference.
+
+
+
+***Other browsers:***
+
+* You may want to follow [this post](https://www.howtogeek.com/114176/how-to-easily-create-search-plugins-add-any-search-engine-to-your-browser/) to search for instructions on how to add a custom search engine for your browser of choice.
+
+
+
+#### Running the server on an external host
+
+##### *Port forwarding*
+
+In order to access the server remotely, beside binding to `0.0.0.0` (or any other relevant IP address for your scenario),  if the host is behind a NAT router, you'll need to forward the listening port (`BIND_PORT`) from the host/router outside IP to the actual machine where the ASN server is running on.
+It is a single port (by default `TCP/49200`), and you can change it via the command line parameters (see [Usage](https://github.com/nitefood/asn#usage)).
+
+##### *Textual browser client*
+
+It is possible to launch remote traces from another command line, and view the results directly in the terminal. All it takes is a compatible text browser, for example `elinks` (but you can download results for later reviewing even using `curl` or really anything else).
+
+The script makes use of 8-bit ANSI colors for its output, so the command to launch a remote trace using elinks would be something like this: 
+
+`elinks -dump -dump-color-mode 3 http://<ASN_SRV_IP>:49200/8.8.8.8`
+
+##### *Security considerations*
+
+The server logic in itself is very simple: the script implements a basic web server entirely in BASH, leveraging the fact that it can talk to a browser using the HTTP protocol and the HTML language, in a reasonably simple way.
+
+The core behind it revolves around [ncat](https://nmap.org/ncat/), a very robust and stable netcat-like network tool. This is the actual "server" listening for incoming connection, and spawning connection handlers (that is, 'single-purpose' instances of the `asn` script itself) as clients connect.
+
+If you decide to open it to the outside (i.e.: binding it to something that is not localhost, and launching traces from outside your local machine), please bear in mind that there is no authentication mechanism (yet) integrated into the code, so theoretically anybody with the right URL could *spawn traceroutes from your server* and view the results.
+
+To contrast that, fortunately `ncat` implements a robust allow/deny logic (based both on command line parameters and files, a la `/etc/hosts.allow` and `hosts.deny`). The script supports passing parameters directly to `ncat`, therefore it's possible to make full use of its filtering capabilities and lock the server to a restricted range of trusted IPs.
+
+The available options, and some usage examples, can be viewed by running `asn -h`.
+
+*Note: if you plan to run the server somewhere else than your local machine, remember to change the bookmarklet code and the custom search engine URL values to reflect the actual IP of the asn server. It is naturally possible to have multiple bookmarklets and search engine keywords to map to different ASN server instances.*
+
+*For the bookmarklet, you'll need to change this value at the very beginning:* `var asnserver="localhost:49200"` *and make it point to the new address:port pair. No further change is required in the remaining JS code.*
+
+
+
 ## Thanks
 
-This script was featured in the **Security Trails** blog post "[_ASN Lookup Tools, Strategies and Techniques_](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
+An initial version of this script was featured in the **Security Trails** blog post "[_ASN Lookup Tools, Strategies and Techniques_](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
 
 Thanks [Massimo Candela](https://github.com/massimocandela/) for your support and excellent work on [IPmap](https://ipmap.ripe.net/), [BGPlay](https://github.com/massimocandela/BGPlay) and [TraceMON](https://github.com/RIPE-NCC/tracemon)!
 

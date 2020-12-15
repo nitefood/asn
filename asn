@@ -1,17 +1,22 @@
 #!/usr/bin/env bash
 
-########################################################################################
-# -----------------------------------------------------------------------------------
-#          ASN / IPv4 / IPv6 / Prefix / AS Path / Organization lookup tool
-#
-#               Project homepage: https://github.com/nitefood/asn
-# -----------------------------------------------------------------------------------
-#
-# Usage:
-#
-#  (Launch the script without parameters or visit the project's homepage for usage info)
-#
-########################################################################################
+# ╭──────────────────────────────────────────────────────────────────────────────────────╮
+# │    ASN / IPv4 / IPv6 / Prefix / AS Path / Organization lookup and server tool        │
+# │                                                                                      │
+# │Project homepage:                                                                     │
+# │                                                                                      │
+# │	https://github.com/nitefood/asn                                                      │
+# │                                                                                      │
+# │Usage:                                                                                │
+# │                                                                                      │
+# │ (Launch the script without parameters or visit the project's homepage for usage info)│
+# ╰──────────────────────────────────────────────────────────────────────────────────────╯
+
+ASN_VERSION="0.70.0"
+
+# ╭──────────────────╮
+# │ Helper functions │
+# ╰──────────────────╯
 
 WhoisASN(){
 	found_asname=$(host -t TXT "AS${1}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
@@ -124,22 +129,26 @@ QueryRipestat(){
 
 	[[ -n "$ipv4_inetnums" ]] && ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
 	[[ -n "$ipv6_inetnums" ]] && ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
-	StatusbarMessage ""
+	StatusbarMessage
 }
 
 RIPESuggestASN(){
 	TRIM_WHITESPACES=false
-	input="$1"
+	input=$(tr '[:lower:]' '[:upper:]' <<<"$1")
+	ripe_suggest_output=""
 	while true; do
-		StatusbarMessage "Retrieving suggested ASNs for ${bluebg}${input}${lightgreybg}"
-		ripe_suggest_output=$(curl -s "https://stat.ripe.net/data/searchcomplete/data.json?resource=${input}&sourceapp=nitefood-asn" | \
-								jq -r '.data.categories | .[] | select ( .category == "ASNs" ) | .suggestions[]')
-		StatusbarMessage ""
+		for input_variation in "${input}" "AS_${input}" "AS-${input}" "${input}_AS" "${input}-AS"; do
+			StatusbarMessage "Retrieving suggested ASNs for ${bluebg}${input_variation}${lightgreybg}"
+			# lookup input variation (AS_<input>, AS-<input>, <input>_AS, <input>-AS)
+			ripe_suggest_output+=$(curl -s "https://stat.ripe.net/data/searchcomplete/data.json?resource=${input_variation}&sourceapp=nitefood-asn" | \
+									jq -r '.data.categories | .[] | select ( .category == "ASNs" ) | .suggestions[]')
+		done
+		StatusbarMessage
 		if [ -n "$ripe_suggest_output" ]; then
 			found_suggestions=$(echo -e "$ripe_suggest_output" | jq -r '.description' | sort -u)
 			for suggestion in $found_suggestions; do
 				echo -e "\n${green}$suggestion${default}"
-				for suggestion_asn in $(echo -e "$ripe_suggest_output" | jq -r 'select (.description=="'"$suggestion"'") | .value'); do
+				for suggestion_asn in $(echo -e "$ripe_suggest_output" | jq -r 'select (.description=="'"$suggestion"'") | .value' | awk 'NR==1{print}'); do
 					echo -e "\t${yellow}$suggestion_asn${default}"
 				done
 			done
@@ -237,7 +246,7 @@ WhoisIP(){
 		# called from TraceASPath, and RPKI lookup will be performed there subsequently
 		StatusbarMessage "Checking RPKI validity for ${bluebg}AS${found_asn}${lightgreybg} and prefix ${bluebg}${found_route}${lightgreybg}"
 		RPKILookup "$found_asn" "$found_route"
-		StatusbarMessage ""
+		StatusbarMessage
 		echo ""
 	elif [ "$IS_BOGON" = false ]; then
 		rpki_output="${red}N/A (address not announced)${default}"
@@ -251,8 +260,13 @@ WhoisIP(){
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
 	printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
-	[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "$ip_type_data"
-	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}\n" "├" "$pwhois_geo"
+	[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "${ip_type_data}"
+	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}" "├" "$pwhois_geo"
+	if [ "$IS_ASN_CHILD" = true ] && [ -n "$flag_icon_cc" ]; then
+		# signal to the parent connhandler the correct country flag to display for this IP
+		echo -n " #COUNTRYCODE $flag_icon_cc"
+	fi
+	printf "\n"
 }
 
 IsBogon(){
@@ -354,30 +368,72 @@ ResolveHostnameToIPList(){
 	echo -e "$ip\n"
 }
 
+PrintErrorAndExit(){
+	if [ "$IS_ASN_CHILD" = true ]; then
+		echo -e "\n${redbg}${1}${default}\n" # get the error in the html report
+	else
+		echo -e "\n${redbg}${1}${default}" >&2
+	fi
+	tput sgr0
+	exit 1
+}
+
 PrintUsage(){
-	programname=$(basename "$0")
-	BoxHeader "ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool"
-	echo -e "\nUsage:\n\n  $programname ${green}[OPTIONS] ${blue}<TARGET>${default}\n\nOptions:" \
-			"\n\n  ${green}-d, --detailed\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
+	# if an argument is passed, it will be displayed on stderr and the script will exit with error
+	script_name=$(basename "$0")
+	BoxHeader "ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool" >&2
+	echo -e "\nVERSION:\n\n  ${ASN_VERSION}" \
+			"\n\nUSAGE:\n\n  $script_name [${green}OPTIONS${default}] [${blue}TARGET${default}]" \
+			"\n  $script_name [${red}-v${default}] ${red}-l${default} [${red}SERVER OPTIONS${default}]" \
+			"\n\nOPTIONS:" \
+			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\t(This option also enables RPKI validation/BGP hijacking detection for every hop)" \
-			"\n\n  ${green}-n, --notrace\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
-			"\n\n  ${green}-s, --suggest\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
-			"\n\n  ${green}-o, --organization\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
-			"\n\nSupported targets:" \
-			"\n\n  ${blue}<AS Number>${default}\n\tLookup matching and BGP announcements/neighbours data." \
+			"\n\n  ${green}-n    (no trace)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
+			"\n\n  ${green}-s    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
+			"\n\n  ${green}-o    (organization search)\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
+			"\n\n  ${green}-h    (help)\n\t${default}Show this help screen" \
+			"\n\n  ${red}-l    (lookup server)\n\t${default}Launch the script in server mode. See ${red}SERVER OPTIONS${default} below" \
+			"\n\nTARGET:" \
+			"\n\n  ${blue}<AS Number>${default}\n\tLookup matching ASN and BGP announcements/neighbours data." \
 			"\n\t(Supports \"as123\" and \"123\" formats - case insensitive)" \
 			"\n\n  ${blue}<IPv4/IPv6>${default}\n\tLookup matching route(4/6), IP reputation and ASN data" \
 			"\n\n  ${blue}<Prefix>${default}\n\tLookup matching ASN data" \
 			"\n\n  ${blue}<host.name.tld>${default}\n\tLookup matching IP, route and ASN data. Supports multiple IPs - e.g. DNS RR" \
 			"\n\n  ${blue}<URL>${default}\n\tExtract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and prepended credentials" \
 			"\n\n  ${blue}<Organization Name>${default}\n\tSearch by company name and lookup network ranges exported by (or related to) the company" \
-			"\n\n\nProject homepage: ${yellow}https://github.com/nitefood/asn${default}\n"
+			"\n\nSERVER OPTIONS:" \
+			"\n\n  ${red}BIND_ADDRESS${default}\n\tIP address (v4/v6) to bind the listening server to (e.g. '$script_name -l 0.0.0.0')\n\tDefault value: ${red}${DEFAULT_SERVER_BINDADDR}${default}" \
+			"\n\n  ${red}BIND_PORT${default}\n\tTCP Port to bind the listening server to (e.g. '$script_name -l 12345')\n\tDefault value: ${red}${DEFAULT_SERVER_BINDPORT}${default}" \
+			"\n\n  ${red}BIND_ADDRESS${default} ${red}BIND_PORT${default}\n\tIP address and port to bind the listening server to (e.g. '$script_name -l ::1 12345')" \
+			"\n\n  ${red}-v    (verbose)\n\t${default}Enable verbose output and debug messages in server mode${default}" \
+			"\n\n  ${red}--allow host[,host,...]\n\t${default}Allow only given hosts to connect to the server${default}" \
+			"\n\n  ${red}--allowfile file\n\t${default}A file of hosts allowed to connect to the server${default}" \
+			"\n\n  ${red}--deny host[,host,...]\n\t${default}Deny given hosts from connecting to the server${default}" \
+			"\n\n  ${red}--denyfile file\n\t${default}A file of hosts denied from connecting to the server${default}" \
+			"\n\n  ${red}-m, --max-conns <n>\n\t${default}The maximum number of simultaneous connections accepted by the server. 100 is the default.${default}" \
+			"\n\n\n  Note: Every option in server mode (after -l) is passed directly to the ncat listener." \
+			"\n        Refer to ${blue}man ncat${default} for more details on the available commands." \
+			"\n        Unless specified, the default IP:PORT values of ${DEFAULT_SERVER_BINDADDR}:${DEFAULT_SERVER_BINDPORT} will be used (e.g. 'asn -l')" \
+			"\n\n  Example server usage:" \
+			"\n\t${blue}asn -l${default}" \
+			"\n\t  (starts server on default IP:PORT)\n" \
+			"\n\t${blue}asn -l 0.0.0.0 --allow 192.168.0.0/24,192.168.1.0/24,192.168.2.245${default}" \
+			"\n\t  (binds to all availables IPv4 interfaces on the default port, allowing only connections from the three specified subnets)\n" \
+			"\n\t${blue}asn -l :: 2222 --allow 2001:DB8::/32${default}" \
+			"\n\t  (binds to all availables IPv6 interfaces on port 2222, allowing only connections from the specified prefix)\n" \
+			"\n\t${blue}asn -v -l 0.0.0.0 --allowfile \"~/goodips.txt\" -m 5${default}" \
+			"\n\t  (verbose mode, bind to all IPv4 interfaces, use an allowfile with allowed addresses, accept a maximum of 5 concurrent connections)\n" \
+			"\n  Bookmarklet configuration page:" \
+			"\n\tplease visit ${blue}http://127.0.0.1:49200/asn_bookmarklet${default} and follow the instructions. More documentation is available on github (link below)." \
+			"\n\n\nProject homepage: ${yellow}https://github.com/nitefood/asn${default}\n" >&2
+
+	[[ -n "$1" ]] && PrintErrorAndExit "$1"
 }
 
 PwhoisLookup(){
 	StatusbarMessage "Collecting pWhois data"
 	pwhois_output=$(whois -h whois.pwhois.org "$1")
-	StatusbarMessage ""
+	StatusbarMessage
 	if echo "$pwhois_output" | grep -vq "That IP address doesn't appear"; then
 		# pwhois_asn=$(echo "$pwhois_output" | grep -E "^Origin-AS" | cut -d ':' -f 2 | sed 's/^ //')
 		# pwhois_prefix=$(echo "$pwhois_output" | grep -E "^Prefix" | cut -d ':' -f 2 | sed 's/^ //')
@@ -405,6 +461,7 @@ PwhoisLookup(){
 			pwhois_city=$(echo "$pwhois_output" | grep -m1 -E "^${cityfield}" | cut -d ':' -f 2 | sed 's/^ //')
 			pwhois_region=$(echo "$pwhois_output" | grep -m1 -E "^${regionfield}" | cut -d ':' -f 2 | sed 's/^ //')
 			pwhois_cc=$(echo "$pwhois_output" | grep -m1 -E "^${ccfield}" | cut -d ':' -f 2 | sed 's/^ //')
+			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$pwhois_cc")
 			if [ "$pwhois_city" = "NULL" ] || [ "$pwhois_region" = "NULL" ]; then
 				pwhois_geo="$pwhois_cc"
 			else
@@ -453,7 +510,7 @@ AbuseLookup(){
 }
 
 HopPrint(){
-	StatusbarMessage ""
+	StatusbarMessage
 	echo -e "$@"
 	StatusbarMessage "Analyzing collected trace output to ${bluebg}${host_to_trace}${lightgreybg}"
 }
@@ -462,7 +519,7 @@ TraceASPath(){
 	starttime=$(date +%s)
 	host_to_trace="$1"
 	mtr_rounds=5
-	border_color=$'\e[38;5;109m'
+	border_color="$lightblue"
 	# attepmt to be as responsive as possible
 	# ideal output width : 150 (size of headers in normal traces)
 	# ideal border width : 100 (used in detailed traces only)
@@ -642,9 +699,9 @@ TraceASPath(){
 
 		# print trace hop info
 		if [ "$DETAILED_TRACE" = false ]; then
-			hop_output="$(printf "%3s. %-$((output_width-51))s %6s${default} %10s ms   %s" "$hop_num" "${hop_ip}" "$hop_loss%" "${hop_ping}" "$asn_data")"
+			hop_output="$(printf "%3s. %-$((output_width-45))s %6s${default} %10s ms   %s" "$hop_num" "${hop_ip}" "$hop_loss%" "${hop_ping}" "$asn_data")"
 		else
-			trailing_line=$(printf '%.0s═' $(seq $((border_width-${#hop_ip}))) )
+			trailing_line=$(printf '%.0s═' $(seq $((border_width+6-${#hop_ip}))) )
 			hop_output="$(printf "${border_color}╔═[${default}%3s. %s ${border_color}]%s╗${default}\n" "$hop_num" "${hop_ip}" "$trailing_line")"
 			hop_output+="\n        ├${bluebg}RTT${default} ${white}${hop_ping} ms${default}\n"
 			hop_output+="        ├${bluebg}LOS${default} ${hop_loss}%${default} packet loss${default}"
@@ -701,7 +758,7 @@ TraceASPath(){
 		mtr_end_msg+=" ${default}"
 		# print hop info with final error message
 		if [ "$DETAILED_TRACE" = false ]; then
-			HopPrint "$(printf "%3s. %-$((output_width-51))s ${lightred}%11s%%${default} %13s   %s" "$hop_num" "$mtr_end_msg" "100" "*" "${white}(No reply)${default}")"
+			HopPrint "$(printf "%3s. %-$((output_width-40))s ${lightred}%11s%%${default} %13s   %s" "$hop_num" "$mtr_end_msg" "100" "*" "${white}(No reply)${default}")"
 		else
 			upper_border="${border_color}╔$(printf '%.0s═' $(seq "$border_width"))╗${default}"
 			lower_border="${border_color}╚$(printf '%.0s═' $(seq "$border_width"))╝${default}"
@@ -712,7 +769,7 @@ TraceASPath(){
 
 	endtime=$(date +%s)
 	runtime=$((endtime-starttime))
-	StatusbarMessage ""
+	StatusbarMessage
 	echo -e "\nTrace complete in $runtime seconds.\n"
 
 	BoxHeader "AS path to $userinput"
@@ -753,7 +810,7 @@ SearchByOrg(){
 			for filter in "${orgfilters_array[@]}"; do
 				apply_filter=$(echo -e "$filtered_org" | grep -i -- "$filter")
 				if [ -z "$apply_filter" ]; then
-					StatusbarMessage ""
+					StatusbarMessage
 					echo -en "${yellow}Warning: No results found for ${bluebg}${filter}${default}"
 					sleep 2
 					# remove last filter term
@@ -766,7 +823,7 @@ SearchByOrg(){
 			for filter in "${excl_orgfilters_array[@]}"; do
 				apply_filter=$(echo -e "$filtered_org" | grep -i -v -- "$filter")
 				if [ -z "$apply_filter" ]; then
-					StatusbarMessage ""
+					StatusbarMessage
 					echo -en "${yellow}Warning: No more results found if excluding ${bluebg}${filter}${default}"
 					sleep 2
 					# remove last filter term
@@ -786,7 +843,7 @@ SearchByOrg(){
 	for orgname in $organizations; do
 		orgs+=("$orgname")
 	done
-	StatusbarMessage ""
+	StatusbarMessage
 
 	if [ ${#orgs[@]} -eq 0 ]; then
 		# company search yielded no results
@@ -868,7 +925,7 @@ SearchByOrg(){
 			done
 		done
 		NO_ERROR_ON_INTERRUPT=false
-		StatusbarMessage ""
+		StatusbarMessage
 		echo -e "$searchresults\n${yellow}────────────────────────────────────────────────────${default}"
 		# let the user choose if they want to run a quick IP lookup
 		while true; do
@@ -887,7 +944,7 @@ SearchByOrg(){
 					(( longest=${#input}+1 ))
 					WhoisIP "$input"
 					PrintReputation "$input"
-					StatusbarMessage ""
+					StatusbarMessage
 					continue
 				else
 					continue
@@ -1111,7 +1168,7 @@ GetIXPresence(){
 	else
 		outputix="${redbg} NONE ${default}"
 	fi
-	echo -e "$outputix"
+	echo -e "$outputix\n"
 }
 
 IPGeoRepLookup(){
@@ -1143,12 +1200,14 @@ IPGeoRepLookup(){
 		ipmap_city=$(echo "$ipmap_location_data" | jq -r 'select (.cityNameAscii != null) | .cityNameAscii')
 		ipmap_region=$(echo "$ipmap_location_data" | jq -r 'select (.stateName != null) | .stateName')
 	fi
+	flag_icon_cc="" # will be used in HTML reports served over HTTP
 	if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ]; then
 		# RIPE IPmap has full geo data, continue
 		ipmap_cc=$(echo "$ipmap_location_data" | jq -r '.countryCodeAlpha2')
 		ipmap_country_name=$(echo "$ipmap_location_data" | jq -r '.countryName')
 		if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ] && [ -n "$ipmap_cc" ]; then
 			ip_geo_data="$ipmap_city, $ipmap_region ($ipmap_cc)"
+			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipmap_cc")
 		elif [ -n "$ipmap_region" ] && [ -n "$ipmap_country_name" ]; then
 			ip_geo_data="$ipmap_region ($ipmap_country_name)"
 		elif [ -n "$ipmap_country_name" ]; then
@@ -1162,6 +1221,7 @@ IPGeoRepLookup(){
 		ipapi_countryname=$(echo "$ipapi_output" | jq -r '.country')
 		if [ -n "$ipapi_city" ] && [ -n "$ipapi_region" ] && [ -n "$ipapi_cc" ]; then
 			ip_geo_data="$ipapi_city, $ipapi_region ($ipapi_cc)"
+			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipapi_cc")
 		elif [ -n "$ipapi_region" ] && [ -n "$ipapi_countryname" ]; then
 			ip_geo_data="$ipapi_region ($ipapi_countryname)"
 		elif [ -n "$ipapi_countryname" ]; then
@@ -1175,7 +1235,6 @@ IPGeoRepLookup(){
 	[[ "$IS_MOBILE" = true ]] && ip_type_data+=" ${yellowbg} Mobile network ${default}"
 	[[ "$IS_PROXY" = true ]] && ip_type_data+=" ${yellowbg} Proxy host ${default}"
 	[[ "$IS_HOSTING" = true ]] && ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
-
 	# Reputation lookup (stopforumspam.org) and threat analisys (ipqualityscore.com)
 	ip_rep_data="${green}✓ GOOD${default}"
 	is_blacklisted=$(curl -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
@@ -1219,18 +1278,71 @@ IPGeoRepLookup(){
 			fi
 		fi
 	fi
-	StatusbarMessage ""
+	StatusbarMessage
 }
 
-PrintErrorAndExit(){
-	echo -e "\n${redbg}${1}${default}\n"
-	tput sgr0
-	exit 1
+AsnServerListener(){
+	BoxHeader "ASN Lookup Server on $HOSTNAME"
+
+	if [ "$ASN_DEBUG" = true ]; then
+		echo -en "\n- ${yellow}[DBG]${default} Server BIND_ADDR : $ASN_SRV_BINDADDR"
+		[[ "$ASN_SRV_BINDADDR" = "$DEFAULT_SERVER_BINDADDR" ]] && echo -en "\t${green}(default)${default}"
+		echo -en "\n- ${yellow}[DBG]${default} Server BIND_PORT : $ASN_SRV_BINDPORT"
+		[[ "$ASN_SRV_BINDPORT" = "$DEFAULT_SERVER_BINDPORT" ]] && echo -en "\t${green}(default)${default}"
+		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'" >&2
+	fi
+
+	# fetch external IP and ASN to include in the HTML reports
+	StatusbarMessage "Detecting host external IP and ASN"
+	WhatIsMyIP
+	LookupASNAndRouteFromIP "$local_wanip"
+	if [ -z "$found_asn" ]; then
+		found_asn="N/A"
+		found_asname="(Unknown)"
+	fi
+	server_country=$(echo "$found_asname" | cut -d ',' -f 2 | tr -d ' ')
+	[[ -z "$server_country" ]] && server_country="(Unknown)"
+
+	StatusbarMessage
+
+	[[ "$HAVE_IPV6" = true ]] && ipv6_mark="${green}✓ YES${default}" || ipv6_mark="${red}❌ NO${default}"
+	echo -e "\n- Server ext. IP  : ${blue}${local_wanip}${default}" \
+			"\n- Server Country  : ${blue}${server_country}${default}" \
+			"\n- Server ASN      : ${red}[AS${found_asn}]${default} ${green}$found_asname${default}" \
+			"\n- Server has IPv6 : $ipv6_mark" \
+			"\n\n[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server listening on ${ASN_SRV_BINDADDR}:${ASN_SRV_BINDPORT}"
+
+	server_country="$(echo -e "$server_country" | tr '[:upper:]' '[:lower:]')"
+
+	trap '
+		echo -e "\r[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server requested shutdown, terminating..."
+		exit 0
+		' INT
+
+	#* Assemble the ncat listener command
+	read -r -d '' ncat_cmd <<- END-OF-NCAT-CMD
+	ncat -k -l $ASN_SRV_BINDADDR $ASN_SRV_BINDPORT $userinput --sh-exec "
+				export NCAT_REMOTE_ADDR; \
+				found_asn=\"$found_asn\" \
+				found_asname=\"$found_asname\" \
+			 	server_country=\"$server_country\" \
+				INTERNAL_CONNHANDLER_CHILD=false \
+			 	INTERNAL_ASNSERVER_CONNHANDLER=true \
+			 	\"$0\"
+		 	"
+	END-OF-NCAT-CMD
+
+	#! Start the ncat listener and serve each client request
+	#! by respawning the script with $INTERNAL_ASNSERVER_CONNHANDLER => true
+	#! for every incoming connection
+	eval "$ncat_cmd"
+
+	PrintErrorAndExit "ERROR: The ncat server crashed or couldn't start. Try passing the '-v' option to see precisely what is being passed to it."
 }
 
 Ctrl_C() {
 	if [ "$NO_ERROR_ON_INTERRUPT" = true ]; then
-		StatusbarMessage ""
+		StatusbarMessage
 		tput sgr0
 		ShowMenu
 	else
@@ -1239,18 +1351,24 @@ Ctrl_C() {
 }
 
 BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
-	local s="$*"
-	echo -e "\n${white}╭─${s//?/─}─╮
-│ ${yellow}${s}${white} │
-╰─${s//?/─}─╯"
-	tput sgr 0
+	local message="$*"
+
+	if [ "$IS_ASN_CHILD" = false ]; then
+		echo -e "\n${white}╭─${message//?/─}─╮\n│ ${yellow}${message}${white} │\n╰─${message//?/─}─╯"
+		tput sgr 0
+	else
+		echo "BOXHEADER $message" # the BOXHEADER tag will be transformed by the ASN server into an html <table> element
+	fi
 }
 
 StatusbarMessage() { # invoke without parameters to delete the status bar message
+	# suppress output for headless runs
+	[[ "$IS_ASN_CHILD" = true ]] && return
+
 	if [ -n "$statusbar_message" ]; then
 		# delete previous status bar message
 		blank_line=$(printf "%.0s " $(seq "$terminal_width"))
-		printf "\r%s\r" "$blank_line"
+		printf "\r%s\r" "$blank_line" >&2
 	fi
 	if [ -n "$1" ]; then
 		statusbar_message="$1"
@@ -1261,7 +1379,7 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 			statusbar_message="${lightgreybg}${statusbar_message}"
 		fi
 		statusbar_message+="${lightgreybg} (press CTRL-C to cancel)...${default}"
-		echo -en "$statusbar_message"
+		echo -en "$statusbar_message" >&2
 	fi
 }
 
@@ -1276,19 +1394,49 @@ WhatIsMyIP() {
 	fi
 }
 
+CoreutilsFixup() {
+	# check for GNU coreutils alternatives (improve command predictability on FreeBSD/MacOS systems)
+	if [ -x "$(command -v gdate)" ]; then
+		date() { gdate "$@"; }
+		export -f date
+	fi
+	if [ -x "$(command -v gsed)" ]; then
+		sed() { gsed "$@"; }
+		export -f sed
+	fi
+	if [ -x "$(command -v gawk)" ]; then
+		awk() { gawk "$@"; }
+		export -f awk
+	fi
+	if [ -x "$(command -v gbase64)" ]; then
+		base64() { gbase64 "$@"; }
+		export -f base64
+	fi
+	if [ -x "$(command -v gtac)" ]; then
+		tac() { gtac "$@"; }
+		export -f tac
+	fi
+	if [ "$IS_ASN_CHILD" = true ] || [ "$IS_ASN_CONNHANDLER" = true ]; then
+		# trap and ignore tput during headless runs
+		tput() { (:;:); }
+		export -f tput
+	fi
+}
+
 CheckPrerequisites() {
 	saveIFS="$IFS"
 	IFS=' '
 	prerequisite_tools="jq whois host curl" # mandatory tools
-	optionals_tools="mtr ipcalc grepcidr"	# optional tools
+	optionals_tools="mtr ipcalc grepcidr ncat aha"	# optional tools
 	missing_tools=""
 	disabled_features=""
 	HARD_FAIL=false
 
 	HAVE_IPCALC=true
 	IXP_DETECTION=true
+	UNABLE_TO_SERVE=false
 
-	#* BASH version check
+	# BASH version check
 	bash_major=$(echo "${BASH_VERSION}" | cut -d '.' -f 1)
 	bash_minor=$(echo "${BASH_VERSION}" | cut -d '.' -f 2)
 	bash_version_too_low=false
@@ -1299,7 +1447,7 @@ CheckPrerequisites() {
 	fi
 	[[ "$bash_version_too_low" = true ]] && PrintErrorAndExit "Error: BASH version must be >= 4.2 (you are running v${BASH_VERSION})"
 
-	#* Mandatory tools checking (hard fail if not found)
+	# Mandatory tools checking (hard fail if not found)
 	for tool in $prerequisite_tools; do
 		if [ -z "$(command -v "$tool")" ]; then
 			missing_tools+="\n - $tool"
@@ -1307,7 +1455,7 @@ CheckPrerequisites() {
 		fi
 	done
 
-	#* Optional tools checking (no hard fail if not found, but some features disabled)
+	# Optional tools checking (no hard fail if not found, but some features disabled)
 	for tool in $optionals_tools; do
 		if [ -z "$(command -v "$tool")" ]; then
 			missing_tools+="\n - $tool"
@@ -1324,6 +1472,10 @@ CheckPrerequisites() {
 					disabled_feat="IXP prefix detection"
 					IXP_DETECTION=false
 					;;
+				"ncat"|"aha")
+					disabled_feat="ASN Lookup Server"
+					UNABLE_TO_SERVE=true
+					;;
 			esac
 
 			disabled_features+="\n - ${disabled_feat}"
@@ -1333,21 +1485,19 @@ CheckPrerequisites() {
 	if [ -n "$missing_tools" ]; then
 		BoxHeader "! WARNING !"
 		echo -e "\nThe following tools were not found on this system:" \
-				"${red} ${missing_tools}${default}"
+				"${red} ${missing_tools}${default}" >&2
 
 		if [ -n "$disabled_features" ]; then
 			echo -e "\nThe following features will be disabled:" \
-					"${yellow}${disabled_features}${default}"
+					"${yellow}${disabled_features}${default}" >&2
 		fi
 
 		echo -e "\nPlease install the necessary prerequisite packages\nfor your system by following these instructions:" \
-				"\n\n>> ${blue}https://github.com/nitefood/asn#prerequisite-packages${default} <<\n"
+				"\n\n>> ${blue}https://github.com/nitefood/asn#prerequisite-packages${default} <<\n" >&2
 
 		[[ "$HARD_FAIL" = true ]] && PrintErrorAndExit "Can not continue without (at least) the following tools: ${prerequisite_tools// /, }"
 
-		echo -n "${lightgreybg}Press ENTER to continue...${default}"
-		# shellcheck disable=SC2034
-		read -r key
+		read -srp "${lightgreybg}Press ENTER to continue...${default}" >&2
 	fi
 
 	IQS_TOKEN=""
@@ -1362,50 +1512,519 @@ CheckPrerequisites() {
 			"\nanalysis and IP reputation lookups. Please visit" \
 			"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
 			"\nfor instructions on how to enable it." \
-			"\n${yellow}────────────────────────────────────────────────────────────${default}\n"
+			"\n${yellow}────────────────────────────────────────────────────────────${default}\n" >&2
 	fi
 
-	# check for `gdate` presence (MacOS coreutils), otherwise fall back to plain `date` (cheers @Antonio-Prado)
-	if [ -x "$(command -v gdate)" ]; then
-		date() { gdate "$@"; }
-		export -f date
-	fi
+	CoreutilsFixup
 
 	IFS="$saveIFS"
 }
 
-# Get terminal width
-terminal_width=$(tput cols)
+ServerDebugPrint(){
+	# Debug print helper function. pass 'false' for second parameter to disable trailing summary
+	if [ "$ASN_DEBUG" = true ]; then
+		# strip CRLFs
+		dbgstring=$(echo -e "$1" | tr -d '\r\n')
+		if [ -z "$host" ]; then
+			target='N/A'
+		else
+			target="$host"
+		fi
+		if [ -z "$reqid" ]; then
+			requestid='N/A'
+		else
+			requestid="$reqid"
+		fi
+		if [ "$2" = false ]; then
+			echo -e "[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring" >&2
+		else
+			echo -e "[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring [CLIENT: ${yellow}$NCAT_REMOTE_ADDR${default}, TARGET: ${magenta}$target${default}, REQID: ${blue}$requestid${default}]" >&2
+		fi
+	fi
+}
+
+StripAnsi() {
+	# portable ANSI colors strip helper fn (for termbin sharing) - cheers https://unix.stackexchange.com/a/140255
+	# shellcheck disable=SC2001
+	echo -e "$1" | sed "s,$(printf '\033')\\[[0-9;]*[a-zA-Z],,g"
+}
+
+HandleNcatClientConnection() {
+	# ╭─────────────────────────────────────╮
+	# │ MAIN NCAT CLIENT CONNECTION HANDLER │
+	# ╰─────────────────────────────────────╯
+
+	# HTTP response headers
+	http_ok='HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n'
+	http_ko='HTTP/1.0 400\r\nContent-Type: text/html\r\n\r\n<html><body><h1>400 Bad Request</h1>\nYour request could not be processed.</body></html>'
+
+	# HTML color codes matching ANSI colors used by the script
+	htmlwhite="#cccccc"
+	htmlblack="#1e1e1e"
+	htmllightgray="#d5d5d5"
+	htmlred="#ff5f5f"
+	htmlblue="#00afd7"
+	htmlyellow="#afaf00"
+	htmlgreen="#00af5f"
+	htmlmagenta="#ff5fff"
+
+	# Javascript bookmarklet
+	js_bookmarklet='javascript:(function(){var asnserver="localhost:49200",target=window.location.hostname,'
+	js_bookmarklet+='width=screen.width-screen.width/7,height=screen.height-screen.height/4,left=window.innerWidth/2-width/2,top=window.innerHeight/2-height/2;'
+	js_bookmarklet+='window.open("http://"+asnserver+"/asn_lookup&"+target,"newWindow","width="+width+",height="+height+",top="+top+",left="+left)})();'
+
+	# HTML bookmarklet page
+	read -r -d '' html_bookmarklet_page <<- END-OF-BOOKMARKLET-HTML
+	<html>
+	<head>
+		<meta http-equiv="Content-Type" content="application/xml+xhtml; charset=UTF-8"/>
+		<title>[ASN] Server configuration (client-side)</title>
+		<style>
+			@import url("https://fonts.googleapis.com/css2?family=Roboto+Mono&display=swap");
+			html * {
+				font-family: "Roboto Mono", monospace;
+				font-size: 1em;
+				color: $htmlwhite;
+				background-color: $htmlblack;
+				border-radius: 6px;
+			}
+		</style>
+	</head>
+	<body>
+	<pre>
+		<br /><br />
+		<hr>
+		<div style="text-align: center;">
+			<span style="color:$htmlgreen; font-size: 2em">- ASN Server // Browser Integration -</span>
+
+			<span>1) Drag and drop the <span style="color:$htmlyellow;">yellow</span> link below to your bookmarks toolbar:</span>
+
+			<span style="font-size: 2.5em;"><a style="color:$htmlyellow;" href='$js_bookmarklet' title="ASN Lookup">ASN LOOKUP</a></span>
+
+			<span>2) Close this page and click the new bookmark while viewing any website.
+			A lookup and trace for that host should start in a pop-up window.</span>
+		<br />
+		<hr>
+		<span style='color: darkgray; font-style: italic; font-size: 0.8em;'><a href='https://github.com/nitefood/asn' target='_blank'>ASN Lookup Server</a> v${ASN_VERSION} running on $(hostname)
+		</span>
+		</div>
+	</pre>
+	</body>
+	</html>
+	END-OF-BOOKMARKLET-HTML
+
+	# HTML opening tags
+	# shellcheck disable=SC2016
+	html_header='
+	<?xml version="1.0" encoding="UTF-8" ?>
+	<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+	<html xmlns="http://www.w3.org/1999/xhtml">
+		<head>
+			<meta http-equiv="Content-Type" content="application/xml+xhtml; charset=UTF-8"/>
+			<title>[ASN] Lookup</title>
+			<script src="https://ajax.googleapis.com/ajax/libs/jquery/2.2.4/jquery.min.js"></script>
+			<script>
+				function termbinshare(){
+					$("#termbinShareButton").attr("disabled","disabled");
+					var oldbuttontext=$("#termbinShareButton").text();
+					$("#termbinShareButton").text("Sharing...");
+					var tracedata=$("#tracedata").text();
+					$.ajax({
+						url: "/termbin_share&" + tracedata,
+						type: "GET",
+						success: function (termbinUrl) {
+							termbinUrl = termbinUrl.replace(/(\\r\\n|\\n|\\r)/gm,"");
+							var outputcontainer = document.getElementById("share-output-container");
+							if (termbinUrl === ""){
+								outputcontainer.innerHTML = "<span style=\"color: '"$htmlred"'; font-size: 0.9em;\">Sharing failed, check server console log</span>";
+								// show the "sharing output" element
+								outputcontainer.classList.remove("hidden");
+								// hide it after 3s
+								setTimeout(function(){ outputcontainer.classList.add("hidden"); }, 3000);
+								$("#termbinShareButton").text(oldbuttontext);
+								$("#termbinShareButton").removeAttr("disabled");
+							} else {
+								$("#share-container").empty();
+								$("#share-container").html("<textarea wrap=\"off\" rows=1 cols="+termbinUrl.length+" readonly id=\"termbinoutput\">"+termbinUrl+"</textarea>");
+								document.getElementById("termbinoutput").select();
+								document.execCommand("copy");
+								$("#share-container").html("<a href=\""+termbinUrl+"\" target=\"_blank\" style=\"color: '$htmlblue';\">"+termbinUrl+"</a>");
+								outputcontainer.innerHTML = "<span style=\"color: '"$htmlgreen"'; font-size: 1em;\">✓ Link copied to clipboard</span>";
+								// show the "sharing output" element
+								outputcontainer.classList.remove("hidden");
+								// hide it after 3s
+								setTimeout(function(){ outputcontainer.classList.add("hidden"); }, 3000);
+							}
+						}
+					});
+				}
+
+				// Fade out loader when window is loaded
+				$(window).load(function() { $(".loader").fadeOut("fast");; });
+
+			</script>
+			<style>
+				@import url("https://fonts.googleapis.com/css2?family=Roboto+Mono&display=swap");
+				html * {
+					font-family: "Roboto Mono", monospace;
+					font-size: 1em;
+					color:'$htmlwhite';
+					background-color: '$htmlblack'; /* background-color: black; */
+					border-radius: 6px;
+				}
+				table {
+					border: 1px solid '$htmlyellow';
+					margin-left: auto;
+					margin-right: auto;
+				}
+				th { text-align: center; background-color: '$htmlblue'; color: black; }
+				td { text-align: center; color: '$htmlwhite'; width: 20%; }
+				.center { margin-left: auto; margin-right: auto; }
+				.textoutput {
+					opacity:1;
+					transition:opacity 200ms;
+					font-size: 0.8em;
+				}
+				.hidden {
+					opacity: 0;
+				}
+
+				button.sharebutton {
+					background-color:'$htmlgreen';
+					border: solid 2px '$htmlblack';
+					border-radius: 8px;
+					display:inline-block;
+					cursor:pointer;
+					color: black;
+					//padding:13px 32px;
+					text-decoration:none;
+				}
+				.sharebutton:hover {
+					border: solid 2px '$htmlyellow';
+				}
+				.sharebutton:active {
+					position:relative;
+					top:1px;
+				}
+
+				/* -------------------------------------------------------------------------------*/
+				/* CSS Loader - cheers https://www.cssscript.com/demo/beautiful-creative-loaders/ */
+				/* modified values to stick to bottom even on scroll:
+					position: fixed;
+					bottom: 0;
+					left: 50%;
+				*/
+				.loader {
+					width: 12px;
+					height: 12px;
+					border-radius: 50%;
+					display: block;
+					margin:15px auto;
+					position: fixed;
+					bottom: 0;
+					left: 50%;
+					color: '$htmlyellow';
+					box-sizing: border-box;
+					animation: animloader 1s linear infinite alternate;
+				}
+				@keyframes animloader {
+					0% {
+						box-shadow: -38px -12px ,  -14px 0,  14px 0, 38px 0;
+					}
+					33% {
+						box-shadow: -38px 0px, -14px -12px,  14px 0, 38px 0;
+					}
+					66% {
+						box-shadow: -38px 0px , -14px 0, 14px -12px, 38px 0;
+					}
+					100% {
+						box-shadow: -38px 0 , -14px 0, 14px 0 , 38px -12px;
+					}
+				}
+				/* -------------------------------------------------------------------------------*/
+			</style>
+		</head>
+		<body>
+			<span class="loader"></span>
+			<pre>
+	'
+
+	# HTML closing tags
+	html_footer='
+		</body>
+		<script>window.scrollTo(0,document.body.scrollHeight);</script>
+	</html>
+	'
+
+	CoreutilsFixup
+
+	# a client just connected
+	echo -e "[$(date +'%F %T')] ${bluebg}  INFO   ${default} Incoming connection by client ${yellow}$NCAT_REMOTE_ADDR${default}" >&2
+
+	# read input from client (URL being accessed through the client browser)
+	read -r line
+	ServerDebugPrint "RECEIVED new client request: '$line'"
+
+	# handle 'asn_bookmarklet' command. This will show a web page for easy dragging&dropping of the bookmarklet to the favorites toolbar
+	if (echo -e "$line" | grep -Eq "^GET /asn_bookmarklet HTTP"); then
+		echo -e "${http_ok}${html_bookmarklet_page}"
+
+	# handle 'termbin_share' command. This will decode the input and send it to termbin, returning a html link to the client
+	elif (echo -e "$line" | grep -Eq "^GET /termbin_share&"); then
+		# send HTTP 200 OK header to client
+		echo -e "${http_ok}"
+		# decode input data
+		input_data="$(echo -e "$line" | cut -d '&' -f 2- | cut -d ' ' -f 1 | base64 -d | gunzip)"
+		termbin_url=""
+		if [ -n "$input_data" ]; then
+			# share on termbin.com and output the url to the client
+			termbin_url="$(echo -e "$input_data" | timeout 10 ncat termbin.com 9999 | tr -d '\r\n\0')" # sanitize trailing characters in termbin output link
+		fi
+		# analyze the sharing attempt result
+		if [ -n "$termbin_url" ]; then
+			# sharing successful, output the link
+			echo -e "${termbin_url}\n"
+			# log the successful sharing attempt
+			echo -e "[$(date +'%F %T')] ${greenbg} SHAREOK ${default} Successfully shared termbin link ${blue}${termbin_url}${default} with client ${yellow}$NCAT_REMOTE_ADDR${default}" >&2
+			exit 0
+		elif [ -z "$input_data" ]; then
+			sharefailreason="invalid input data"
+		elif [ -z "$termbin_url" ]; then
+			sharefailreason="termbin.com error"
+		else
+			sharefailreason="unknown reason"
+		fi
+		# log the failed sharing attempt
+		echo -e "[$(date +'%F %T')] ${redbg} SHAREKO ${default} Error sharing termbin link with client ${yellow}$NCAT_REMOTE_ADDR${default} ($sharefailreason)" >&2
+		# close the client connection without any output
+		exit 1
+
+	elif (echo -e "$line" | grep -Eq "^GET /asn_lookup&"); then
+
+		# handle 'asn_lookup' command. This will start a lookup for the target.
+		# 1) trim down target length to at most 100 characters
+		# 2) extract target from client request (cut on ampersand first, space next, e.g.: 'GET /asn_lookup&google.com HTTP/1.1' should return google.com)
+		# 3) convert any '%3A' to ':' (for IPv6 searches)
+		# 4) convert any '%2F' to '/' (for URL searches)
+		# 5) strip leading slash (/google.com -> google.com)
+		# 6) sanitize by stripping any character except letters, numbers, and dot/colon/dash [.:-])
+		target=$(echo -e "$line" | cut -d '&' -f 2- | awk -F' ' '{print substr($1,0,100)}')
+		host=$(echo -e "$target" | sed -e 's/%3[aA]/:/g' -e 's/%2[fF]/\//g' -e 's/^\///' -e 's/[^0-9a-zA-Z/\.:-]//g')
+
+		# validate target by checking if it's an:
+		# 1) IP address
+		# 2) hostname (beginning with any alphanumeric character and including at least one dot '.')
+		# 3) AS number (with or without case-insensitive 'AS' prefix)
+		is_valid_target=$(echo -e "$host" | grep -Eo "$ipv4v6regex|^([0-9a-zA-Z])+.*\.|^([aA][sS])?[0-9]{1,6}$")
+
+		# avoid invalid/malformed targets
+		if [ -n "$is_valid_target" ]; then
+			# this is a valid client request, set up request identifier
+			reqid=$(date +'%N')
+
+			starttime=$(date +'%s')
+			startdatetime=$(date +'%F %T')
+			reportdatetime=$(date +'%F %T (%Z)')
+			echo -e "[$startdatetime] ${yellowbg} STARTED ${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
+
+			# send HTTP 200 OK response and display HTML headers
+			echo -e "${http_ok}${html_header}"
+
+			# display ASN server info table
+			echo -e "
+				<table style='border: none; white-space: nowrap';>
+					<tr>
+						<th colspan='5' style='background-color: $htmllightgray;'>ASN Lookup Server Report</th>
+					</tr>
+					<tr>
+						<th>Lookup Target</td>
+						<th>Client IP</td>
+						<th>Lookup Server ASN</td>
+						<th>Lookup Server Hostname</td>
+						<th>Date and time</td>
+					</tr>
+					<tr>
+						<td style='color:$htmlred;'>$host</td>
+						<td style='color:$htmlyellow;'>$NCAT_REMOTE_ADDR</td>
+						<td style='color:$htmlgreen;'>$found_asn ($found_asname
+						<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$server_country.svg' style='height:1.05em; border-radius: 0; vertical-align: middle;'>)
+						</td>
+						<td style='color:$htmlmagenta;'>$(hostname)</td>
+						<td style='color:$htmlwhite;'>$reportdatetime</td>
+					</tr>
+				</table>
+				<hr />
+			"
+			# launch ASN trace to URL and convert its output to HTML
+
+			ServerDebugPrint "Spawning child"
+			INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false "$0" "$host" |
+			{
+				#* ╭──────────────────────────────────────────────╮
+				#* │ Main child output parsing loop command group │
+				#* ╰──────────────────────────────────────────────╯
+
+				TextHeader() {
+					headerwidth="150"
+					padchar="_"
+					padding="$(printf '%0.1s' ' '{1..500})"
+					printf "%${headerwidth}s\n\n" "" | tr " " "${padchar}"
+					printf '%*.*s %s %*.*s\n' 0 "$(((headerwidth-2-${#1})/2))" "$padding" "$1" 0 "$(((headerwidth-1-${#1})/2))" "$padding"
+					printf "%${headerwidth}s\n" "" | tr " " "${padchar}"
+				}
+
+				# initialize textual trace log variable
+				tracedata=""
+				while IFS= read -r outputline; do
+					# ServerDebugPrint "[$reqid] CHILD OUTPUT: $outputline" "false"
+					if echo -e "$outputline" | grep -Eq "^BOXHEADER "; then
+						# child instance is displaying a BoxHeader, transform it into a <table>
+						message=$(echo -e "$outputline" | cut -d ' ' -f 2-)
+						echo -e "<table style='width: 30%; height: 5%;'><tr><th style='background-color: $htmlblack; color: $htmlwhite;'>$message</th></tr></table>\n"
+						# append boxheader to tracefile
+						# tracedata+="$(BoxHeader "$message")\n"
+						tracedata+=$(TextHeader "[ $message ]")
+						tracedata+="\n\n"
+						if echo -e "$message" | grep -q "Trace to "; then
+							echo -e "<script>top.document.title='[IN PROGRESS] Path trace to $host'</script>"
+						fi
+					elif echo -e "$outputline" | grep -Eq "#COUNTRYCODE"; then
+						# child instance is indicating a country code for the current IP, map it to a SVG and display it on the HTML report
+						# alternative URLs for the flag SVGs:
+						# JSdelivr CDN: https://cdn.jsdelivr.net/npm/flag-icon-css/flags/4x3/$cc.svg
+						# Github Pages: https://lipis.github.io/flag-icon-css/flags/4x3/$cc.svg
+						# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
+						cc=$(echo -e "$outputline" | awk '{print $NF}')
+						target_flag_img="<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg' style='height:1.05em; border-radius: 0; vertical-align: middle;'>"
+						outputline=$(echo -e "$outputline" | sed -e 's/#COUNTRYCODE.*//')
+						tracedata+="$outputline\n"
+						outputline=$(echo -e "$outputline" | tr -d '\r\n' | aha -b -n)
+						printf "%s%s\n" "$outputline" "$target_flag_img"
+					else
+						tracedata+="$outputline\n"
+						printf "%s\n" "$outputline" | aha -b -n
+					fi
+					printf "<script>window.scrollTo(0,document.body.scrollHeight);</script>" # cheers https://stackoverflow.com/a/55471426
+				done
+
+				#* Child asn instance finished, finish up the html
+
+				# append text footer to tracedata (will only be displayed when sharing results on termbin)
+				footermsg="Report generated by ASN Lookup Server v${ASN_VERSION} (https://github.com/nitefood/asn) on $reportdatetime"
+				footermsglen=${#footermsg}
+				footerhr=$(printf "%150s" "" | tr " " "_")
+				tracedata+="$(printf "%s\n\n%*s\n" "$footerhr" $(((footermsglen+150)/2)) "$footermsg")"
+
+				# print closing headers
+				endtime=$(date +%s)
+				runtime=$((endtime-starttime))
+				echo -e "<div style='text-align: center;'>" \
+							"<hr>" \
+							"<span style='color: darkgray; font-style: italic; font-size: 0.8em;'>" \
+								"Generated by <a href='https://github.com/nitefood/asn' target='_blank'>ASN Lookup Server</a> v${ASN_VERSION} running on $(hostname) in ${runtime}s (request ID: $reqid)" \
+							"</span>" \
+							"<br /><br /><span id='share-container'><button id='termbinShareButton' class='sharebutton' onclick='termbinshare()'>Share Results</button></span>" \
+							"<div id='share-output-container' class='textoutput hidden'> </div>" \
+							"<a href='#' onclick=\"document.getElementById('help-container').classList.toggle('hidden');return false;\" style='color: darkgray; font-size: 0.7em;'>What is that?</a>" \
+							"\n<span id='help-container' class='textoutput hidden' style='color: $htmlgreen;'>This report will be shared on <a href='https://termbin.com' target='_blank'>Termbin</a> (a Pastebin-like sharing service for terminal data).\nTermbin pastes have a lifespan of 1 month.</span>" \
+						"</div>" \
+						"</pre>"
+
+				# create a hidden div with the gzipped+b64 encoded trace output for optional termbin sharing
+				tracedata_encoded="$(StripAnsi "$tracedata" | gzip | base64 -w0)"
+				echo -e "<div style='display: none;' id='tracedata'>${tracedata_encoded}</div>"
+
+				echo -e "$html_footer"
+			}
+
+			#  end the ncat client connection for this request ID
+			childretval="$?"
+			if [ "$childretval" -eq 0 ]; then
+				ServerDebugPrint "Child process completed successfully with exit code $?"
+				echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
+				# log lookup request completed on server side
+				echo -e "[$(date +"%F %T")] ${greenbg}COMPLETED${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
+			else
+				ServerDebugPrint "Child process failed with exit code $childretval (SIG$(kill -l $childretval))"
+				echo -e "[$(date +"%F %T")] ${redbg}  FAILED ${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} failed with exit code $childretval (SIG$(kill -l $childretval)) (Request ID: ${blue}$reqid${default})" >&2
+			fi
+			if [ "$childretval" -eq 141 ]; then
+				ServerDebugPrint "Client has gone away?"
+			fi
+		else
+			# send HTTP code 400 Bad Request to client
+			echo -e "$http_ko"
+
+			# log lookup request ignored on server side
+			echo -e "[$(date +"%F %T")] ${redbg} IGNORED ${default} Malformed data in request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default}" >&2
+		fi
+	else
+		# ignore spurious browser requests (e.g. 'GET /favicon.ico') or scans.
+		# Log the bad request on server side, sleep for 1 second, and drop the connection
+		reqbytes=$(echo -e "$line" | awk -F$'\r\n' '{print substr($1,0,30)}')
+		echo -e "[$(date +"%F %T")] ${redbg} IGNORED ${default} Ignored request by client ${yellow}$NCAT_REMOTE_ADDR${default}. Request data (first 30 bytes): ${red}${reqbytes}${default}" >&2
+		sleep 1
+	fi
+}
+
+#! ╭───────────────────────╮
+#! │ Main asn script start │
+#! ╰───────────────────────╯
+
+IFS=$'\n\t'
 
 # Color scheme
-IFS=$'\n\t'
-green=$'\e[32m'
-magenta=$'\e[35m'
-yellow=$'\e[33m'
-white=$'\e[97m'
-blue=$'\e[94m'
-red=$'\e[31m'
-black=$'\e[30m'
+green=$'\e[38;5;035m'
+magenta=$'\e[38;5;207m'
+yellow=$'\e[38;5;142m'
+white=$'\e[38;5;007m'
+blue=$'\e[38;5;038m'
+red=$'\e[38;5;203m'
+black=$'\e[38;5;016m'
 lightyellow=$'\e[38;5;220m'
-lightred=$'\e[91m'
-lightgreybg=$'\e[47m\e[30m'
-bluebg=$'\e[44m\e[30m'
-redbg=$'\e[30m\e[101m'
-greenbg=$'\e[42m\e[30m'
-yellowbg=$'\e[43m\e[30m'
+lightred=$'\e[38;5;167m'
+lightblue=$'\e[38;5;109m'
+lightgreybg=$'\e[48;5;252m'${black}
+bluebg=$'\e[48;5;038m'${black}
+redbg=$'\e[48;5;210m'${black}
+greenbg=$'\e[48;5;035m'${black}
+yellowbg=$'\e[48;5;142m'${black}
 default=$'\e[0m'
+
+# Check if this script instance was launched by the ASN server connection handler
+if [ "$INTERNAL_CONNHANDLER_CHILD" = true ]; then
+	IS_ASN_CHILD=true
+else
+	IS_ASN_CHILD=false
+fi
+
+# Check if this script instance was spawned by the ncat listener
+if [ "$INTERNAL_ASNSERVER_CONNHANDLER" = true ]; then
+	IS_ASN_CONNHANDLER=true
+	HandleNcatClientConnection
+	exit 0
+else
+	IS_ASN_CONNHANDLER=false
+fi
+
+# Get terminal width. If running headless set it to a "sane" value to display appropriate HTML spacing in reports
+[[ "$IS_ASN_CHILD" = false ]] && terminal_width=$(tput cols) || terminal_width=233
 
 # External API token for ipqualityscore.com (IP reputation & threat analisys lookup)
 IQS_TOKEN_FILENAME="$HOME/.asn/iqs_token"
 
-# PeeringDB list of IXP prefixes
-peeringdb_dataset=""
-peeringdb_ipv6_dataset=""
+# Server mode binding defaults
+DEFAULT_SERVER_BINDADDR="127.0.0.1"
+DEFAULT_SERVER_BINDPORT="49200"
 
 # Signals trapping (interrupt/terminal resize)
 NO_ERROR_ON_INTERRUPT=false
 trap Ctrl_C INT
 trap 'terminal_width=$(tput cols)' SIGWINCH
+
+# PeeringDB list of IXP prefixes
+peeringdb_dataset=""
+peeringdb_ipv6_dataset=""
 
 ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
 '([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|'\
@@ -1414,7 +2033,9 @@ ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:)
 '(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|'\
 '1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
 
-# Check cmdline parameters
+#*
+#* Parse command line options
+#*
 if [[ $# -lt 1 ]]; then
 	PrintUsage
 	exit 1
@@ -1422,73 +2043,154 @@ fi
 
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
+SERVER_MODE=false
+ASN_DEBUG=false
 
-case "$1" in
-	"-n"|"--notrace")
-		if [[ $# -lt 2 ]]; then
-			PrintUsage
-			echo -e "Error: missing ${red}TARGET${default}\n"
-			exit 1
-		fi
-		TRACEASNPATH=false
-		DETAILED_TRACE=false
-		userinput="$2"
-		;;
-	"-d"|"--detailed")
-		if [[ $# -lt 2 ]]; then
-			PrintUsage
-			echo -e "Error: missing ${red}TARGET${default}\n"
-			exit 1
-		fi
-		TRACEASNPATH=true
-		DETAILED_TRACE=true
-		userinput="$2"
-		;;
-	"-o"|"--organization")
-		if [[ $# -lt 2 ]]; then
-			PrintUsage
-			echo -e "Error: missing ${red}TARGET${default}\n"
-			exit 1
-		else
-			FORCE_ORGSEARCH=true
-			userinput=$(echo "$@" | cut -d ' ' -f 2- | sed -e 's/^[ \t]*//')
-		fi
-		;;
-	"-s"|"--suggest")
-		if [[ $# -lt 2 ]]; then
-			PrintUsage
-			echo -e "Error: missing ${red}TARGET${default}\n"
-			exit 1
-		else
-			SUGGEST_SEARCH=true
-			userinput=$(echo "$@" | cut -d ' ' -f 2- | sed -e 's/^[ \t]*//')
-		fi
-		;;
-	*)
-		if [ "${1:0:1}" = "-" ]; then
-			 PrintUsage
-			 echo -e "Error: unknown option ${red}$1${default}\n"
-			 exit 1
-		else
-			# defaults
-			TRACEASNPATH=true
+# optspec contains:
+# - options followed by a colon: parameter is mandatory
+# - first colon: disable getopts' own error reporting
+# 	in this mode, getopts sets optchar to:
+# 	'?' -> unknown option
+# 	':' -> missing mandatory parameter to the option
+optspec=":hvln:d:o:s:"
+
+OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
+while getopts "$optspec" optchar; do {
+
+	GetFullParamsFromCurrentPosition(){
+		#
+		# Helper function that retrieves all the command line
+		# parameters starting from position $OPTIND (current
+		# option's argument as being parsed by getopts)
+		#
+		# 1) first param is set to current option's param (space-separated)
+		# 2) then append (if any exist) the following command line params.
+		#
+		# this allows for invocations such as 'asn -o NAME WITH SPACES'
+		# without having to quote NAME WITH SPACES
+		# The function requires passing the original $@ as parameter
+		# so as to not confuse it with the function's own $@.
+		#
+		# in the above example, $OPTARG="NAME", $OPTIND="3", ${@:$OPTIND}=array("WITH" "SPACES")
+		#
+		userinput="$OPTARG"
+		for option in "${@:$OPTIND}"; do
+			userinput+=" $option"
+		done
+	}
+
+	OPTIONS_PRESENT=true
+    case "${optchar}" in
+		"n")
+			TRACEASNPATH=false
 			DETAILED_TRACE=false
-			ENABLE_ORGSEARCH=true
-			# shellcheck disable=2124
-			userinput="$@"
-		fi
-		;;
-esac
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"d")
+			TRACEASNPATH=true
+			DETAILED_TRACE=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"o")
+			FORCE_ORGSEARCH=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"s")
+			SUGGEST_SEARCH=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"l")
+			SERVER_MODE=true
+			argcount=1
+			for option in "${@:$OPTIND}"; do
+				# one ore more parameters were passed to -l, check if
+				# is an IP, PORT or "IP PORT" pair.
+				# pass the rest of the command line as direct
+				# ncat arguments.
+				# Not passing everything directly (-l has the same
+				# functionality in ncat) because asn should have more
+				# sensible defaults (i.e. bind to 127.0.0.1 and not
+				# 0.0.0.0 by default).
+
+				# handle special case (if invocation was 'asn -l -v <server_opts>' instead of 'asn -v -l <server_opts>')
+				[[ "$option" = "-v" ]] && { ASN_DEBUG=true; continue; }
+
+				if [ "$argcount" -eq 1 ]; then
+					listen_opt1="$option"
+					[[ "${listen_opt1:0:1}" = "-" ]] && { listen_opt1=""; userinput+=" $option"; argcount=99999; } # next lines will be treated as ncat options}
+
+				elif [ "$argcount" -eq 2 ]; then
+					listen_opt2="$option"
+					[[ "${listen_opt2:0:1}" = "-" ]] && { listen_opt2=""; userinput+=" $option"; argcount=99999; } # next lines will be treated as ncat options}
+				else
+					userinput+=" $option"
+				fi
+				(( argcount++ ))
+			done
+			# analyze the args
+			ASN_SRV_BINDADDR=""
+			ASN_SRV_BINDPORT=""
+			for passedarg in $listen_opt1 $listen_opt2; do
+				if grep -Eq ":|\." <<<"$passedarg"; then
+					# it's an IP address
+					ASN_SRV_BINDADDR="$passedarg"
+				else
+					# it's a port
+					ASN_SRV_BINDPORT="$passedarg"
+				fi
+			done
+			# fallback to default ports if none was passed.
+			# The rest is already in $userinput, ncat will use it for its own args
+			[[ -z "$ASN_SRV_BINDADDR" ]] && ASN_SRV_BINDADDR="$DEFAULT_SERVER_BINDADDR"
+			[[ -z "$ASN_SRV_BINDPORT" ]] && ASN_SRV_BINDPORT="$DEFAULT_SERVER_BINDPORT"
+			# trim the leading whitespace from ncat options
+			userinput="${userinput#' '}"
+			# '-l' must be the last option (since it includes optional args), bail the getopts loop
+			break
+			;;
+		"h")
+			PrintUsage
+			exit 0
+			;;
+		"v")
+			ASN_DEBUG=true
+			;;
+		*)
+			if [ "$OPTERR" = 1 ]; then
+				[[ "$optchar" = "?" ]] && PrintUsage "Error: unknown option '-$OPTARG'"
+				[[ "$optchar" = ":" ]] && PrintUsage "Error: option '-$OPTARG' requires an argument"
+				exit 1
+			fi
+			;;
+	esac
+}
+done
+
+if [ "$OPTIONS_PRESENT" = false ]; then
+	# defaults
+	TRACEASNPATH=true
+	DETAILED_TRACE=false
+	ENABLE_ORGSEARCH=true
+	# shellcheck disable=2124
+	userinput="$@"
+fi
 
 #* Check prerequisite and optional tools
 CheckPrerequisites
 
 local_wanip=""
 HAVE_IPV6=false
+
+if [ "$SERVER_MODE" = true ]; then
+	# user passed the "-l" switch
+	[[ "$UNABLE_TO_SERVE" = true ]] && PrintErrorAndExit "ERROR: Can not start the listening server. Please install the necessary tools."
+	AsnServerListener
+fi
+
 BoxHeader "ASN lookup for $userinput"
 
 if [ "$FORCE_ORGSEARCH" = true ]; then
-	# user passed the "-o|--organization" switch
+	# user passed the "-o" switch
 	ORG_FILTER=false
 	declare -a orgfilters_array
 	declare -a excl_orgfilters_array
@@ -1497,7 +2199,7 @@ if [ "$FORCE_ORGSEARCH" = true ]; then
 fi
 
 if [ "$SUGGEST_SEARCH" = true ]; then
-	# user passed the "-s|--suggest" switch
+	# user passed the "-s" switch
 	RIPESuggestASN "$userinput"
 	exit 0
 fi
@@ -1518,14 +2220,18 @@ if [ -z "$input" ]; then
 				echo -e -n "\n${blue}- Resolving \"$userinput\"... "
 				ip=$(ResolveHostnameToIPList "$userinput")
 				if [ -z "$ip" ]; then
-					echo -e "${red}Error: unable to resolve hostname${default}" \
-							"\n\n(Hint: if you wanted to search by organization, try the ${blue}'-o'${default} switch)\n"
+					resolver_error="${red}Error: unable to resolve hostname${default}"
+					if [ "$IS_ASN_CHILD" = true ]; then
+						echo -e "$resolver_error\n"
+					else
+						echo -e "${resolver_error}\n\n(Hint: if you wanted to search by organization, try the ${blue}'-o'${default} switch)\n" >&2
+					fi
 					exit 1
 				fi
 			fi
 			numips=$(echo "$ip" | wc -l)
 			[[ $numips = 1 ]] && s="" || s="es"
-			echo -e "${blue}$numips IP address$s found:\n"
+			echo -e "${blue}$numips IP address$s found:${default}\n"
 			# grab the longest IP to properly size output padding
 			longest=0
 			for singleip in $ip; do
@@ -1535,30 +2241,55 @@ if [ -z "$input" ]; then
 			# output actual results
 			ip_to_trace=""
 			WhatIsMyIP
-			for singleip in $ip; do
-				LookupASNAndRouteFromIP "$singleip"
-				WhoisIP "$singleip"
-				PrintReputation "$singleip"
-				# save the first IP from the dns lookup result
-				[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
-			done
-			# Check if AS path tracing is requested
-			if [ "$TRACEASNPATH" = true ]; then
-				# In case of multiple IPs (DNS RR), trace the first one.
-				# Additionally, if we're on an IPv6 connection, default to
-				# tracing to the first resolved IPv6 address (if any)
+			if [ "$IS_ASN_CHILD" = true ] && [ "$numips" -gt 1 ]; then
+				# Running headless as an ASN server connhandler child, and more than 1 IP detected.
+				# Speed up the operation and only process the first appropriate IP (v4/v6)
 				if [ "$HAVE_IPV6" = true ]; then
-					first_ipv6=$(echo "$ip" | grep -m1 ':')
-					[[ -n "$first_ipv6" ]] && ip_to_trace="$first_ipv6"
+					ip_to_trace=$(echo "$ip" | grep -m1 ':')
+					else
+					ip_to_trace=$(echo "$ip" | grep -v -m1 ':')
 				fi
+				LookupASNAndRouteFromIP "$ip_to_trace"
+				WhoisIP "$ip_to_trace"
+				PrintReputation "$ip_to_trace"
+				echo -e "\n${bluebg} INFO ${default} multiple IP support is ${red}disabled${default} for remote traces. The remaining $((numips-1)) IPs have been ignored:"
+				count=1
+				for singleip in $(echo "$ip" | grep -v "$ip_to_trace"); do
+					if [[ count -lt $((numips-1)) ]]; then
+						echo -e "   ├ ${white}${singleip}${default}"
+					else
+						echo -e "   └ ${white}${singleip}${default}"
+					fi
+					((count++))
+				done
+				echo ""
 				TraceASPath "$ip_to_trace"
+			else
+				for singleip in $ip; do
+					LookupASNAndRouteFromIP "$singleip"
+					WhoisIP "$singleip"
+					PrintReputation "$singleip"
+					# save the first IP from the dns lookup result
+					[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
+				done
+				# Check if AS path tracing is requested
+				if [ "$TRACEASNPATH" = true ]; then
+					# In case of multiple IPs (DNS RR), trace the first one.
+					# Additionally, if we're on an IPv6 connection, default to
+					# tracing to the first resolved IPv6 address (if any)
+					if [ "$HAVE_IPV6" = true ]; then
+						first_ipv6=$(echo "$ip" | grep -m1 ':')
+						[[ -n "$first_ipv6" ]] && ip_to_trace="$first_ipv6"
+					fi
+					TraceASPath "$ip_to_trace"
+				fi
 			fi
 			tput sgr0
 			echo ""
 			exit 0
 		else
 			# not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
-			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: To search by organization, please pass the [-o|--organization] command line switch (or no switch at all)"
+			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: To search by organization, please pass the [-o] command line switch (or no switch at all)"
 			ORG_FILTER=false
 			declare -a orgfilters_array
 			declare -a excl_orgfilters_array
@@ -1570,19 +2301,25 @@ if [ -z "$input" ]; then
 		if [ -z "$found_asname" ]; then
 			PrintErrorAndExit "Error: no data found for AS${asn}"
 		fi
-		echo -e "\n${bluebg} AS Number ──────>${default} ${red}${asn}"
-		echo -e "${bluebg} AS Name ────────>${default} ${green}${found_asname}"
-		echo -e "${bluebg} Organization ───>${default} ${yellow}${found_org}"
-		echo -e "${bluebg} AS Reg. date ───>${default} ${white}${found_createdate}"
+		echo -e "\n${bluebg} AS Number     ──>${default} ${red}${asn}"
+		echo -en "${bluebg} AS Name       ──>${default} ${green}${found_asname}"
+		if [ "$IS_ASN_CHILD" = true ]; then
+			# signal to the parent connhandler the correct country flag to display for this ASN
+			flag_icon_cc=$(echo "$found_asname" | cut -d ',' -f 2 | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+			[[ -n "$flag_icon_cc" ]] && echo -n " #COUNTRYCODE $flag_icon_cc"
+		fi
+		printf "\n"
+		echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_org}"
+		echo -e "${bluebg} AS Reg. date  ──>${default} ${white}${found_createdate}"
 		echo -en "${bluebg} Peering @IXPs ──>${default} "
 		GetIXPresence "$asn"
 		BoxHeader "BGP informations for AS${asn} (${found_asname})"
 		echo ""
 		QueryRipestat "${asn}"
 		if [ -n "$ripestat_routing_data" ]; then
-			echo -e "${bluebg} IPv4 Prefixes ─────>${default} ${green}${ripestat_ipv4}"
-			echo -e "${bluebg} IPv6 Prefixes ─────>${default} ${yellow}${ripestat_ipv6}"
-			echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}"
+			echo -e "${bluebg} IPv4 Prefixes  ────>${default} ${green}${ripestat_ipv4}"
+			echo -e "${bluebg} IPv6 Prefixes  ────>${default} ${yellow}${ripestat_ipv6}"
+			echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}\n"
 		fi
 		if [ -n "$ripestat_neighbours_data" ]; then
 			[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
