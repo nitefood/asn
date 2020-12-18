@@ -1,4 +1,4 @@
-# ASN Lookup Tool and Traceroute Server (Bash)
+# ASN Lookup Tool and Traceroute Server
 
 
 
@@ -6,7 +6,7 @@
 
 ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation & geolocation lookup tool / Web traceroute server.
 
-This script serves the purpose of having a quick OSINT command line tool at disposal when investigating network data, which can come in handy in incident response scenarios as well.
+This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
 It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](https://github.com/nitefood/asn#running-lookups-from-the-browser) for more information about  server mode functionality.
 
@@ -113,21 +113,34 @@ Requires Bash v4.2+. Tested on:
 
 ### Prerequisite packages
 
-This script requires **BASH v4.2** or later. Some additional packages are also required for full functionality:
+This script requires **BASH v4.2** or later. You can check your version by running from your shell: 
 
-* **Debian/Ubuntu:**
+`bash -c 'echo $BASH_VERSION'`
 
-  `apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc && git clone https://github.com/theZiz/aha.git && make install -C aha/ `
+Some additional packages are also required for full functionality:
 
-* **CentOS 7/8:**
+* **Debian 10 / Ubuntu 20.04 (or newer):**
 
   ```
-  yum -y install curl whois bind-utils mtr jq perl nmap git gcc && \
-  rpm -ivh http://www6.atomicorp.com/channels/atomic/centos/7/x86_64/RPMS/grepcidr-2.0-1.el7.art.x86_64.rpm \
-  https://ftp.tu-chemnitz.de/pub/linux/dag/redhat/el7/en/x86_64/rpmforge/RPMS/ipcalc-0.41-1.el7.rf.x86_64.rpm; \
-  git clone https://github.com/theZiz/aha.git && make install -C aha/
+  apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr ncat aha
+  ```
+  
+* **Debian 9 / Ubuntu 18.04 (or older):**
+
+  ```
+  apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc make && \
+  git clone https://github.com/theZiz/aha.git && \
+  make install -C aha/
   ```
 
+* **CentOS 8:**
+
+  ```
+  yum -y install curl whois bind-utils mtr jq nmap-ncat ipcalc && \
+  rpm -ivh http://rpmfind.net/linux/opensuse/tumbleweed/repo/oss/x86_64/grepcidr-2.0-1.1.x86_64.rpm \
+  http://rpmfind.net/linux/epel/8/Everything/x86_64/Packages/a/aha-0.5.1-1.el8.x86_64.rpm
+  ```
+  
 * **FreeBSD**:
 
   `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
@@ -136,19 +149,51 @@ This script requires **BASH v4.2** or later. Some additional packages are also r
 
   `brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr`
 
-  *(Note for MacOS users: if `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it)*
+  *Notes for MacOS users:*
 
-### Script download
+  * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
+  * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (a good explanation for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
 
-Afterwards, to download the **asn** script from your shell:
+### Script download and installation
 
-`curl https://raw.githubusercontent.com/nitefood/asn/master/asn > asn && chmod +x asn`
+Afterwards, to install the **asn** script from your shell to **/usr/bin**:
 
-You can then use the script by running `./asn`.
+`curl "https://raw.githubusercontent.com/nitefood/asn/master/asn" > /usr/bin/asn && chmod 0755 /usr/bin/asn`
+
+You can then use the script by running `asn`.
+
+### Installing the *asn server* as a system service
+
+*Note: this step is optional, and these instructions are only for systemd-based Linux systems (most current major distributions).*
+
+To control the **asn server** with utilities like *systemctl* and *service*, and to enable it to automatically start at boot, follow these steps:
+
+1. create a new file called `/etc/systemd/system/asn.service` with the following content (make sure you edit the *ExecStart* line to match your installation path and desired startup options):
+
+   ```
+   [Unit]
+   Description=ASN lookup and traceroute server
+   After=network.target
+   StartLimitIntervalSec=0
+   
+   [Service]
+   Type=simple
+   Restart=always
+   RestartSec=1
+   User=nobody
+   ExecStart=/usr/bin/asn -l 0.0.0.0
+   
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+2. Now you can start and stop the asn server using `systemctl start asn` and `systemctl stop asn`, and check its status and logs with `systemctl status asn`.
+
+3. If you want to start the server automatically on boot, run `systemctl enable asn`. Similarily, to disable automatic startup use `systemctl disable asn`.
+
+
 
 ### IP reputation API token
-
-##### *NOTICE: Auth0 recently [announced](https://auth0.com/blog/auth0-sunsets-signals/) their plans to deprecate the Signals API on Feb 8, 2021. `asn` now combines results from the [StopForumSpam](https://www.stopforumspam.com/) and [IPQualityScore](https://www.ipqualityscore.com/) APIs instead, read below for more info.*
 
 The script will perform first-level IPv4/v6 reputation lookups using [StopForumSpam](https://www.stopforumspam.com/), and in case of a match it will perform a second-level, in-depth threat analysis for targets and trace hops using the [IPQualityScore](https://www.ipqualityscore.com/) API. The StopForumSpam API is free and requires no sign-up, and the service aggregates a [huge](https://www.stopforumspam.com/contributors) amount of blacklist feeds.
 
@@ -286,11 +331,11 @@ The script will use the ip-api, RIPE IPmap and PeeringDB services to classify ta
 
 ## Running lookups from the browser
 
-##### *Prerequisites tools for server mode*
+##### *Prerequisite tools for server mode*
 
-Server mode requires two tools for its functionality: `nmap` and `aha`. Specifically, [aha](https://github.com/theZiz/aha) (the ANSI->HTML converter) v0.5+ is required. Nmap is only required since it includes the `ncat` network tool in the same package. The actual script requirement is just `ncat`, not the full nmap package.
+Server mode requires two tools for its functionality: `ncat` and `aha`. Specifically, [aha](https://github.com/theZiz/aha) (the ANSI->HTML converter) v0.5+ is required. The ncat tool is contained inside the *nmap* package on older distributions (e.g. Ubuntu 18.04, Debian 9), while it is packaged as a standalone tool on newer ones.
 
-Please refer to the [prerequisite packages](https://github.com/nitefood/asn#prerequisite-packages) section and run the appropriate commands to install the required packages for your operating system.
+Please refer to the [installation](https://github.com/nitefood/asn#installation) section and run the appropriate commands to install the required packages for your operating system, and optionally to install the asn server as a systemd service.
 
 #### Server side
 
@@ -314,7 +359,7 @@ The link you drag to the bookmarks bar is actually a *minified* (i.e.: compacted
 
 ```javascript
 javascript:(function () {
-	var asnserver = "localhost:49200";
+    var asnserver = "localhost:49200";
     var target = window.location.hostname;
     var width = screen.width - screen.width / 7;
     var height= screen.height - screen.height / 4;
@@ -336,14 +381,14 @@ Once the trace is finished, an option to share the output on [termbin](https://t
 
 #### Search engine setup
 
-In order to take full advantage of having `asn` inside the browser, it is possible to install it as a custom search engine for the browser search bar. This allows to leverage the server to  search for **ASNs**, **URLs**, **IPs**, **Hostnames**, and so on, depending on the search string.
+In order to take full advantage of having `asn` inside the browser, it is possible to configure it as a custom search engine for the browser search bar. This allows to leverage the server to  search for **ASNs**, **URLs**, **IPs**, **Hostnames**, and so on, depending on the search string.
 
-Generally speaking, this implies instructing the browser that when a certain **keyword** is prepended to a search, the following characters (the actual **search string**, identified by `%s`) have to be passed to a certain URL. The URL is then constructed according to this logic, and opened just like a normal webpage.
+Generally speaking, this implies instructing the browser that when a certain **keyword** is prepended to a search, the following characters (the actual **search string**, identified by `%s`) have to be passed to a certain URL. The URL is then composed according to this logic, and opened just like a normal webpage.
 
 I've used `@asn` for my keyword, but anything would do. In order to speed up things, one could very well use a shorter tag (e.g. `#`) that, when used in the address bar, automatically switches your search engine to the ASN Lookup server.
 Note that the leading `@` sign is not mandatory, just handy since it doesn't get in the way of normal searches, but there's much freedom with that.
 
-For quick reference, the search string to enter (for both Firefox and Chrome) is: `http://127.0.0.1:49200/asn_lookup&%s`. Of course that sends lookup requests to the *locally* running ASN server.
+For quick reference, the location URL string to enter (for both Firefox and Chrome) is: `http://127.0.0.1:49200/asn_lookup&%s`. Of course that sends lookup requests to the *locally* running ASN server.
 
 Here's how to add a search engine in Firefox and Chrome:
 
@@ -386,7 +431,7 @@ As usual, the keyword is entierly customizable to your preference.
 ##### *Port forwarding*
 
 In order to access the server remotely, beside binding to `0.0.0.0` (or any other relevant IP address for your scenario),  if the host is behind a NAT router, you'll need to forward the listening port (`BIND_PORT`) from the host/router outside IP to the actual machine where the ASN server is running on.
-It is a single port (by default `TCP/49200`), and you can change it via the command line parameters (see [Usage](https://github.com/nitefood/asn#usage)).
+It is a single TCP port (by default `TCP/49200`), and you can change it via the command line parameters (see [Usage](https://github.com/nitefood/asn#usage)).
 
 ##### *Textual browser client*
 
@@ -394,7 +439,7 @@ It is possible to launch remote traces from another command line, and view the r
 
 The script makes use of 8-bit ANSI colors for its output, so the command to launch a remote trace using elinks would be something like this: 
 
-`elinks -dump -dump-color-mode 3 http://<ASN_SRV_IP>:49200/8.8.8.8`
+`elinks -dump -dump-color-mode 3 http://<ASN_SRV_IP>:49200/asn_lookup&8.8.8.8`
 
 ##### *Security considerations*
 
@@ -402,7 +447,7 @@ The server logic in itself is very simple: the script implements a basic web ser
 
 The core behind it revolves around [ncat](https://nmap.org/ncat/), a very robust and stable netcat-like network tool. This is the actual "server" listening for incoming connection, and spawning connection handlers (that is, 'single-purpose' instances of the `asn` script itself) as clients connect.
 
-If you decide to open it to the outside (i.e.: binding it to something that is not localhost, and launching traces from outside your local machine), please bear in mind that there is no authentication mechanism (yet) integrated into the code, so theoretically anybody with the right URL could *spawn traceroutes from your server* and view the results.
+If you decide to open it to the outside (i.e.: binding it to something that is not localhost, and launching traces from outside your local machine), please bear in mind that there is no authentication mechanism (yet) integrated into the code, so theoretically anybody with the right URL could *spawn traceroutes from your server* and view the results (bear in mind however that the server sanitizes user input by stripping any dangerous characters).
 
 To contrast that, fortunately `ncat` implements a robust allow/deny logic (based both on command line parameters and files, a la `/etc/hosts.allow` and `hosts.deny`). The script supports passing parameters directly to `ncat`, therefore it's possible to make full use of its filtering capabilities and lock the server to a restricted range of trusted IPs.
 
