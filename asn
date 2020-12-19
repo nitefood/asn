@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.70.0"
+ASN_VERSION="0.70.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1282,6 +1282,9 @@ IPGeoRepLookup(){
 }
 
 AsnServerListener(){
+
+	DisableColorsIfHeadless
+
 	BoxHeader "ASN Lookup Server on $HOSTNAME"
 
 	if [ "$ASN_DEBUG" = true ]; then
@@ -1305,7 +1308,11 @@ AsnServerListener(){
 
 	StatusbarMessage
 
-	[[ "$HAVE_IPV6" = true ]] && ipv6_mark="${green}✓ YES${default}" || ipv6_mark="${red}❌ NO${default}"
+	if [ "$HAVE_IPV6" = true ]; then
+		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="YES" || ipv6_mark="${green}✓ YES${default}"
+	else
+		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="NO" || ipv6_mark="${red}❌ NO${default}"
+	fi
 	echo -e "\n- Server ext. IP  : ${blue}${local_wanip}${default}" \
 			"\n- Server Country  : ${blue}${server_country}${default}" \
 			"\n- Server ASN      : ${red}[AS${found_asn}]${default} ${green}$found_asname${default}" \
@@ -1315,12 +1322,13 @@ AsnServerListener(){
 	server_country="$(echo -e "$server_country" | tr '[:upper:]' '[:lower:]')"
 
 	trap '
-		echo -e "\r[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server requested shutdown, terminating..."
+		[[ "$IS_HEADLESS" = false ]] && echo -en "\r" >&2
+		echo -e "[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server requested shutdown, terminating..." >&2
 		exit 0
-		' INT
+		' INT TERM
 
 	#* Assemble the ncat listener command
-	read -r -d '' ncat_cmd <<- END-OF-NCAT-CMD
+	read -r -d '' ncat_cmd <<- END_OF_NCAT_CMD
 	ncat -k -l $ASN_SRV_BINDADDR $ASN_SRV_BINDPORT $userinput --sh-exec "
 				export NCAT_REMOTE_ADDR; \
 				found_asn=\"$found_asn\" \
@@ -1330,7 +1338,7 @@ AsnServerListener(){
 			 	INTERNAL_ASNSERVER_CONNHANDLER=true \
 			 	\"$0\"
 		 	"
-	END-OF-NCAT-CMD
+	END_OF_NCAT_CMD
 
 	#! Start the ncat listener and serve each client request
 	#! by respawning the script with $INTERNAL_ASNSERVER_CONNHANDLER => true
@@ -1353,17 +1361,21 @@ Ctrl_C() {
 BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
 	local message="$*"
 
-	if [ "$IS_ASN_CHILD" = false ]; then
-		echo -e "\n${white}╭─${message//?/─}─╮\n│ ${yellow}${message}${white} │\n╰─${message//?/─}─╯"
-		tput sgr 0
-	else
+	if [ "$IS_ASN_CHILD" = true ]; then
 		echo "BOXHEADER $message" # the BOXHEADER tag will be transformed by the ASN server into an html <table> element
+	else
+		if [ "$IS_HEADLESS" = true ]; then
+			echo "// $message //"
+		else
+			echo -e "\n${white}╭─${message//?/─}─╮\n│ ${yellow}${message}${white} │\n╰─${message//?/─}─╯"
+			tput sgr 0
+		fi
 	fi
 }
 
 StatusbarMessage() { # invoke without parameters to delete the status bar message
 	# suppress output for headless runs
-	[[ "$IS_ASN_CHILD" = true ]] && return
+	[[ "$IS_HEADLESS" = true ]] && return
 
 	if [ -n "$statusbar_message" ]; then
 		# delete previous status bar message
@@ -1391,6 +1403,29 @@ WhatIsMyIP() {
 	# check if we default to an IPv6 internet connection
 	if echo "$local_wanip" | grep -q ':'; then
 		HAVE_IPV6=true
+	fi
+}
+
+DisableColorsIfHeadless() {
+	# avoid colors for headless server runs (e.g. systemd logs/status)
+	# and for listener runs
+	if [ "$IS_HEADLESS" = true ]; then
+		green=""
+		magenta=""
+		yellow=""
+		white=""
+		blue=""
+		red=""
+		black=""
+		lightyellow=""
+		lightred=""
+		lightblue=""
+		lightgreybg=""
+		bluebg=""
+		redbg=""
+		greenbg=""
+		yellowbg=""
+		default=""
 	fi
 }
 
@@ -1501,18 +1536,30 @@ CheckPrerequisites() {
 	fi
 
 	IQS_TOKEN=""
-	# Read ipqualityscore.com token from file
-	if [ -r "$IQS_TOKEN_FILENAME" ]; then
-		IQS_TOKEN=$(tr -d ' \n\r\t' < "$IQS_TOKEN_FILENAME")
-	fi
+	# Read ipqualityscore.com token from possible config files on disk
+	IFS=$'\n'
+	for asn_config_file in $(tr ':' '\n' <<<"$IQS_TOKEN_FILES"); do
+		if [ -r "$asn_config_file" ]; then
+			IQS_TOKEN=$(tr -d ' \n\r\t' < "$asn_config_file")
+			break
+		fi
+	done
 	if [ -z "$IQS_TOKEN" ]; then
 		# warn the user about the absence of in-depth IP reputation API token
-		echo -en "\n${yellow}────────────────────────────────────────────────────────────\n\t\t\tWARNING${default}" \
-			"\n\n${white}No IPQualityScore token found, so disabling in-depth threat" \
-			"\nanalysis and IP reputation lookups. Please visit" \
-			"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
-			"\nfor instructions on how to enable it." \
-			"\n${yellow}────────────────────────────────────────────────────────────${default}\n" >&2
+		if [ "$IS_HEADLESS" = true ]; then
+			line="------------------------------------------------------------"
+			echo -e "\n${line}\nWARNING: No IpQualityScore token found, disabling in-depth\nthreat analysis. Check" \
+				"\nhttps://github.com/nitefood/asn#ip-reputation-api-token for\ninstructions on how to enable it." \
+				"\n${line}" >&2
+		else
+			line="────────────────────────────────────────────────────────────"
+			echo -en "\n${yellow}${line}\n\t\t\tWARNING${default}" \
+				"\n\n${white}No IPQualityScore token found, so disabling in-depth threat" \
+				"\nanalysis and IP reputation lookups. Please visit" \
+				"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
+				"\nfor instructions on how to enable it." \
+				"\n${yellow}${line}${default}\n" >&2
+		fi
 	fi
 
 	CoreutilsFixup
@@ -1550,9 +1597,12 @@ StripAnsi() {
 }
 
 HandleNcatClientConnection() {
+
 	# ╭─────────────────────────────────────╮
 	# │ MAIN NCAT CLIENT CONNECTION HANDLER │
 	# ╰─────────────────────────────────────╯
+
+	DisableColorsIfHeadless
 
 	# HTTP response headers
 	http_ok='HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n'
@@ -1574,7 +1624,7 @@ HandleNcatClientConnection() {
 	js_bookmarklet+='window.open("http://"+asnserver+"/asn_lookup&"+target,"newWindow","width="+width+",height="+height+",top="+top+",left="+left)})();'
 
 	# HTML bookmarklet page
-	read -r -d '' html_bookmarklet_page <<- END-OF-BOOKMARKLET-HTML
+	read -r -d '' html_bookmarklet_page <<- END_OF_BOOKMARKLET_HTML
 	<html>
 	<head>
 		<meta http-equiv="Content-Type" content="application/xml+xhtml; charset=UTF-8"/>
@@ -1611,7 +1661,7 @@ HandleNcatClientConnection() {
 	</pre>
 	</body>
 	</html>
-	END-OF-BOOKMARKLET-HTML
+	END_OF_BOOKMARKLET_HTML
 
 	# HTML opening tags
 	# shellcheck disable=SC2016
@@ -1991,6 +2041,16 @@ greenbg=$'\e[48;5;035m'${black}
 yellowbg=$'\e[48;5;142m'${black}
 default=$'\e[0m'
 
+[[ "$TERM" = "dumb" ]] && IS_HEADLESS=true || IS_HEADLESS=false
+
+# Get terminal width. If running headless in a child instance (or in server mode) set it to a "sane" value to display appropriate HTML spacing in reports
+if [ "$IS_HEADLESS" = true ]; then
+	terminal_width=233
+else
+	terminal_width=$(tput cols)
+	trap 'terminal_width=$(tput cols)' SIGWINCH
+fi
+
 # Check if this script instance was launched by the ASN server connection handler
 if [ "$INTERNAL_CONNHANDLER_CHILD" = true ]; then
 	IS_ASN_CHILD=true
@@ -2007,22 +2067,15 @@ else
 	IS_ASN_CONNHANDLER=false
 fi
 
-# Get terminal width. If running headless in a child instance (or in server mode) set it to a "sane" value to display appropriate HTML spacing in reports
-if [ "$IS_ASN_CHILD" = true ] || [ "$IS_ASN_CONNHANDLER" = true ] || [ "$SERVER_MODE" = true ]; then
-	terminal_width=233
-else
-	terminal_width=$(tput cols)
-	trap 'terminal_width=$(tput cols)' SIGWINCH
-fi
-
 # External API token for ipqualityscore.com (IP reputation & threat analisys lookup)
-IQS_TOKEN_FILENAME="$HOME/.asn/iqs_token"
+# Files will be parsed in the order they are declared (first path found takes precedence)
+IQS_TOKEN_FILES="$HOME/.asn/iqs_token:/etc/asn/iqs_token"
 
 # Server mode binding defaults
 DEFAULT_SERVER_BINDADDR="127.0.0.1"
 DEFAULT_SERVER_BINDPORT="49200"
 
-# Signals trapping (interrupt/terminal resize)
+# SIGINT trapping
 NO_ERROR_ON_INTERRUPT=false
 trap Ctrl_C INT
 

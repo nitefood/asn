@@ -152,7 +152,7 @@ Some additional packages are also required for full functionality:
   *Notes for MacOS users:*
 
   * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
-  * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (a good explanation for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
+  * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
 
 ### Script download and installation
 
@@ -187,23 +187,45 @@ To control the **asn server** with utilities like *systemctl* and *service*, and
    WantedBy=multi-user.target
    ```
 
-2. Now you can start and stop the asn server using `systemctl start asn` and `systemctl stop asn`, and check its status and logs with `systemctl status asn`.
+2. Enable the *CAP_NET_RAW* capability for the mtr-packet binary:
 
-3. If you want to start the server automatically on boot, run `systemctl enable asn`. Similarily, to disable automatic startup use `systemctl disable asn`.
+   `setcap cap_net_raw+ep $(which mtr-packet)`
 
+   *Explanation: this will allow mtr-packet to create raw sockets (and thus perform traces) when launched as an unprivileged user (we're setting up the service to run as user nobody for added security), without the requirement of the setuid-root bit and without having to invoke mtr as root. A thorough explanation for this can be found [here](https://github.com/traviscross/mtr/blob/master/SECURITY).*
 
+3. Now you can refer to standard systemd utilities to perform service operations:
+
+   * To start the service: `systemctl start asn`
+   * To stop the service: `systemctl stop asn`
+   * To check its status and latest logs: `systemctl status asn`
+   * To follow its logging in real time: `journalctl -f -u asn`
+   * To start the service automatically on boot: `systemctl enable asn`
+   * To disable automatic start on boot: `systemctl disable asn`
 
 ### IP reputation API token
 
 The script will perform first-level IPv4/v6 reputation lookups using [StopForumSpam](https://www.stopforumspam.com/), and in case of a match it will perform a second-level, in-depth threat analysis for targets and trace hops using the [IPQualityScore](https://www.ipqualityscore.com/) API. The StopForumSpam API is free and requires no sign-up, and the service aggregates a [huge](https://www.stopforumspam.com/contributors) amount of blacklist feeds.
 
 Still, in order to use the IPQualityScore API for in-depth threat reporting, it's necessary to [sign up](https://www.ipqualityscore.com/create-account) for their service (it's free) and get an API token (it will be emailed to you on sign-up), which will entitle you to 5000 free lookups per month.
-Once obtained, the api token should be written to the `$HOME/.asn/iqs_token` file.
+
+Once obtained, the api token should be written to one of the following files (parsed in that order):
+
+`$HOME/.asn/iqs_token` or
+`/etc/asn/iqs_token`
+
+The `/etc`-based file should be used when running asn in **server mode**. The `$HOME`-based file takes precedence if both files exist, and is ideal for **user mode** (that is, running `asn` interactively from the command line).
+
 In order to do so, you can use the following command:
+
+***User mode:***
 
 `TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/iqs_token" && chmod -R 600 "$HOME/.asn/"`
 
-`asn` will pick up your token on the next run, and use it to query the IPQualityScore API.
+***Server mode:***
+
+`TOKEN="<your_token_here>"; mkdir "/etc/asn/" && echo "$TOKEN" > "/etc/asn/iqs_token" && chmod -R 700 "/etc/asn/" && chown -R nobody /etc/asn/`
+
+Either way, `asn` will pick up your token on the next run (no need to restart the service if running in server mode), and use it to query the IPQualityScore API.
 
 ## Usage
 
