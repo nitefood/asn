@@ -2,13 +2,23 @@
 
 
 
+*Quick jump:*
+
+* [Description](#description)
+* [Screenshots](#screenshots)
+* [Installation](#installation)
+* [Usage (as a command line tool)](#usage)
+* [Usage (as a lookup & traceroute server)](#running-lookups-from-the-browser)
+
+
+
 ## Description
 
 ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation & geolocation lookup tool / Web traceroute server.
 
 This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
-It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](https://github.com/nitefood/asn#running-lookups-from-the-browser) for more information about  server mode functionality.
+It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](#running-lookups-from-the-browser) for more information about  server mode functionality.
 
 #### Features:
 
@@ -25,7 +35,7 @@ It can also be used as a **web-based traceroute server**, by running it in liste
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
-- It will perform **IP geolocation** lookups according to the logic described [below](https://github.com/nitefood/asn#geolocation).
+- It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
 - It will perform **IP reputation** lookups and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 - It will perform **IP classification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
   - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
@@ -153,6 +163,21 @@ Some additional packages are also required for full functionality:
 
   * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
   * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
+  
+* **Windows**:
+
+  * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
+
+    Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
+    Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
+
+    *Note for WSL2 users:*
+
+    * *systemd is not currently available in WSL2, so you won't be able to run the **asn server** in daemon mode as described below (if you want server mode you'll have to launch it manually using `asn -l`). An alternative could be to run it as a background process (optionally also using `nohup`), or using Windows' own task scheduler to start it at boot.*
+
+  * **using [Cygwin](https://cygwin.com/index.html):**
+
+    Most of the prerequisite packages listed above for *Debian 10 / Ubuntu 20.04 (or newer)* are obtainable directly with Cygwin's own Setup wizard (or through scripts like *apt-cyg*). You will still have to manually compile (or find a suitable third-party precompiled binary) the *mtr*, *grepcidr* and *aha* tools. Instructions on how to do so can be found directly on the respective projects homepages.
 
 ### Script download and installation
 
@@ -315,7 +340,7 @@ Default behavior:
 - The script will start up a webserver allowing the user to run remote lookups and traceroutes directly from the browser.
   The web server is actually an [ncat](https://nmap.org/ncat/) listener waiting for requests, responding to browsers querying through the HTTP protocol. This interface makes for a straightforward integration into user workflow and no need to download any client-side tools.
   By simply using a Javascript [bookmarklet](https://en.wikipedia.org/wiki/Bookmarklet) or custom [search engine](https://www.howtogeek.com/114176/how-to-easily-create-search-plugins-add-any-search-engine-to-your-browser/), it will be possible to launch remote traces and lookups without ever leaving the browser.
-  Refer to the [this section](https://github.com/nitefood/asn#running-lookups-from-the-browser) for more information.
+  Refer to the [this section](#running-lookups-from-the-browser) for more information.
 
 ##### 
 
@@ -357,7 +382,7 @@ The script will use the ip-api, RIPE IPmap and PeeringDB services to classify ta
 
 Server mode requires two tools for its functionality: `ncat` and `aha`. Specifically, [aha](https://github.com/theZiz/aha) (the ANSI->HTML converter) v0.5+ is required. The ncat tool is contained inside the *nmap* package on older distributions (e.g. Ubuntu 18.04, Debian 9), while it is packaged as a standalone tool on newer ones.
 
-Please refer to the [installation](https://github.com/nitefood/asn#installation) section and run the appropriate commands to install the required packages for your operating system, and optionally to install the asn server as a systemd service.
+Please refer to the [installation](#installation) section and run the appropriate commands to install the required packages for your operating system, and optionally to install the asn server as a systemd service.
 
 #### Server side
 
@@ -365,7 +390,7 @@ Once started in **server mode**, `asn` will spin up a custom webserver waiting f
 
 ![server_console](https://user-images.githubusercontent.com/24555810/102154363-80ee5500-3e79-11eb-840f-53e3619be2e4.png)
 
-The server is now ready to accept browser requests (only from the local machine, in this case - since I've launched it with no command line switches, which defaults to listening on **127.0.0.1:49200**. Refer to the [usage](https://github.com/nitefood/asn#usage) section for more information about the available server options).
+The server is now ready to accept browser requests (only from the local machine, in this case - since I've launched it with no command line switches, which defaults to listening on **127.0.0.1:49200**. Refer to the [usage](#usage) section for more information about the available server options).
 
 #### Client side
 
@@ -453,7 +478,7 @@ As usual, the keyword is entierly customizable to your preference.
 ##### *Port forwarding*
 
 In order to access the server remotely, beside binding to `0.0.0.0` (or any other relevant IP address for your scenario),  if the host is behind a NAT router, you'll need to forward the listening port (`BIND_PORT`) from the host/router outside IP to the actual machine where the ASN server is running on.
-It is a single TCP port (by default `TCP/49200`), and you can change it via the command line parameters (see [Usage](https://github.com/nitefood/asn#usage)).
+It is a single TCP port (by default `TCP/49200`), and you can change it via the command line parameters (see [Usage](#usage)).
 
 ##### *Textual browser client*
 

@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.70.1"
+ASN_VERSION="0.70.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1285,7 +1285,7 @@ AsnServerListener(){
 
 	DisableColorsIfHeadless
 
-	BoxHeader "ASN Lookup Server on $HOSTNAME"
+	BoxHeader "ASN Lookup Server v$ASN_VERSION on $HOSTNAME"
 
 	if [ "$ASN_DEBUG" = true ]; then
 		echo -en "\n- ${yellow}[DBG]${default} Server BIND_ADDR : $ASN_SRV_BINDADDR"
@@ -1447,13 +1447,9 @@ CoreutilsFixup() {
 		base64() { gbase64 "$@"; }
 		export -f base64
 	fi
-	if [ -x "$(command -v gtac)" ]; then
-		tac() { gtac "$@"; }
-		export -f tac
-	fi
 	if [ "$IS_ASN_CHILD" = true ] || [ "$IS_ASN_CONNHANDLER" = true ]; then
-		# trap and ignore tput during headless runs
-		tput() { (:;:); }
+		# suppress the tput command during headless runs
+		tput() { :; }
 		export -f tput
 	fi
 }
