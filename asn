@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.70.2"
+ASN_VERSION="0.70.3"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1904,7 +1904,7 @@ HandleNcatClientConnection() {
 			# launch ASN trace to URL and convert its output to HTML
 
 			ServerDebugPrint "Spawning child"
-			INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false "$0" "$host" |
+			INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false TERM=dumb "$0" "$host" |
 			{
 				#* ╭──────────────────────────────────────────────╮
 				#* │ Main child output parsing loop command group │
@@ -2297,9 +2297,9 @@ if [ -z "$input" ]; then
 			if [ "$IS_ASN_CHILD" = true ] && [ "$numips" -gt 1 ]; then
 				# Running headless as an ASN server connhandler child, and more than 1 IP detected.
 				# Speed up the operation and only process the first appropriate IP (v4/v6)
-				if [ "$HAVE_IPV6" = true ]; then
+				if [ "$HAVE_IPV6" = true ] && grep -q ':' <<<"$ip"; then
 					ip_to_trace=$(echo "$ip" | grep -m1 ':')
-					else
+				else
 					ip_to_trace=$(echo "$ip" | grep -v -m1 ':')
 				fi
 				LookupASNAndRouteFromIP "$ip_to_trace"
