@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.70.3"
+ASN_VERSION="0.70.4"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1303,7 +1303,7 @@ AsnServerListener(){
 		found_asn="N/A"
 		found_asname="(Unknown)"
 	fi
-	server_country=$(echo "$found_asname" | cut -d ',' -f 2 | tr -d ' ')
+	server_country=$(echo "${found_asname##*,}" | tr -d ' ')
 	[[ -z "$server_country" ]] && server_country="(Unknown)"
 
 	StatusbarMessage
@@ -2358,7 +2358,7 @@ if [ -z "$input" ]; then
 		echo -en "${bluebg} AS Name       ──>${default} ${green}${found_asname}"
 		if [ "$IS_ASN_CHILD" = true ]; then
 			# signal to the parent connhandler the correct country flag to display for this ASN
-			flag_icon_cc=$(echo "$found_asname" | cut -d ',' -f 2 | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+			flag_icon_cc=$(echo "${found_asname##*,}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
 			[[ -n "$flag_icon_cc" ]] && echo -n " #COUNTRYCODE $flag_icon_cc"
 		fi
 		printf "\n"
