@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.70.4"
+ASN_VERSION="0.71"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -55,7 +55,11 @@ QueryRipestat(){
 	for peer in $(echo -e "$upstream_peers" | head -n $RESOLVE_COUNT); do
 		(( count++ ))
 		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
-		resolved_upstream_peers+="${greenbg} $peername ($peer) ${default} "
+		if [ "$IS_ASN_CHILD" = true ]; then
+			resolved_upstream_peers+="${greenbg} $peername (<a href=\"/asn_lookup&AS$peer\" style=\"background-color: $htmlgreen; color: $htmlblack;\">$peer</a>) ${default} "
+		else
+			resolved_upstream_peers+="${greenbg} $peername ($peer) ${default} "
+		fi
 		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_upstream_peers+="\n"
 	done
 	# and add the remaining ones as AS numbers only
@@ -63,7 +67,11 @@ QueryRipestat(){
 	if [ "$unresolved_peercount" -ge 1 ]; then
 		resolved_upstream_peers+="and more: "
 		for peer in $(echo -e "$upstream_peers" | tail -n $unresolved_peercount ); do
-			resolved_upstream_peers+="${green}${peer}${default} "
+			if [ "$IS_ASN_CHILD" = true ]; then
+				resolved_upstream_peers+="<a href=\"/asn_lookup&AS$peer\" style=\"color: $htmlgreen;\">$peer</a>${default} "
+			else
+				resolved_upstream_peers+="${green}${peer}${default} "
+			fi
 		done
 	fi
 	upstream_peers="$resolved_upstream_peers"
@@ -75,7 +83,11 @@ QueryRipestat(){
 	for peer in $(echo -e "$downstream_peers" | head -n $RESOLVE_COUNT); do
 		(( count++ ))
 		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
-		resolved_downstream_peers+="${yellowbg} $peername ($peer) ${default} "
+		if [ "$IS_ASN_CHILD" = true ]; then
+			resolved_downstream_peers+="${yellowbg} $peername (<a href=\"/asn_lookup&AS$peer\" style=\"background-color: $htmlyellow; color: $htmlblack;\">$peer</a>) ${default} "
+		else
+			resolved_downstream_peers+="${yellowbg} $peername ($peer) ${default} "
+		fi
 		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_downstream_peers+="\n"
 	done
 	# and add the remaining ones as AS numbers only
@@ -83,7 +95,11 @@ QueryRipestat(){
 	if [ "$unresolved_peercount" -ge 1 ]; then
 		resolved_downstream_peers+="and more: "
 		for peer in $(echo -e "$downstream_peers" | tail -n $unresolved_peercount ); do
-			resolved_downstream_peers+="${yellow}${peer}${default} "
+			if [ "$IS_ASN_CHILD" = true ]; then
+				resolved_downstream_peers+="<a href=\"/asn_lookup&AS$peer\" style=\"color: $htmlyellow;\">$peer</a>${default} "
+			else
+				resolved_downstream_peers+="${yellow}${peer}${default} "
+			fi
 		done
 	fi
 	downstream_peers="$resolved_downstream_peers"
@@ -95,7 +111,11 @@ QueryRipestat(){
 	for peer in $(echo -e "$uncertain_peers" | head -n $RESOLVE_COUNT); do
 		(( count++ ))
 		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
-		resolved_uncertain_peers+="${lightgreybg} $peername ($peer) ${default} "
+		if [ "$IS_ASN_CHILD" = true ]; then
+			resolved_uncertain_peers+="${lightgreybg} $peername (<a href=\"/asn_lookup&AS$peer\" style=\"background-color: $htmllightgray; color: $htmlblack;\">$peer</a>) ${default} "
+		else
+			resolved_uncertain_peers+="${lightgreybg} $peername ($peer) ${default} "
+		fi
 		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_uncertain_peers+="\n"
 	done
 	# and add the remaining ones as AS numbers only
@@ -103,7 +123,11 @@ QueryRipestat(){
 	if [ "$unresolved_peercount" -ge 1 ]; then
 		resolved_uncertain_peers+="and more: "
 		for peer in $(echo -e "$uncertain_peers" | tail -n $unresolved_peercount ); do
-			resolved_uncertain_peers+="${white}${peer}${default} "
+			if [ "$IS_ASN_CHILD" = true ]; then
+				resolved_uncertain_peers+="<a href=\"/asn_lookup&AS$peer\" style=\"color: $htmlwhite;\">$peer</a>${default} "
+			else
+				resolved_uncertain_peers+="${white}${peer}${default} "
+			fi
 		done
 	fi
 	uncertain_peers="$resolved_uncertain_peers"
@@ -127,8 +151,27 @@ QueryRipestat(){
 		fi
 	done
 
-	[[ -n "$ipv4_inetnums" ]] && ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
-	[[ -n "$ipv6_inetnums" ]] && ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
+	if [ -n "$ipv4_inetnums" ]; then
+		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
+		if [ "$IS_ASN_CHILD" = true ]; then
+			html=""
+			for inetnum in $ipv4_inetnums; do
+				html+="<a href=\"/asn_lookup&$inetnum\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
+			done
+			ipv4_inetnums="$html"
+		fi
+	fi
+	if [ -n "$ipv6_inetnums" ]; then
+		ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
+		if [ "$IS_ASN_CHILD" = true ]; then
+			html=""
+			for inet6num in $ipv6_inetnums; do
+				html+="<a href=\"/asn_lookup&$inet6num\" style=\"color: $htmlyellow;\">$inet6num</a>\n"
+			done
+			ipv6_inetnums="$html"
+		fi
+	fi
+	# [[ -n "$ipv6_inetnums" ]] && ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
 	StatusbarMessage
 }
 
@@ -255,7 +298,8 @@ WhoisIP(){
 	fi
 
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
-	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$found_asn" "$output_asname"
+	[[ "$IS_ASN_CHILD" ]] && summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>" || summary_asn="$found_asn"
+	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
@@ -511,7 +555,19 @@ AbuseLookup(){
 
 HopPrint(){
 	StatusbarMessage
-	echo -e "$@"
+	# shellcheck disable=SC2124
+	output="$@"
+	# create hyperlinks if running in server mode
+	if [ "$IS_ASN_CHILD" = true ]; then
+		[[ -z "$ixp_tag" ]] && htmlcolor="$htmlwhite" || htmlcolor="$htmlblue"
+		found_ips=$(grep -Eo "${ipv4v6regex}[ $]" <<<"$output")
+		if [ -n "$found_ips" ]; then
+			for ip in $found_ips; do
+				output="${output//"$ip"/"<a href=\"/asn_lookup&$ip\" style=\"color: $htmlcolor;\">$ip</a>"}"
+			done
+		fi
+	fi
+	echo -e "$output"
 	StatusbarMessage "Analyzing collected trace output to ${bluebg}${host_to_trace}${lightgreybg}"
 }
 
@@ -560,7 +616,12 @@ TraceASPath(){
 		found_asn="XXX"
 		found_asname="(Unknown)"
 	fi
-	aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+	if [ "$IS_ASN_CHILD" = true ]; then
+		aspatharray_asnvalue="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred; display:inline-block; width: 4em;\">$found_asn</a>"
+	else
+		aspatharray_asnvalue="$found_asn"
+	fi
+	aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)" )
 	aspath_array+=("$aspath_entry")
 
 	# mtr finished, analyze and output results
@@ -665,9 +726,15 @@ TraceASPath(){
 				fi
 			else
 				# $hop_ip belongs to an announced prefix
-				asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+				if [ "$IS_ASN_CHILD" = true ]; then
+					asn_data="${red}[<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">AS$found_asn</a>] ${green}$found_asname${default}"
+					aspatharray_asnvalue="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred; display:inline-block; width: 4em;\">$found_asn</a>"
+				else
+					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
+					aspatharray_asnvalue="$found_asn"
+				fi
 				# avoid adding the same AS multiple times in a row in the summary path
-				aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$found_asn" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+				aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)" )
 				if [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
 					aspath_array+=("$aspath_entry")
 				fi
@@ -1155,7 +1222,11 @@ GetIXPresence(){
 	netlist=$(curl -s "https://www.peeringdb.com/api/net?asn__in=$asn" | jq -r '.data[].id')
 	if [ -n "$netlist" ]; then
 		for net in $netlist; do
-			ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
+			if [ "$IS_ASN_CHILD" = true ]; then
+				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[] | "<a href=\"https://www.peeringdb.com/ix/\(.ix_id)\" target=\"_blank\" style=\"color: '"$htmlblue"';\">\(.name)</a>"')
+			else
+				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
+			fi
 		done
 		if [ -n "$ixps" ]; then
 			for ix in $(echo "$ixps" | sort -u); do
@@ -1604,16 +1675,6 @@ HandleNcatClientConnection() {
 	http_ok='HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n'
 	http_ko='HTTP/1.0 400\r\nContent-Type: text/html\r\n\r\n<html><body><h1>400 Bad Request</h1>\nYour request could not be processed.</body></html>'
 
-	# HTML color codes matching ANSI colors used by the script
-	htmlwhite="#cccccc"
-	htmlblack="#1e1e1e"
-	htmllightgray="#d5d5d5"
-	htmlred="#ff5f5f"
-	htmlblue="#00afd7"
-	htmlyellow="#afaf00"
-	htmlgreen="#00af5f"
-	htmlmagenta="#ff5fff"
-
 	# Javascript bookmarklet
 	js_bookmarklet='javascript:(function(){var asnserver="localhost:49200",target=window.location.hostname,'
 	js_bookmarklet+='width=screen.width-screen.width/7,height=screen.height-screen.height/4,left=window.innerWidth/2-width/2,top=window.innerHeight/2-height/2;'
@@ -1734,7 +1795,14 @@ HandleNcatClientConnection() {
 				.hidden {
 					opacity: 0;
 				}
-
+				/* cheers https://css-tricks.com/snippets/css/make-pre-text-wrap/ */
+				pre {
+					white-space: pre-wrap;       /* css-3 */
+					white-space: -moz-pre-wrap;  /* Mozilla, since 1999 */
+					white-space: -pre-wrap;      /* Opera 4-6 */
+					white-space: -o-pre-wrap;    /* Opera 7 */
+					word-wrap: break-word;       /* Internet Explorer 5.5+ */
+				}
 				button.sharebutton {
 					background-color:'$htmlgreen';
 					border: solid 2px '$htmlblack';
@@ -1875,7 +1943,12 @@ HandleNcatClientConnection() {
 
 			# send HTTP 200 OK response and display HTML headers
 			echo -e "${http_ok}${html_header}"
-
+			countryname=$(timeout 1.5 curl -s https://restcountries.eu/rest/v2/alpha/$server_country | jq -r '.name')
+			if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
+				title_tag="title='$countryname'"
+			else
+				title_tag=""
+			fi
 			# display ASN server info table
 			echo -e "
 				<table style='border: none; white-space: nowrap';>
@@ -1892,8 +1965,8 @@ HandleNcatClientConnection() {
 					<tr>
 						<td style='color:$htmlred;'>$host</td>
 						<td style='color:$htmlyellow;'>$NCAT_REMOTE_ADDR</td>
-						<td style='color:$htmlgreen;'>$found_asn ($found_asname
-						<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$server_country.svg' style='height:1.05em; border-radius: 0; vertical-align: middle;'>)
+						<td style='color:$htmlgreen;'><a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlgreen;\">$found_asn</a> ($found_asname
+						<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$server_country.svg' $title_tag style='height:1.05em; border-radius: 0; vertical-align: middle;'>)
 						</td>
 						<td style='color:$htmlmagenta;'>$HOSTNAME</td>
 						<td style='color:$htmlwhite;'>$reportdatetime</td>
@@ -1941,11 +2014,22 @@ HandleNcatClientConnection() {
 						# Github Pages: https://lipis.github.io/flag-icon-css/flags/4x3/$cc.svg
 						# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
 						cc=$(echo -e "$outputline" | awk '{print $NF}')
-						target_flag_img="<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg' style='height:1.05em; border-radius: 0; vertical-align: middle;'>"
+						# lookup full country name
+						countryname=$(timeout 1.5 curl -s https://restcountries.eu/rest/v2/alpha/$cc | jq -r '.name')
+						if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
+							title_tag="title='$countryname'"
+						else
+							title_tag=""
+						fi
+						target_flag_img="<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg' $title_tag style='height:1.05em; border-radius: 0; vertical-align: middle;'>"
 						outputline=$(echo -e "$outputline" | sed -e 's/#COUNTRYCODE.*//')
 						tracedata+="$outputline\n"
 						outputline=$(echo -e "$outputline" | tr -d '\r\n' | aha -b -n)
 						printf "%s%s\n" "$outputline" "$target_flag_img"
+					elif grep -q "<a href=" <<<"$outputline"; then
+						href_stripped=$(awk '{gsub(/<[^>]*>/,""); print }' <<<"$outputline")
+						tracedata+="$href_stripped\n"
+						printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
 					else
 						tracedata+="$outputline\n"
 						printf "%s\n" "$outputline" | aha -b -n
@@ -2037,7 +2121,24 @@ greenbg=$'\e[48;5;035m'${black}
 yellowbg=$'\e[48;5;142m'${black}
 default=$'\e[0m'
 
+# HTML color codes matching ANSI colors used by the script
+htmlwhite="#cccccc"
+htmlblack="#1e1e1e"
+htmllightgray="#d5d5d5"
+htmlred="#ff5f5f"
+htmlblue="#00afd7"
+htmlyellow="#afaf00"
+htmlgreen="#00af5f"
+htmlmagenta="#ff5fff"
+
 [[ "$TERM" = "dumb" ]] && IS_HEADLESS=true || IS_HEADLESS=false
+
+ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
+'([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|'\
+'([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|'\
+':((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|'\
+'(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|'\
+'1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
 
 # Get terminal width. If running headless in a child instance (or in server mode) set it to a "sane" value to display appropriate HTML spacing in reports
 if [ "$IS_HEADLESS" = true ]; then
@@ -2078,13 +2179,6 @@ trap Ctrl_C INT
 # PeeringDB list of IXP prefixes
 peeringdb_dataset=""
 peeringdb_ipv6_dataset=""
-
-ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
-'([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|'\
-'([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|'\
-':((:[0-9a-fA-F]{1,4}){1,7}|:)|fe80:(:[0-9a-fA-F]{0,4}){0,4}%[0-9a-zA-Z]{1,}|::(ffff(:0{1,4}){0,1}:){0,1}((25[0-5]|'\
-'(2[0-4]|1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9])|([0-9a-fA-F]{1,4}:){1,4}:((25[0-5]|(2[0-4]|'\
-'1{0,1}[0-9]){0,1}[0-9])\.){3,3}(25[0-5]|(2[0-4]|1{0,1}[0-9]){0,1}[0-9]))' # cheers https://stackoverflow.com/a/17871737
 
 #*
 #* Parse command line options
@@ -2354,7 +2448,15 @@ if [ -z "$input" ]; then
 		if [ -z "$found_asname" ]; then
 			PrintErrorAndExit "Error: no data found for AS${asn}"
 		fi
-		echo -e "\n${bluebg} AS Number     ──>${default} ${red}${asn}"
+		echo -en "\n${bluebg} AS Number     ──>${default} ${red}${asn}"
+		if [ "$IS_ASN_CHILD" = true ]; then
+			ripestat_link="<a href=\"https://stat.ripe.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">RIPEStat</a>"
+			he_link="<a href=\"https://bgp.he.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">HE.NET</a>"
+			bgpview_link="<a href=\"https://bgpview.io/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPView</a>"
+			peeringdb_link="<a href=\"https://www.peeringdb.com/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">PeeringDB</a>"
+			echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $peeringdb_link🔗)</span>"
+		fi
+		echo ""
 		echo -en "${bluebg} AS Name       ──>${default} ${green}${found_asname}"
 		if [ "$IS_ASN_CHILD" = true ]; then
 			# signal to the parent connhandler the correct country flag to display for this ASN
