@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.1"
+ASN_VERSION="0.71.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -298,7 +298,7 @@ WhoisIP(){
 	fi
 
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
-	[[ "$IS_ASN_CHILD" ]] && summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>" || summary_asn="$found_asn"
+	[[ "$IS_ASN_CHILD" = true ]] && summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>" || summary_asn="$found_asn"
 	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
