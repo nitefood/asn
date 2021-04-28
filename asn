@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.2"
+ASN_VERSION="0.71.3"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -298,10 +298,17 @@ WhoisIP(){
 	fi
 
 	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
-	[[ "$IS_ASN_CHILD" = true ]] && summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>" || summary_asn="$found_asn"
+	if [ "$IS_ASN_CHILD" = true ] && [ -n "$found_asname" ]; then
+		summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>"
+		ipinfolink="<a href=\"https://ipinfo.io/AS$found_asn/$found_route\" target=\"_blank\" style=\"color: $htmlyellow; font-style: italic;\">ipinfo.io</a>"
+		summary_ipinfo=" <span style=\"font-size: 75%; color: $htmlyellow;\">($ipinfolink🔗)</span>"
+	else
+		summary_asn="$found_asn"
+		summary_ipinfo=""
+	fi
 	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
 	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
-	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_route" "$pwhois_net"
+	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)%s${default}\n" "├" "$found_route" "$pwhois_net" "$summary_ipinfo"
 	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
 	printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
 	[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "${ip_type_data}"
