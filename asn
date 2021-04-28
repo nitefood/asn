@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71"
+ASN_VERSION="0.71.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -560,10 +560,14 @@ HopPrint(){
 	# create hyperlinks if running in server mode
 	if [ "$IS_ASN_CHILD" = true ]; then
 		[[ -z "$ixp_tag" ]] && htmlcolor="$htmlwhite" || htmlcolor="$htmlblue"
-		found_ips=$(grep -Eo "${ipv4v6regex}[ $]" <<<"$output")
+		# extract and trim duplicate IPs from the trace output line
+		found_ips=$(grep -Eo "${ipv4v6regex}" <<<"$output" | sort -u)
 		if [ -n "$found_ips" ]; then
 			for ip in $found_ips; do
-				output="${output//"$ip"/"<a href=\"/asn_lookup&$ip\" style=\"color: $htmlcolor;\">$ip</a>"}"
+				# replace only the last IP in the trace output, so to handle special cases
+				# where the trace hop PTR contains the full dotted IP, ex:
+				# 1.2.3.4.domain.name (1.2.3.4) -> 1.2.3.4.domain.name (<href to 1.2.3.4>)
+				output=$(sed "s/\(.*\)$ip/\1<a href=\"\/asn_lookup\&$ip\" style=\"color: $htmlcolor;\">$ip<\/a>/" <<<"$output")
 			done
 		fi
 	fi
