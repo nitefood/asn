@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.3"
+ASN_VERSION="0.71.4"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1832,6 +1832,46 @@ HandleNcatClientConnection() {
 					top:1px;
 				}
 
+				/* ------------------------------------------------------------------------*/
+				/* CSS For modal popup (whois results in server mode for hostname targets) */
+				/* ------------------------------------------------------------------------*/
+				/* The Modal (background) */
+				.modal {
+					display: none; /* Hidden by default */
+					position: fixed; /* Stay in place */
+					z-index: 1; /* Sit on top */
+					left: 0;
+					top: 0;
+					width: 100%; /* Full width */
+					height: 100%; /* Full height */
+					overflow: auto; /* Enable scroll if needed */
+					background-color: rgb(0,0,0); /* Fallback color */
+					background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+				}
+
+				/* Modal Content/Box */
+				.modal-content {
+					background-color: '$htmlwhite';
+					margin: 15% auto; /* 15% from the top and centered */
+					font-size: 85%;
+					border: 1px solid '$htmlwhite';
+					width: 80%; /* Could be more or less, depending on screen size */
+				}
+				/* The Close Button */
+				.close {
+					color: #aaa;
+					float: right;
+					font-size: 28px;
+					font-weight: bold;
+				}
+
+				.close:hover,
+					.close:focus {
+						color: black;
+						text-decoration: none;
+						cursor: pointer;
+				}
+
 				/* -------------------------------------------------------------------------------*/
 				/* CSS Loader - cheers https://www.cssscript.com/demo/beautiful-creative-loaders/ */
 				/* modified values to stick to bottom even on scroll:
@@ -1954,7 +1994,7 @@ HandleNcatClientConnection() {
 
 			# send HTTP 200 OK response and display HTML headers
 			echo -e "${http_ok}${html_header}"
-			countryname=$(timeout 1.5 curl -s https://restcountries.eu/rest/v2/alpha/$server_country | jq -r '.name')
+			countryname=$(timeout 1.5 curl -s "https://restcountries.eu/rest/v2/alpha/$server_country" | jq -r '.name')
 			if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 				title_tag="title='$countryname'"
 			else
@@ -2018,7 +2058,7 @@ HandleNcatClientConnection() {
 						if echo -e "$message" | grep -q "Trace to "; then
 							echo -e "<script>top.document.title='[IN PROGRESS] Path trace to $host'</script>"
 						fi
-					elif echo -e "$outputline" | grep -Eq "#COUNTRYCODE"; then
+					elif grep -Eq "#COUNTRYCODE" <<<"$outputline"; then
 						# child instance is indicating a country code for the current IP, map it to a SVG and display it on the HTML report
 						# alternative URLs for the flag SVGs:
 						# JSdelivr CDN: https://cdn.jsdelivr.net/npm/flag-icon-css/flags/4x3/$cc.svg
@@ -2026,7 +2066,7 @@ HandleNcatClientConnection() {
 						# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
 						cc=$(echo -e "$outputline" | awk '{print $NF}')
 						# lookup full country name
-						countryname=$(timeout 1.5 curl -s https://restcountries.eu/rest/v2/alpha/$cc | jq -r '.name')
+						countryname=$(timeout 1.5 curl -s "https://restcountries.eu/rest/v2/alpha/$cc" | jq -r '.name')
 						if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 							title_tag="title='$countryname'"
 						else
@@ -2037,9 +2077,59 @@ HandleNcatClientConnection() {
 						tracedata+="$outputline\n"
 						outputline=$(echo -e "$outputline" | tr -d '\r\n' | aha -b -n)
 						printf "%s%s\n" "$outputline" "$target_flag_img"
-					elif grep -q "<a href=" <<<"$outputline"; then
+					elif grep -Eq "<a href=" <<<"$outputline"; then
 						href_stripped=$(awk '{gsub(/<[^>]*>/,""); print }' <<<"$outputline")
 						tracedata+="$href_stripped\n"
+						printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
+					elif grep -Eq "#PERFORMWHOIS" <<<"$outputline"; then
+						# child instance is asking us to perform a whois lookup for the target domain
+						# and show it to the user in the form of a tooltip
+						targetdomain=$(echo -e "$outputline" | awk '{print $NF}')
+						targetdomaindata=$(whois -H "$targetdomain" | grep -Ev "^\*")
+						hostio_href="<a href=\"https://host.io/$targetdomain\" target=\"_blank\" style=\"color: $htmlyellow; font-style: italic;\">host.io</a>"
+						hostio_link=" <span style=\"font-size: 75%; color: $htmlyellow;\">$hostio_href🔗</span>"
+						read -r -d '' whoisbutton <<- END_OF_MODAL_HTML
+							<!-- Trigger/Open The Modal -->
+							<button id="whoisbtn" style="cursor:pointer; background: none!important; border: none; padding: 0!important; text-decoration: underline dotted; font-size: 75%; font-style: italic; color: $htmlyellow;">WHOIS</button>
+							<!-- The Modal -->
+							<div id="myModal" class="modal">
+								<!-- Modal content -->
+								<div class="modal-content">
+									<span class="close"></span>
+									<p style="font-size: 120%; font-style: italic; text-align: center;">Whois information for domain <span style="font-weight: bold; color: $htmlred;">$targetdomain</span><br /><pre>$targetdomaindata</pre></p>
+								</div>
+							</div>
+							<script>
+								// Get the modal
+								var modal = document.getElementById("myModal");
+
+								// Get the button that opens the modal
+								var btn = document.getElementById("whoisbtn");
+
+								// Get the <span> element that closes the modal
+								var span = document.getElementsByClassName("close")[0];
+
+								// When the user clicks the button, open the modal
+								btn.onclick = function() {
+								modal.style.display = "block";
+								}
+
+								// When the user clicks on <span> (x), close the modal
+								span.onclick = function() {
+								modal.style.display = "none";
+								}
+
+								// When the user clicks anywhere outside of the modal, close it
+								window.onclick = function(event) {
+								if (event.target == modal) {
+									modal.style.display = "none";
+								}
+								}
+							</script>
+						END_OF_MODAL_HTML
+						outputline=$(echo -e "$outputline" | sed -e 's/#PERFORMWHOIS.*//')
+						tracedata+="${outputline}\n"
+						outputline+="(<nobr>$whoisbutton</nobr>•$hostio_link )"
 						printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
 					else
 						tracedata+="$outputline\n"
@@ -2375,7 +2465,12 @@ if [ -z "$input" ]; then
 			# run the IP regex again in case input is an IP(v6) URL (e.g. https://1.2.3.4/) and skip resolution if an IP is found
 			ip=$(echo "$userinput" | grep -Eo "$ipv4v6regex")
 			if [ -z "$ip" ]; then
-				echo -e -n "\n${blue}- Resolving \"$userinput\"... "
+				if [ "$IS_ASN_CHILD" = true ]; then
+					targetdomain=$(rev <<<"$userinput" | cut -d '.' -f 1,2 | rev)
+					echo -e "\n${blue}- Resolving \"$userinput\"... #PERFORMWHOIS $targetdomain\n"
+				else
+					echo -e -n "\n${blue}- Resolving \"$userinput\"... "
+				fi
 				ip=$(ResolveHostnameToIPList "$userinput")
 				if [ -z "$ip" ]; then
 					resolver_error="${red}Error: unable to resolve hostname${default}"
