@@ -36,8 +36,8 @@ It can also be used as a **web-based traceroute server**, by running it in liste
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
 - It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
-- It will perform **IP reputation** lookups and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
-- It will perform **IP classification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
+- It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
+- It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
   - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
 - It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 - It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
@@ -54,6 +54,14 @@ The script uses the following services for data retrieval:
 * [ip-api](https://ip-api.com/)
 * [StopForumSpam](https://www.stopforumspam.com/)
 * [IP Quality Score](https://www.ipqualityscore.com)
+* [GreyNoise](https://greynoise.io)
+
+It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode) to the following external services when appropriate:
+
+* [HE.net](https://bgp.he.net)
+* [BGPView](https://bgpview.io)
+* [IPInfo.io](https://ipinfo.io)
+* [Host.io](https://host.io)
 
 Requires Bash v4.2+. Tested on:
 
@@ -68,9 +76,9 @@ Requires Bash v4.2+. Tested on:
 
 ### Generic usage ###
 
-* _IPv4 lookup with IP type detection (Anycast, Hosting/DC)_
+* _IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as known good_
 
-![ipv4lookup](https://user-images.githubusercontent.com/24555810/99828678-906ccd80-2b5b-11eb-829c-73e212155851.png)
+![ipv4lookup](https://user-images.githubusercontent.com/24555810/117334574-72412280-ae9a-11eb-86d8-b57a4d4291f0.png)
 
 * _IPv4 lookup (bad reputation IP) with threat analysis and scoring_
 
@@ -86,13 +94,13 @@ Requires Bash v4.2+. Tested on:
 
 * _Hostname lookup_
 
-![hostnamelookup](https://user-images.githubusercontent.com/24555810/99829094-230d6c80-2b5c-11eb-9abf-0732399cdf99.png)
+![hostnamelookup](https://user-images.githubusercontent.com/24555810/117335483-7de11900-ae9b-11eb-8016-d1736f182c57.png)
 
 ### AS Path tracing ###
 
 * _ASPath trace to www.github.com_
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/100301315-36736a00-2f98-11eb-8e13-e720e147c663.png)
+![pathtrace](https://user-images.githubusercontent.com/24555810/117336096-1d9ea700-ae9c-11eb-82dc-6aaf9dc68a6e.png)
 
 
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
@@ -102,7 +110,7 @@ Requires Bash v4.2+. Tested on:
 
 * _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/100092531-8518eb00-2e56-11eb-8a77-8a2e0b02ca8b.png)
+![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/117335188-28a50780-ae9b-11eb-98d9-cfd3bc2f1295.png)
 
 
 ### Network search by organization ###
@@ -346,10 +354,11 @@ Default behavior:
 
 ## Notes
 
-##### *Organization data and IP Reputation*
+##### *Organization data, IP Reputation and noise classification*
 
 - Organization data is taken from pWhois
 - IP reputation data is taken from StopForumSpam and IpQualityScore
+  - Reputation is also enriched with IP *noise* classification (addresses that have been observed scanning the Internet, and very likely to appear in your logs), taken from [GreyNoise](https://greynoise.io). This will also help identify known-good IPs (e.g. Google networks, CDNs, etc.) from aggressive, known-malicious scanners.
 
 ##### *Geolocation*
 
@@ -383,6 +392,28 @@ The script will use the ip-api, RIPE IPmap and PeeringDB services to classify ta
 Server mode requires two tools for its functionality: `ncat` and `aha`. Specifically, [aha](https://github.com/theZiz/aha) (the ANSI->HTML converter) v0.5+ is required. The ncat tool is contained inside the *nmap* package on older distributions (e.g. Ubuntu 18.04, Debian 9), while it is packaged as a standalone tool on newer ones.
 
 Please refer to the [installation](#installation) section and run the appropriate commands to install the required packages for your operating system, and optionally to install the asn server as a systemd service.
+
+##### *Advantages of server mode*
+
+The main advantage of running lookups from the browser, is that every IP address and AS number gets converted into a hyperlink, allowing to perform subsequent lookups by simply clicking on them.
+
+When looking up an URL/hostname/domain, quick WHOIS info and links to relevant external resources will be available in the results.
+
+When looking up an AS number, all peering ASNs will be clickable. Also, if an AS peers at a public facility, PeeringDB info for that facility will be linked directly. Furthermore, additional external BGP information sources will be linked, directly for the target ASN.
+
+Here are some examples:
+
+![srvmode_hostname_lookup](https://user-images.githubusercontent.com/24555810/117340152-e1217a00-aea0-11eb-9d8f-abaea0d3389e.png)
+
+
+
+![srvmode_whois](https://user-images.githubusercontent.com/24555810/117340278-01e9cf80-aea1-11eb-8cad-457f60e80a86.png)
+
+
+
+![srvmode_asn_lookup](https://user-images.githubusercontent.com/24555810/117340969-d7e4dd00-aea1-11eb-8e94-88d166f67360.png)
+
+
 
 #### Server side
 

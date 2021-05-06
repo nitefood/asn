@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.4"
+ASN_VERSION="0.71.5"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -220,7 +220,7 @@ WhoisIP(){
 	# $2: (optional) if set to anything, only perform a generic whois lookup (skip pWhois/RPKI/IXP lookups)
 	GENERIC_WHOIS_LOOKUP_ONLY=false
 	[[ "$#" -gt 1 ]] && GENERIC_WHOIS_LOOKUP_ONLY=true
-	full_whois_data=$(whois "$1")
+	full_whois_data=$(timeout 5 whois "$1" 2>/dev/null)
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
 	# Check if input is a bogon address
 	if [ "$IS_BOGON" = false ]; then
@@ -544,7 +544,7 @@ AbuseLookup(){
 				original_whois_server=$(echo -e "$full_whois_data" | grep -E "^%.*whois\..*$" | awk 'NR==1 {print $NF}' | tr -d '[]')
 				if [ -n "$original_whois_server" ]; then
 					# original whois server found, try manually querying it with an extended set of grep patterns
-					resolvedabuse=$(whois -h "$original_whois_server" "$abusecontact" | grep -E -m1 -i "^abuse-mailbox:|^e-mail:" | awk '{print $2}' | tr -d \')
+					resolvedabuse=$(whois -h "$original_whois_server" "$abusecontact" 2>/dev/null | grep -E -m1 -i "^abuse-mailbox:|^e-mail:" | awk '{print $2}' | tr -d \')
 				fi
 			fi
 			[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
@@ -1317,8 +1317,8 @@ IPGeoRepLookup(){
 	[[ "$IS_MOBILE" = true ]] && ip_type_data+=" ${yellowbg} Mobile network ${default}"
 	[[ "$IS_PROXY" = true ]] && ip_type_data+=" ${yellowbg} Proxy host ${default}"
 	[[ "$IS_HOSTING" = true ]] && ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
-	# Reputation lookup (stopforumspam.org) and threat analisys (ipqualityscore.com)
-	ip_rep_data="${green}✓ GOOD${default}"
+	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analisys (ipqualityscore.com)
+	ip_rep_data="${green}✓ NONE${default}"
 	is_blacklisted=$(curl -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
 	if [ "$is_blacklisted" = "1" ]; then
 		# IP is blacklisted by StopForumSpam. Lookup detailed reputation data on IPQualityScore
@@ -1358,6 +1358,27 @@ IPGeoRepLookup(){
 				iqs_errmsg=$(echo "$iqs_output" | jq -r '.message')
 				ip_rep_data+=" ${redbg} ERR ${default} (IpQualityScore API said: $iqs_errmsg)"
 			fi
+		fi
+	fi
+	# GreyNoise lookup
+	greynoise_data=$(curl -m5 -s "https://api.greynoise.io/v3/community/$1")
+	if [ -n "$greynoise_data" ]; then
+		gn_noisy=$(jq -r 'select (.noise != null) | .noise' <<<"$greynoise_data")
+		gn_riot=$(jq -r 'select (.riot != null) | .riot' <<<"$greynoise_data")
+		gn_classification=$(jq -r 'select (.classification != null) | .classification' <<<"$greynoise_data")
+		gn_name=$(jq -r 'select (.name != null) | .name' <<<"$greynoise_data")
+		[[ "$gn_name" = "unknown" ]] && gn_name="${default}" || gn_name="as \"$gn_name\" ${default}"
+		if [ "$gn_riot" = "true" ] || [ "$gn_classification" = "benign" ]; then
+			# GreyNoise known-good
+			ip_rep_data="${green}✓${default} ${greenbg} KNOWN GOOD $gn_name"
+			[[ "$gn_noisy" = "true" ]] && ip_rep_data+=" ${yellowbg} SEEN SCANNING ${default}"
+		elif [ "$gn_classification" = "malicious" ]; then
+			# GreyNoise known-bad
+			[[ "$is_blacklisted" != "1" ]] && ip_rep_data="${red}❌ BAD${default}" # tag the IP with a bad REP, it wasn't caught by StopForumSpam earlier
+			ip_rep_data+=" ${redbg} SCANNER $gn_name"
+		else
+			# GreyNoise not listed, or tagged as "noisy" but not explicitly good or bad
+			[[ "$gn_noisy" = "true" ]] && ip_rep_data+=" ${yellowbg} SEEN SCANNING ${default}"
 		fi
 	fi
 	StatusbarMessage
