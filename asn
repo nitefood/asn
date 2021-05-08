@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.5"
+ASN_VERSION="0.71.6"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -56,7 +56,7 @@ QueryRipestat(){
 		(( count++ ))
 		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 		if [ "$IS_ASN_CHILD" = true ]; then
-			resolved_upstream_peers+="${greenbg} $peername (<a href=\"/asn_lookup&AS$peer\" style=\"background-color: $htmlgreen; color: $htmlblack;\">$peer</a>) ${default} "
+			resolved_upstream_peers+="${greenbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlgreen; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 		else
 			resolved_upstream_peers+="${greenbg} $peername ($peer) ${default} "
 		fi
@@ -68,7 +68,7 @@ QueryRipestat(){
 		resolved_upstream_peers+="and more: "
 		for peer in $(echo -e "$upstream_peers" | tail -n $unresolved_peercount ); do
 			if [ "$IS_ASN_CHILD" = true ]; then
-				resolved_upstream_peers+="<a href=\"/asn_lookup&AS$peer\" style=\"color: $htmlgreen;\">$peer</a>${default} "
+				resolved_upstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$peer</a>${default} "
 			else
 				resolved_upstream_peers+="${green}${peer}${default} "
 			fi
@@ -84,7 +84,7 @@ QueryRipestat(){
 		(( count++ ))
 		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 		if [ "$IS_ASN_CHILD" = true ]; then
-			resolved_downstream_peers+="${yellowbg} $peername (<a href=\"/asn_lookup&AS$peer\" style=\"background-color: $htmlyellow; color: $htmlblack;\">$peer</a>) ${default} "
+			resolved_downstream_peers+="${yellowbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlyellow; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 		else
 			resolved_downstream_peers+="${yellowbg} $peername ($peer) ${default} "
 		fi
@@ -96,7 +96,7 @@ QueryRipestat(){
 		resolved_downstream_peers+="and more: "
 		for peer in $(echo -e "$downstream_peers" | tail -n $unresolved_peercount ); do
 			if [ "$IS_ASN_CHILD" = true ]; then
-				resolved_downstream_peers+="<a href=\"/asn_lookup&AS$peer\" style=\"color: $htmlyellow;\">$peer</a>${default} "
+				resolved_downstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlyellow;\">$peer</a>${default} "
 			else
 				resolved_downstream_peers+="${yellow}${peer}${default} "
 			fi
@@ -112,7 +112,7 @@ QueryRipestat(){
 		(( count++ ))
 		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 		if [ "$IS_ASN_CHILD" = true ]; then
-			resolved_uncertain_peers+="${lightgreybg} $peername (<a href=\"/asn_lookup&AS$peer\" style=\"background-color: $htmllightgray; color: $htmlblack;\">$peer</a>) ${default} "
+			resolved_uncertain_peers+="${lightgreybg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmllightgray; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 		else
 			resolved_uncertain_peers+="${lightgreybg} $peername ($peer) ${default} "
 		fi
@@ -124,7 +124,7 @@ QueryRipestat(){
 		resolved_uncertain_peers+="and more: "
 		for peer in $(echo -e "$uncertain_peers" | tail -n $unresolved_peercount ); do
 			if [ "$IS_ASN_CHILD" = true ]; then
-				resolved_uncertain_peers+="<a href=\"/asn_lookup&AS$peer\" style=\"color: $htmlwhite;\">$peer</a>${default} "
+				resolved_uncertain_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlwhite;\">$peer</a>${default} "
 			else
 				resolved_uncertain_peers+="${white}${peer}${default} "
 			fi
@@ -156,7 +156,7 @@ QueryRipestat(){
 		if [ "$IS_ASN_CHILD" = true ]; then
 			html=""
 			for inetnum in $ipv4_inetnums; do
-				html+="<a href=\"/asn_lookup&$inetnum\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
+				html+="<a href=\"/asn_lookup&$inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
 			done
 			ipv4_inetnums="$html"
 		fi
@@ -166,12 +166,11 @@ QueryRipestat(){
 		if [ "$IS_ASN_CHILD" = true ]; then
 			html=""
 			for inet6num in $ipv6_inetnums; do
-				html+="<a href=\"/asn_lookup&$inet6num\" style=\"color: $htmlyellow;\">$inet6num</a>\n"
+				html+="<a href=\"/asn_lookup&$inet6num\" class=\"hidden_underline\" style=\"color: $htmlyellow;\">$inet6num</a>\n"
 			done
 			ipv6_inetnums="$html"
 		fi
 	fi
-	# [[ -n "$ipv6_inetnums" ]] && ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
 	StatusbarMessage
 }
 
@@ -574,7 +573,7 @@ HopPrint(){
 				# replace only the last IP in the trace output, so to handle special cases
 				# where the trace hop PTR contains the full dotted IP, ex:
 				# 1.2.3.4.domain.name (1.2.3.4) -> 1.2.3.4.domain.name (<href to 1.2.3.4>)
-				output=$(sed "s/\(.*\)$ip/\1<a href=\"\/asn_lookup\&$ip\" style=\"color: $htmlcolor;\">$ip<\/a>/" <<<"$output")
+				output=$(sed "s/\(.*\)$ip/\1<a href=\"\/asn_lookup\&$ip\" class=\"hidden_underline\" style=\"color: $htmlcolor;\">$ip<\/a>/" <<<"$output")
 			done
 		fi
 	fi
@@ -738,7 +737,7 @@ TraceASPath(){
 			else
 				# $hop_ip belongs to an announced prefix
 				if [ "$IS_ASN_CHILD" = true ]; then
-					asn_data="${red}[<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">AS$found_asn</a>] ${green}$found_asname${default}"
+					asn_data="${red}[<a href=\"/asn_lookup&AS$found_asn\" class=\"hidden_underline\" style=\"color: $htmlred;\">AS$found_asn</a>] ${green}$found_asname${default}"
 					aspatharray_asnvalue="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred; display:inline-block; width: 4em;\">$found_asn</a>"
 				else
 					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
@@ -1220,6 +1219,7 @@ IsIXP() {
 				ixp_state=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.state')
 				ip_type_data=" ${lightgreybg} IXP ${default}"
 				[[ -n "$ixp_state" ]] && ixp_geo+=" ($ixp_state)"
+				[[ "$IS_ASN_CHILD" = true ]] && ixp_data="<a href=\"https://www.peeringdb.com/ix/$ixlan_id\" target=\"_blank\" class=\"hidden_underline\" style=\"color: $htmlblue;\">$ixp_data</a>"
 				break
 			fi
 		done
@@ -1234,14 +1234,14 @@ GetIXPresence(){
 	if [ -n "$netlist" ]; then
 		for net in $netlist; do
 			if [ "$IS_ASN_CHILD" = true ]; then
-				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[] | "<a href=\"https://www.peeringdb.com/ix/\(.ix_id)\" target=\"_blank\" style=\"color: '"$htmlblue"';\">\(.name)</a>"')
+				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[] | "<a href=\"https://www.peeringdb.com/ix/\(.ix_id)\" target=\"_blank\" class=\"hidden_underline\" style=\"color: '"$htmlblue"';\">\(.name)</a>"')
 			else
 				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
 			fi
 		done
 		if [ -n "$ixps" ]; then
 			for ix in $(echo "$ixps" | sort -u); do
-				[[ -n "$outputix" ]] && outputix+=" | "
+				[[ -n "$outputix" ]] && outputix+=" • "
 				outputix+="${blue}${ix}${default}"
 			done
 		else
@@ -1892,7 +1892,14 @@ HandleNcatClientConnection() {
 						text-decoration: none;
 						cursor: pointer;
 				}
-
+				.hidden_underline {
+					/*text-decoration: none;*/
+					text-decoration: underline solid transparent;
+					transition: text-decoration 0.2s ease-out;
+				}
+				.hidden_underline:hover {
+					text-decoration: underline solid Currentcolor;
+				}
 				/* -------------------------------------------------------------------------------*/
 				/* CSS Loader - cheers https://www.cssscript.com/demo/beautiful-creative-loaders/ */
 				/* modified values to stick to bottom even on scroll:
@@ -2529,10 +2536,11 @@ if [ -z "$input" ]; then
 				echo -e "\n${bluebg} INFO ${default} multiple IP support is ${red}disabled${default} for remote traces. The remaining $((numips-1)) IPs have been ignored:"
 				count=1
 				for singleip in $(echo "$ip" | grep -v "$ip_to_trace"); do
+					ignoredip="<a href=\"/asn_lookup&$singleip\">$singleip</a>"
 					if [[ count -lt $((numips-1)) ]]; then
-						echo -e "   ├ ${white}${singleip}${default}"
+						echo -e "   ├ ${white}${ignoredip}${default}"
 					else
-						echo -e "   └ ${white}${singleip}${default}"
+						echo -e "   └ ${white}${ignoredip}${default}"
 					fi
 					((count++))
 				done
