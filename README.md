@@ -158,6 +158,10 @@ Some additional packages are also required for full functionality:
   rpm -ivh http://rpmfind.net/linux/opensuse/tumbleweed/repo/oss/x86_64/grepcidr-2.0-1.1.x86_64.rpm \
   http://rpmfind.net/linux/epel/8/Everything/x86_64/Packages/a/aha-0.5.1-1.el8.x86_64.rpm
   ```
+* **Manjaro/Arch Linux:**
+  ```
+   yay -S asn-git
+  ``` 
   
 * **FreeBSD**:
 
