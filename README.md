@@ -160,8 +160,9 @@ Some additional packages are also required for full functionality:
   ```
 * **Manjaro/Arch Linux:**
   ```
-   yay -S jq mtr ipcalc grepcidr aha
+   yay -S jq mtr ipcalc grepcidr aha asn-git
   ``` 
+  
 * **FreeBSD**:
 
   `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
