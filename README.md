@@ -160,7 +160,7 @@ Some additional packages are also required for full functionality:
   ```
 * **Manjaro/Arch Linux:**
   ```
-   yay -S jq mtr ipcalc grepcidr aha asn-git
+   yay -S asn-git
   ``` 
   
 * **FreeBSD**:
