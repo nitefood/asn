@@ -151,13 +151,19 @@ Some additional packages are also required for full functionality:
   make install -C aha/
   ```
 
-* **CentOS 8:**
+* **CentOS / RHEL / Rocky Linux 8:**
 
   ```
-  yum -y install curl whois bind-utils mtr jq nmap-ncat ipcalc && \
-  rpm -ivh http://rpmfind.net/linux/opensuse/tumbleweed/repo/oss/x86_64/grepcidr-2.0-1.1.x86_64.rpm \
-  http://rpmfind.net/linux/epel/8/Everything/x86_64/Packages/a/aha-0.5.1-1.el8.x86_64.rpm
+  dnf -y install epel-release && \
+  dnf -y install curl whois bind-utils mtr jq nmap-ncat ipcalc aha grepcidr
   ```
+
+* **Fedora:**
+
+  ```
+  dnf -y install curl whois bind-utils mtr jq nmap-ncat ipcalc aha grepcidr
+  ```
+
 * **Manjaro/Arch Linux:**
   ```
    yay -S asn-git
