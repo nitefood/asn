@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.6"
+ASN_VERSION="0.71.7"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -32,7 +32,7 @@ WhoisASN(){
 QueryRipestat(){
 	StatusbarMessage "Retrieving BGP data for AS$1 ($found_asname)"
 	# BGP routing stats
-	ripestat_routing_data=$(curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_routing_data=$(timeout 5 curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	if [ -n "$ripestat_routing_data" ]; then
 		ripestat_ipv4=$(echo -e "$ripestat_routing_data" | jq -r '.data.announced_space.v4.prefixes')
 		ripestat_ipv6=$(echo -e "$ripestat_routing_data" | jq -r '.data.announced_space.v6.prefixes')
@@ -40,7 +40,7 @@ QueryRipestat(){
 	fi
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
-	ripestat_neighbours_data=$(curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_neighbours_data=$(timeout 5 curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	upstream_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="left") | .asn')
 	downstream_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="right") | .asn')
 	uncertain_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="uncertain") | .asn')
@@ -135,7 +135,7 @@ QueryRipestat(){
 	StatusbarMessage "Retrieving prefix allocations and announcements for AS$1 ($found_asname)"
 	ipv4_inetnums=""
 	ipv6_inetnums=""
-	for prefix in $(curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes | .[] | .prefix'); do
+	for prefix in $(timeout 5 curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes | .[] | .prefix'); do
 		if [[ "$prefix" == *':'* ]]; then
 			inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
 							grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
@@ -684,10 +684,11 @@ TraceASPath(){
 		# check for routing loops, if so fail immediately
 		if [ "$hop_num" -ge 2 ]; then
 			prev_hop=${tracehops_array[$(( hop_num-1 ))]}
-			if [ "$hop_ip" = "$prev_hop" ]; then
-				ROUTING_LOOP=true
-				break
-			fi
+			# Check disabled to avoid detecting routing loops in rare cases where the same hop appears twice in a row during the trace
+			# if [ "$hop_ip" = "$prev_hop" ]; then
+			# 	ROUTING_LOOP=true
+			# 	break
+			# fi
 		fi
 		if [ "$hop_num" -ge 4 ]; then
 			# detect routing loops
