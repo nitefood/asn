@@ -1,7 +1,5 @@
 # ASN Lookup Tool and Traceroute Server
 
-
-
 *Quick jump:*
 
 * [Description](#description)
@@ -10,11 +8,9 @@
 * [Usage (as a command line tool)](#usage)
 * [Usage (as a lookup & traceroute server)](#running-lookups-from-the-browser)
 
-
-
 ## Description
 
-ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation & geolocation lookup tool / Web traceroute server.
+ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation / IP geolocation / IP fingerprinting lookup tool / Web traceroute server.
 
 This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
@@ -23,28 +19,41 @@ It can also be used as a **web-based traceroute server**, by running it in liste
 #### Features:
 
 * It will lookup relevant Autonomous System information for any given AS number, including:
+  
   * **Organization name**
   * **IXP Presence** (*Internet Exchange facilities where the AS is present*)
   * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
   * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
   * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
-
 - It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
+
 - It will detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
+
 - It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
+
 - It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
+  
   - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
+
 - It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
+
 - It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
+
+- It will perform **IP fingerprinting** and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops.
+
 - It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
+  
   - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
+
 - It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
+
 - It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
 
 Screenshots for every lookup option are below.
 
 The script uses the following services for data retrieval:
+
 * [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/)
 * [The Prefix WhoIs Project](https://pwhois.org/)
 * [PeeringDB](https://www.peeringdb.com/)
@@ -55,6 +64,7 @@ The script uses the following services for data retrieval:
 * [StopForumSpam](https://www.stopforumspam.com/)
 * [IP Quality Score](https://www.ipqualityscore.com)
 * [GreyNoise](https://greynoise.io)
+* [Shodan](https://www.shodan.io/)
 
 It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode) to the following external services when appropriate:
 
@@ -74,7 +84,7 @@ Requires Bash v4.2+. Tested on:
 
 ## Screenshots
 
-### Generic usage ###
+### Generic usage
 
 * _IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as known good_
 
@@ -83,6 +93,10 @@ Requires Bash v4.2+. Tested on:
 * _IPv4 lookup (bad reputation IP) with threat analysis and scoring_
 
 ![ipv4badlookup](https://user-images.githubusercontent.com/24555810/99828886-d1fd7880-2b5b-11eb-8206-b8b2ad9b1306.png)
+
+- *IP fingerprinting with open ports reporting, detected services, Shodan tags and known CVEs affecting the target*
+
+![](https://user-images.githubusercontent.com/24555810/158912653-8f648164-8fbc-44f7-b693-fbadd3c491b5.png)
 
 * _IPv6 lookup_
 
@@ -96,30 +110,27 @@ Requires Bash v4.2+. Tested on:
 
 ![hostnamelookup](https://user-images.githubusercontent.com/24555810/117335483-7de11900-ae9b-11eb-8016-d1736f182c57.png)
 
-### AS Path tracing ###
+### AS Path tracing
 
 * _ASPath trace to www.github.com_
 
 ![pathtrace](https://user-images.githubusercontent.com/24555810/117336096-1d9ea700-ae9c-11eb-82dc-6aaf9dc68a6e.png)
 
-
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
 
 ![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100301579-b4d00c00-2f98-11eb-82c5-047c190ffcd6.png)
-
 
 * _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
 
 ![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/117335188-28a50780-ae9b-11eb-98d9-cfd3bc2f1295.png)
 
-
-### Network search by organization ###
+### Network search by organization
 
 * _Organization search for "github"_
 
 ![search_by_org](https://user-images.githubusercontent.com/24555810/99845076-5b20a980-2b74-11eb-9312-986867034cc9.png)
 
-### Suggested ASNs search ###
+### Suggested ASNs search
 
 * _Suggested ASNs for "google"_
 
@@ -138,13 +149,13 @@ This script requires **BASH v4.2** or later. You can check your version by runni
 Some additional packages are also required for full functionality:
 
 * **Debian 10 / Ubuntu 20.04 (or newer):**
-
+  
   ```
   apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr ncat aha
   ```
-  
-* **Debian 9 / Ubuntu 18.04 (or older):**
 
+* **Debian 9 / Ubuntu 18.04 (or older):**
+  
   ```
   apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc make && \
   git clone https://github.com/theZiz/aha.git && \
@@ -152,49 +163,50 @@ Some additional packages are also required for full functionality:
   ```
 
 * **CentOS / RHEL / Rocky Linux 8:**
-
+  
   ```
   dnf -y install epel-release && \
   dnf -y install curl whois bind-utils mtr jq nmap-ncat ipcalc aha grepcidr
   ```
 
 * **Fedora:**
-
+  
   ```
   dnf -y install curl whois bind-utils mtr jq nmap-ncat ipcalc aha grepcidr
   ```
 
 * **Manjaro/Arch Linux:**
+  
   ```
    yay -S asn-git
-  ``` 
-  
-* **FreeBSD**:
+  ```
 
+* **FreeBSD**:
+  
   `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
 
 * **MacOS** (using [Homebrew](https://brew.sh)):
-
+  
   `brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr`
-
+  
   *Notes for MacOS users:*
-
+  
   * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
   * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
-  
+
 * **Windows**:
-
+  
   * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
-
+    
     Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
     Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
-
+    
     *Note for WSL2 users:*
-
+    
     * *systemd is not currently available in WSL2, so you won't be able to run the **asn server** in daemon mode as described below (if you want server mode you'll have to launch it manually using `asn -l`). An alternative could be to run it as a background process (optionally also using `nohup`), or using Windows' own task scheduler to start it at boot.*
-
+  
   * **using [Cygwin](https://cygwin.com/index.html):**
-
+    
     Most of the prerequisite packages listed above for *Debian 10 / Ubuntu 20.04 (or newer)* are obtainable directly with Cygwin's own Setup wizard (or through scripts like *apt-cyg*). You will still have to manually compile (or find a suitable third-party precompiled binary) the *mtr*, *grepcidr* and *aha* tools. Instructions on how to do so can be found directly on the respective projects homepages.
 
 ### Script download and installation
@@ -212,7 +224,7 @@ You can then use the script by running `asn`.
 To control the **asn server** with utilities like *systemctl* and *service*, and to enable it to automatically start at boot, follow these steps:
 
 1. create a new file called `/etc/systemd/system/asn.service` with the following content (make sure you edit the *ExecStart* line to match your installation path and desired startup options):
-
+   
    ```
    [Unit]
    Description=ASN lookup and traceroute server
@@ -231,13 +243,13 @@ To control the **asn server** with utilities like *systemctl* and *service*, and
    ```
 
 2. Enable the *CAP_NET_RAW* capability for the mtr-packet binary:
-
+   
    `setcap cap_net_raw+ep $(which mtr-packet)`
-
+   
    *Explanation: this will allow mtr-packet to create raw sockets (and thus perform traces) when launched as an unprivileged user (we're setting up the service to run as user nobody for added security), without the requirement of the setuid-root bit and without having to invoke mtr as root. A thorough explanation for this can be found [here](https://github.com/traviscross/mtr/blob/master/SECURITY).*
 
 3. Now you can refer to standard systemd utilities to perform service operations:
-
+   
    * To start the service: `systemctl start asn`
    * To stop the service: `systemctl stop asn`
    * To check its status and latest logs: `systemctl status asn`
@@ -278,8 +290,6 @@ Either way, `asn` will pick up your token on the next run (no need to restart th
 
 `asn [-v] -l [SERVER OPTIONS]`
 
-
-
 where `TARGET` can be one of the following:
 
 * **AS number** -- lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)
@@ -287,8 +297,6 @@ where `TARGET` can be one of the following:
 * **Hostname** -- resolve the host and lookup data (same as IPv4/IPv6 lookup. Supports multiple IPs - e.g. DNS RR)
 * **URL** -- extract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and [prepended credentials](https://en.wikipedia.org/wiki/Basic_access_authentication#URL_encoding)
 * **Organization name** -- search by company name and lookup network ranges exported by (or related to) the company
-
-
 
 <u>Options</u>:
 
@@ -301,11 +309,9 @@ where `TARGET` can be one of the following:
 * `[-s]`
   * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
 * `[-h]`
-  *  Show usage information.
+  * Show usage information.
 * `[-l]`
   * Launch the script in *server mode*. See **Server Options** below
-
-
 
 <u>Server Options</u>:
 
@@ -331,8 +337,6 @@ where `TARGET` can be one of the following:
 *Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
 *Unless specified, the default IP:PORT values of **127.0.0.1:49200** will be used (e.g.* `asn -l`*)*
 
-
-
 Default behavior:
 
 * The script will attempt to automatically identify the `TARGET` type, if invoked with `-d` , `-n` or without options, 
@@ -341,7 +345,7 @@ Default behavior:
 ##### *Detailed mode (`-d`)*
 
 - Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
-
+  
   Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
 
 ##### *Organization search (`-o`)*
@@ -364,11 +368,12 @@ Default behavior:
 
 ## Notes
 
-##### *Organization data, IP Reputation and noise classification*
+##### *Organization data, IP Reputation, noise classification and IP fingerprinting*
 
 - Organization data is taken from pWhois
 - IP reputation data is taken from StopForumSpam and IpQualityScore
   - Reputation is also enriched with IP *noise* classification (addresses that have been observed scanning the Internet, and very likely to appear in your logs), taken from [GreyNoise](https://greynoise.io). This will also help identify known-good IPs (e.g. Google networks, CDNs, etc.) from aggressive, known-malicious scanners.
+- IP fingerprinting data is retrieved from Shodan's [InternetDB API](https://internetdb.shodan.io/). Data includes open ports, [software/hardware information](https://en.wikipedia.org/wiki/Common_Platform_Enumeration) and [known vulnerabilities](https://en.wikipedia.org/wiki/Common_Vulnerabilities_and_Exposures) pertaining to the IP address.
 
 ##### *Geolocation*
 
@@ -393,8 +398,6 @@ The script will use the ip-api, RIPE IPmap and PeeringDB services to classify ta
 - The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
 - The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with some [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
 
-
-
 ## Running lookups from the browser
 
 ##### *Prerequisite tools for server mode*
@@ -415,15 +418,9 @@ Here are some examples:
 
 ![srvmode_hostname_lookup](https://user-images.githubusercontent.com/24555810/117340152-e1217a00-aea0-11eb-9d8f-abaea0d3389e.png)
 
-
-
 ![srvmode_whois](https://user-images.githubusercontent.com/24555810/117340278-01e9cf80-aea1-11eb-8cad-457f60e80a86.png)
 
-
-
 ![srvmode_asn_lookup](https://user-images.githubusercontent.com/24555810/117340969-d7e4dd00-aea1-11eb-8e94-88d166f67360.png)
-
-
 
 #### Server side
 
@@ -465,8 +462,6 @@ Once the trace is finished, an option to share the output on [termbin](https://t
 
 ![termbin_2](https://user-images.githubusercontent.com/24555810/102168101-f49b5c80-3e8f-11eb-8bc6-9f0592fa9624.png)
 
-
-
 #### Search engine setup
 
 In order to take full advantage of having `asn` inside the browser, it is possible to configure it as a custom search engine for the browser search bar. This allows to leverage the server to  search for **ASNs**, **URLs**, **IPs**, **Hostnames**, and so on, depending on the search string.
@@ -483,36 +478,30 @@ Here's how to add a search engine in Firefox and Chrome:
 ***Firefox***:
 
 * Simply create a new bookmark and fill its details like this:
-
+  
   ![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
-
+  
   Afterwards, you will be able to run queries and traceroutes by simply entering, for example, `@asn 8.8.8.8` in the browser's location bar.
 
 ***Chrome:***
 
 1. Right click the location bar and select ***Manage search engines...***
-
+   
    ![searchsetup_chrome_1](https://user-images.githubusercontent.com/24555810/102161929-87d09400-3e88-11eb-9e42-70087e3fab87.png)
    
    2.Click **Add**:
-
+   
    ![searchsetup_chrome_2](https://user-images.githubusercontent.com/24555810/102162100-dc740f00-3e88-11eb-8037-528fbcc636e9.png)
    
-   
-
    3.Fill in the details as shown below:
    
    ![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
 
 As usual, the keyword is entierly customizable to your preference.
 
-
-
 ***Other browsers:***
 
 * You may want to follow [this post](https://www.howtogeek.com/114176/how-to-easily-create-search-plugins-add-any-search-engine-to-your-browser/) to search for instructions on how to add a custom search engine for your browser of choice.
-
-
 
 #### Running the server on an external host
 
@@ -544,8 +533,6 @@ The available options, and some usage examples, can be viewed by running `asn -h
 *Note: if you plan to run the server somewhere else than your local machine, remember to change the bookmarklet code and the custom search engine URL values to reflect the actual IP of the asn server. It is naturally possible to have multiple bookmarklets and search engine keywords to map to different ASN server instances.*
 
 *For the bookmarklet, you'll need to change this value at the very beginning:* `var asnserver="localhost:49200"` *and make it point to the new address:port pair. No further change is required in the remaining JS code.*
-
-
 
 ## Thanks
 

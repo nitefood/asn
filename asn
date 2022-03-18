@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.7"
+ASN_VERSION="0.71.8"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -240,6 +240,7 @@ WhoisIP(){
 				found_asname=""
 			fi
 			IPGeoRepLookup "$1"
+			IPShodanLookup "$1"
 			# check if it's an IXP, otherwise fall back to generic whois
 			[[ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]] && IsIXP "$1" || ixp_data=""; ixp_geo=""
 			if [ -n "$ixp_data" ]; then
@@ -496,6 +497,7 @@ PwhoisLookup(){
 			pwhois_org="$pwhois_asorg"
 		fi
 		IPGeoRepLookup "$1"
+		IPShodanLookup "$1"
 		pwhois_geo="$ip_geo_data"
 		if [ -z "$ip_geo_data" ]; then
 			if echo "$pwhois_output" | grep -q -E "^Geo-"; then
@@ -717,6 +719,10 @@ TraceASPath(){
 				hop_net="$pwhois_net"
 				[[ -n "$found_route" ]] && hop_net+=" ($found_route)"
 				hop_typ="$ip_type_data"
+				hop_cpe="$ip_shodan_cpe_data"
+				hop_ports="$ip_shodan_ports_data"
+				hop_tags="$ip_shodan_tags_data"
+				hop_cve="$ip_shodan_cve_data"
 				hop_geo="$pwhois_geo"
 				hop_rep="$ip_rep_data"
 				if [ -n "$ixp_data" ]; then
@@ -763,6 +769,10 @@ TraceASPath(){
 				hop_org="$pwhois_org"
 				hop_net="$pwhois_net"
 				hop_typ="$ip_type_data"
+				hop_cpe="$ip_shodan_cpe_data"
+				hop_ports="$ip_shodan_ports_data"
+				hop_tags="$ip_shodan_tags_data"
+				hop_cve="$ip_shodan_cve_data"
 				hop_geo="$pwhois_geo"
 				hop_rep="$ip_rep_data"
 			fi
@@ -815,7 +825,12 @@ TraceASPath(){
 			hop_details+="        ├${bluebg}ROA${default} ${rpki_output}\n"
 			# 2. hop TYP (optional, only if hop is a particular IP type (anycast/hosting/etc))
 			[[ -n "$hop_typ" ]] && hop_details+="        ├${bluebg}TYP${default}${hop_typ}${default}\n"
-			# 3. hop GEO, REP
+			# 3. hop CPE, PORTS, TAGS, CVE
+			[[ -n "$hop_cpe" ]] && hop_details+="        ├${bluebg}CPE${default}${hop_cpe}${default}\n"
+			[[ -n "$hop_ports" ]] && hop_details+="        ├${bluebg}POR${default}${hop_ports}${default}\n"
+			[[ -n "$hop_tags" ]] && hop_details+="        ├${bluebg}TAG${default}${hop_tags}${default}\n"
+			[[ -n "$hop_cve" ]] && hop_details+="        ├${bluebg}CVE${default}${hop_cve}${default}\n"
+			# 4. hop GEO, REP
 			hop_details+="        ├${bluebg}GEO${default} ${magenta}${hop_geo}${default}\n"
 			hop_details+="        └${bluebg}REP${default} ${hop_rep}${default}"
 			[[ "$DETAILED_TRACE" = false ]] && hop_details+="\n"
@@ -1021,7 +1036,7 @@ SearchByOrg(){
 					LookupASNAndRouteFromIP "$input"
 					(( longest=${#input}+1 ))
 					WhoisIP "$input"
-					PrintReputation "$input"
+					PrintReputationAndShodanData "$input"
 					StatusbarMessage
 					continue
 				else
@@ -1132,9 +1147,14 @@ $IPCALC_WARNING
 	echo ""
 }
 
-PrintReputation(){
-	# We already have it in $ip_rep_data since we called IPGeoRepLookup() previously
+PrintReputationAndShodanData(){
+	# We already collected reputation and Shodan data since we called IPGeoRepLookup() and IPShodanLookup() previously
+	[[ -n "$ip_shodan_cpe_data" ]] && printf "${white}%${indent}s${bluebg}CPE${default}%s\n" "├" "${ip_shodan_cpe_data}"
+	[[ -n "$ip_shodan_ports_data" ]] && printf "${white}%${indent}s${bluebg}POR${default}%s\n" "├" "${ip_shodan_ports_data}"
+	[[ -n "$ip_shodan_tags_data" ]] && printf "${white}%${indent}s${bluebg}TAG${default}%s\n" "├" "${ip_shodan_tags_data}"
+	[[ -n "$ip_shodan_cve_data" ]] && printf "${white}%${indent}s${bluebg}CVE${default}%s\n" "├" "${ip_shodan_cve_data}"
 	printf "${white}%${indent}s${bluebg}REP${default} ${magenta}%s${default}\n\n" "└" "$ip_rep_data"
+
 }
 
 RPKILookup(){
@@ -1260,7 +1280,7 @@ IPGeoRepLookup(){
 	ipmap_output=$(curl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
-	ipapi_output=$(curl -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
+	ipapi_output=$(curl -m4 -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
 	ipapi_status=$(echo "$ipapi_output" | jq -r '.status')
 	if [ "$ipapi_status" = "fail" ]; then
 		ipapi_errmsg=$(echo "$ipapi_output" | jq -r '.message')
@@ -1320,12 +1340,12 @@ IPGeoRepLookup(){
 	[[ "$IS_HOSTING" = true ]] && ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
 	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analisys (ipqualityscore.com)
 	ip_rep_data="${green}✓ NONE${default}"
-	is_blacklisted=$(curl -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
+	is_blacklisted=$(curl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
 	if [ "$is_blacklisted" = "1" ]; then
 		# IP is blacklisted by StopForumSpam. Lookup detailed reputation data on IPQualityScore
 		ip_rep_data="${red}❌ BAD (on stopforumspam.org)${default}"
 		if [ -n "$IQS_TOKEN" ]; then
-			iqs_output=$(curl -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
+			iqs_output=$(curl -m4 -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
 			iqs_success=$(echo "$iqs_output" | jq -r '.success')
 			if [ "$iqs_success" = true ]; then
 				iqs_score=$(echo "$iqs_output" | jq -r '.fraud_score')
@@ -1382,6 +1402,69 @@ IPGeoRepLookup(){
 			[[ "$gn_noisy" = "true" ]] && ip_rep_data+=" ${yellowbg} SEEN SCANNING ${default}"
 		fi
 	fi
+
+	StatusbarMessage
+}
+
+IPShodanLookup(){
+	# Shodan InternetDB lookup
+	ip_shodan_cpe_data=""
+	ip_shodan_ports_data=""
+	ip_shodan_tags_data=""
+	ip_shodan_cve_data=""
+	StatusbarMessage "Collecting open ports, CPE and CVE data"
+	shodan_data=$(curl -m5 -s "https://internetdb.shodan.io/$1" | grep -v "No information available")
+	if [ -n "$shodan_data" ]; then
+		shodan_cpes=$(echo "$shodan_data" | jq -r 'select (.cpes != null) | .cpes[]')
+		shodan_ports=$(echo "$shodan_data" | jq -r 'select (.ports != null) | .ports[]')
+		shodan_tags=$(echo "$shodan_data" | jq -r 'select (.tags != null) | .tags[]')
+		shodan_cve_count=$(echo "$shodan_data" | jq 'select (.vulns != null) | .vulns | length')
+
+		# fetch CPE types, possible values:
+		# a for Applications, h for Hardware, o for Operating Systems
+		for cpe in $shodan_cpes; do
+			cpetype=$(echo "$cpe" | cut -d ':' -f 2)
+			cpename=$(echo "$cpe" | cut -d ':' -f 3-)
+			case "${cpetype}" in
+				"/a")
+					type="APP"
+				;;
+				"/o")
+					type="OS"
+				;;
+				"/h")
+					type="HW"
+				;;
+				*)
+					type="UNK"
+				;;
+			esac
+			ip_shodan_cpe_data+="${white} [${blue}$type: ${white}$cpename]${default}"
+		done
+
+		# fetch open ports
+		ip_shodan_ports_data=""
+		for port in $shodan_ports; do
+			[[ -n "$ip_shodan_ports_data" ]] && ip_shodan_ports_data+="," || ip_shodan_ports_data=" ${green}Open ports:"
+			ip_shodan_ports_data+=" $port"
+		done
+		[[ -n "$ip_shodan_ports_data" ]] && ip_shodan_ports_data+="${default}"
+
+		# fetch Shodan tags
+		ip_shodan_tags_data=""
+		for tag in $shodan_tags; do
+			ip_shodan_tags_data+=" ${lightgreybg} $tag ${default}"
+		done
+
+		# fetch Shodan CVE count
+		ip_shodan_cve_data=""
+		if [ -n "$shodan_cve_count" ] && [ "$shodan_cve_count" -ne 0 ]; then
+			[[ "$shodan_cve_count" -gt 1 ]] && vulntext="VULNERABILITIES" || vulntext="VULNERABILITY"
+			ip_shodan_cve_data+=" ${redbg} $shodan_cve_count $vulntext FOUND ${default} (check "
+			[[ "$IS_ASN_CHILD" = true ]] && ip_shodan_cve_data+="<a href=\"https://internetdb.shodan.io/$1\" target=\"_blank\" \">Shodan</a>)" || ip_shodan_cve_data+="https://internetdb.shodan.io/$1)"
+		fi
+	fi
+
 	StatusbarMessage
 }
 
@@ -2023,7 +2106,7 @@ HandleNcatClientConnection() {
 
 			# send HTTP 200 OK response and display HTML headers
 			echo -e "${http_ok}${html_header}"
-			countryname=$(timeout 1.5 curl -s "https://restcountries.eu/rest/v2/alpha/$server_country" | jq -r '.name')
+			countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$server_country" | jq -r '.[].name.common')
 			if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 				title_tag="title='$countryname'"
 			else
@@ -2095,7 +2178,7 @@ HandleNcatClientConnection() {
 						# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
 						cc=$(echo -e "$outputline" | awk '{print $NF}')
 						# lookup full country name
-						countryname=$(timeout 1.5 curl -s "https://restcountries.eu/rest/v2/alpha/$cc" | jq -r '.name')
+						countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
 						if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 							title_tag="title='$countryname'"
 						else
@@ -2533,7 +2616,7 @@ if [ -z "$input" ]; then
 				fi
 				LookupASNAndRouteFromIP "$ip_to_trace"
 				WhoisIP "$ip_to_trace"
-				PrintReputation "$ip_to_trace"
+				PrintReputationAndShodanData "$ip_to_trace"
 				echo -e "\n${bluebg} INFO ${default} multiple IP support is ${red}disabled${default} for remote traces. The remaining $((numips-1)) IPs have been ignored:"
 				count=1
 				for singleip in $(echo "$ip" | grep -v "$ip_to_trace"); do
@@ -2551,7 +2634,7 @@ if [ -z "$input" ]; then
 				for singleip in $ip; do
 					LookupASNAndRouteFromIP "$singleip"
 					WhoisIP "$singleip"
-					PrintReputation "$singleip"
+					PrintReputationAndShodanData "$singleip"
 					# save the first IP from the dns lookup result
 					[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
 				done
@@ -2636,7 +2719,7 @@ else
 	LookupASNAndRouteFromIP "$input"
 	(( longest=${#input}+1 ))
 	WhoisIP "$input"
-	PrintReputation "$input"
+	PrintReputationAndShodanData "$input"
 	# Perform AS path tracing if requested
 	[[ "$TRACEASNPATH" = true ]] && TraceASPath "$input"
 	tput sgr0
