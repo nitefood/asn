@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.8"
+ASN_VERSION="0.71.9"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1337,7 +1337,19 @@ IPGeoRepLookup(){
 	[[ "$IS_ANYCAST" = true ]] && ip_type_data+=" ${yellowbg} Anycast IP ${default}"
 	[[ "$IS_MOBILE" = true ]] && ip_type_data+=" ${yellowbg} Mobile network ${default}"
 	[[ "$IS_PROXY" = true ]] && ip_type_data+=" ${yellowbg} Proxy host ${default}"
-	[[ "$IS_HOSTING" = true ]] && ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
+	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
+	incolumitas_dcdata=$(curl -s -m2  https://api.incolumitas.com/datacenter?ip=$1)
+	dcname=$(echo "$incolumitas_dcdata" | jq -r 'select (.datacenter != null) | .datacenter')
+	dcregion=$(echo "$incolumitas_dcdata" | jq -r 'select (.region != null) | .region')
+	if [ -n "$dcname" ]; then
+		# incolumitas.com has details regarding this DC
+		ip_type_data+=" ${yellowbg} DC ${default}${yellow} $dcname"
+		[[ -n "$dcregion" ]] && ip_type_data+=" ($dcregion)"
+		ip_type_data+="${default}"
+	elif [ "$IS_HOSTING" = true ]; then
+		# fallback to IP-API DC detection
+		ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
+	fi
 	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analisys (ipqualityscore.com)
 	ip_rep_data="${green}✓ NONE${default}"
 	is_blacklisted=$(curl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')

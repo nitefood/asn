@@ -40,9 +40,9 @@ It can also be used as a **web-based traceroute server**, by running it in liste
 
 - It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 
-- It will perform **IP fingerprinting** and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops.
+- It will perform **IP fingerprinting** using Shodan's [InternetDB API]([https://internetdb.shodan.io/](https://internetdb.shodan.io/)) and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops (detailed traces only).
 
-- It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Hosting provider/IXP prefix*) for target IPs and individual trace hops.
+- It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
   
   - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
 
@@ -65,6 +65,7 @@ The script uses the following services for data retrieval:
 * [IP Quality Score](https://www.ipqualityscore.com)
 * [GreyNoise](https://greynoise.io)
 * [Shodan](https://www.shodan.io/)
+* [Incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
 
 It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode) to the following external services when appropriate:
 
@@ -88,27 +89,27 @@ Requires Bash v4.2+. Tested on:
 
 * _IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as known good_
 
-![ipv4lookup](https://user-images.githubusercontent.com/24555810/117334574-72412280-ae9a-11eb-86d8-b57a4d4291f0.png)
+![ipv4lookup](https://user-images.githubusercontent.com/24555810/159185461-cb7a8601-dcae-4188-b531-1eafec6ed19b.png)
 
-* _IPv4 lookup (bad reputation IP) with threat analysis and scoring_
+* _IPv4 lookup (bad reputation IP) with threat analysis/scoring, CPE/CVE identification and open ports reporting_
 
-![ipv4badlookup](https://user-images.githubusercontent.com/24555810/99828886-d1fd7880-2b5b-11eb-8206-b8b2ad9b1306.png)
+![ipv4badlookup](https://user-images.githubusercontent.com/24555810/159185495-1c2a0c71-2019-4f46-9d27-48d40ed9887a.png)
 
-- *IP fingerprinting with open ports reporting, detected services, Shodan tags and known CVEs affecting the target*
+- *IP fingerprinting with advanced datacenter+region identification, known vulnerabilities affecting the target and honeypot identification according to Shodan data*
 
-![](https://user-images.githubusercontent.com/24555810/158912653-8f648164-8fbc-44f7-b693-fbadd3c491b5.png)
+![](https://user-images.githubusercontent.com/24555810/159185618-fa20f45c-91b4-45b4-ad82-02becc648fa5.png)
 
 * _IPv6 lookup_
 
-![ipv6lookup](https://user-images.githubusercontent.com/24555810/99829009-0113ea00-2b5c-11eb-9f7c-b225c76db124.png)
+![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
 
 * _Autonomous system number lookup with BGP stats, peering and prefix informations_
 
 ![asnlookup](https://user-images.githubusercontent.com/24555810/98995579-d3162080-2531-11eb-886a-c929ad9dc24c.png)
 
-* _Hostname lookup_
+* _Hostname/URL lookup_
 
-![hostnamelookup](https://user-images.githubusercontent.com/24555810/117335483-7de11900-ae9b-11eb-8016-d1736f182c57.png)
+![hostnamelookup](https://user-images.githubusercontent.com/24555810/159185854-f07c005e-e014-4d11-921d-db0684c70981.png)
 
 ### AS Path tracing
 
@@ -120,7 +121,7 @@ Requires Bash v4.2+. Tested on:
 
 ![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100301579-b4d00c00-2f98-11eb-82c5-047c190ffcd6.png)
 
-* _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 5_
+* _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 6_
 
 ![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/117335188-28a50780-ae9b-11eb-98d9-cfd3bc2f1295.png)
 
@@ -385,12 +386,12 @@ The script will perform IP and trace hop geolocation with this logic:
 
 ##### *IP Classification*
 
-The script will use the ip-api, RIPE IPmap and PeeringDB services to classify target IPs and trace hops into these categories:
+The script will use the ip-api, incolumitas.com, RIPE IPmap and PeeringDB services to classify target IPs and trace hops into these categories:
 
 - [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
 - Mobile network
 - Proxy host (TOR exit node/VPN/etc)
-- Hosting network (datacenter/hosting provider/etc)
+- Hosting network (datacenter/hosting provider/etc) along with detailed DC and region identification where available
 - IXP network
 
 ##### *IXP detection and unannounced prefixes*
