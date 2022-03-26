@@ -7,6 +7,7 @@
 * [Installation](#installation)
 * [Usage (as a command line tool)](#usage)
 * [Usage (as a lookup & traceroute server)](#running-lookups-from-the-browser)
+* [Usage (as a lookup API with JSON output)](#json-output-and-api-mode)
 
 ## Description
 
@@ -14,7 +15,9 @@ ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP r
 
 This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
-It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](#running-lookups-from-the-browser) for more information about  server mode functionality.
+It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](#running-lookups-from-the-browser) for more information about server mode functionality.
+
+Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JSON-formatted data while running in both interactive and server mode. Click [here](#json-output-and-api-mode) for more information about API mode functionality.
 
 #### Features:
 
@@ -49,6 +52,8 @@ It can also be used as a **web-based traceroute server**, by running it in liste
 - It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 
 - It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
+
+- Lookup data can be integrated by third party tools by choosing **JSON output** and parsing the results externally, turning the script into a lookup API endpoint.
 
 Screenshots for every lookup option are below.
 
@@ -309,6 +314,10 @@ where `TARGET` can be one of the following:
   * forces a Search-By-Organization lookup and skip all target identification checks
 * `[-s]`
   * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+* `[-j]`
+  * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
+* `[-J]`
+  * enables pretty-printed JSON output.
 * `[-h]`
   * Show usage information.
 * `[-l]`
@@ -534,6 +543,190 @@ The available options, and some usage examples, can be viewed by running `asn -h
 *Note: if you plan to run the server somewhere else than your local machine, remember to change the bookmarklet code and the custom search engine URL values to reflect the actual IP of the asn server. It is naturally possible to have multiple bookmarklets and search engine keywords to map to different ASN server instances.*
 
 *For the bookmarklet, you'll need to change this value at the very beginning:* `var asnserver="localhost:49200"` *and make it point to the new address:port pair. No further change is required in the remaining JS code.*
+
+## JSON output and API mode
+
+#### Locally (shell mode)
+
+The tool can be instructed to output lookup results in JSON mode by using the `-j` (compact JSON) or `-J` (pretty-printed JSON) command line options:
+
+*Example 1 - IPv4 lookup:*
+
+```jsonp
+root@KRUSTY:~# asn -J 8.8.8.8
+{
+  "target": "8.8.8.8",
+  "target_type": "ipv4",
+  "result": "ok",
+  "reason": "success",
+  "version": "0.72",
+  "request_time": "2022-03-26T22:42:34",
+  "request_duration": "3",
+  "result_count": 1,
+  "results": [
+    {
+      "ip": "8.8.8.8",
+      "ip_version": "4",
+      "reverse": "dns.google",
+      "org_name": "Google LLC",
+      "abuse_contacts": [
+        "abuse@level3.com",
+        "network-abuse@google.com"
+      ],
+      "routing": {
+        "is_announced": true,
+        "as_number": "15169",
+        "as_name": "GOOGLE, US",
+        "net_range": "8.8.8.0/24",
+        "net_name": "LVLT-GOGL-8-8-8",
+        "roa_count": "1",
+        "roa_validity": "valid"
+      },
+      "type": {
+        "is_bogon": false,
+        "is_anycast": true,
+        "is_mobile": false,
+        "is_proxy": false,
+        "is_dc": true,
+        "dc_details": {
+          "dc_name": "Google Cloud"
+        },
+        "is_ixp": false
+      },
+      "geolocation": {
+        "city": "Washington, D.C.",
+        "region": "Washington, D.C.",
+        "country": "United States",
+        "cc": "US"
+      },
+      "reputation": {
+        "status": "good",
+        "is_known_good": true,
+        "known_as": "Google Public DNS"
+      },
+      "fingerprinting": {
+        "ports": [
+          53,
+          443
+        ]
+      }
+    }
+  ]
+}
+```
+
+*Example 2 - ASN lookup:*
+
+```jsonp
+root@KRUSTY:~# asn -J 5505
+{
+  "target": "5505",
+  "target_type": "asn",
+  "result": "ok",
+  "reason": "success",
+  "version": "0.72",
+  "request_time": "2022-03-26T21:59:51",
+  "request_duration": "4",
+  "result_count": 1,
+  "results": [
+    {
+      "asn": "5505",
+      "asname": "VADAVO, ES",
+      "org": "VDV-VLC-RED05 VDV-VLC-RED05 - CLIENTES DATACENTER",
+      "registration_date": "2016-12-13T08:28:07",
+      "ixp_presence": [
+        "NIXVAL-ix: Peering LAN1",
+        "DE-CIX Madrid: DE-CIX Madrid Peering LAN",
+        "ESPANIX Madrid Lower LAN",
+        "IXPlay Global Peers"
+      ],
+      "prefix_count_v4": 8,
+      "prefix_count_v6": 1,
+      "bgp_peer_count": 32,
+      "bgp_peers": {
+        "upstream": [
+          "1299",
+          "6939",
+          "3262",
+          "34549",
+          "13030",
+          "25369",
+          "25091",
+          "33891",
+          "41327",
+          "35280",
+          "1239",
+          "34927",
+          "60501",
+          "13786",
+          "4455",
+          "24482",
+          "8218",
+          "15830"
+        ],
+        "downstream": [
+          "200509",
+          "48952",
+          "207495",
+          "208248",
+          "205093",
+          "205086",
+          "202054"
+        ],
+        "uncertain": [
+          "51185",
+          "34854",
+          "271253",
+          "264479",
+          "25160",
+          "61573",
+          "37721"
+        ]
+      },
+      "announced_prefixes": {
+        "v4": [
+          "185.123.204.0/22",
+          "185.210.224.0/22",
+          "188.130.232.0/21",
+          "188.130.240.0/20"
+        ],
+        "v6": [
+          "2a03:9320::/32"
+        ]
+      }
+    }
+  ]
+}
+```
+
+*Example 3 - enumerating abuse contacts for every IP to which a hostname resolves:*
+
+```shell
+root@KRUSTY:~# asn -j www.google.com | jq '[.results[].abuse_contacts[]] | unique[]'
+"network-abuse@google.com"
+"ripe-contact@google.com"
+```
+
+*Example 4 - enumerating known vulnerabilities for a target:*
+
+```shell
+root@KRUSTY:~# asn -j 45.67.34.100 | jq '.results[].fingerprinting.vulns[]'
+"CVE-2017-15906"
+"CVE-2018-15919"
+```
+
+#### Remotely (API endpoint)
+
+By running the script in [server mode](#running-lookups-from-the-browser), it is possible to use it as a self-hosted lookup API service by running HTTP queries against it and retrieving the results in JSON format. The server exposes the `asn_lookup_json` endpoint for this purpose. The syntax is the same as with normal browser-based remote queries.
+
+*Example 1: querying the server remotely using `curl`:*
+
+```shell
+root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_json&1.1.1.1"
+{"target":"1.1.1.1","target_type":"ipv4","result":"ok","reason":"success","version":"0.72","request_time":"2022-03-26T22:21:24","request_duration":"3","result_count":1,"results":[{"ip":"1.1.1.1","ip_version":"4","reverse":"one.one.one.one","org_name":"APNIC and Cloudflare DNS Resolver project","abuse_contacts":["helpdesk@apnic.net"],"routing":{"is_announced":true,"as_number":"13335","as_name":"CLOUDFLARENET, US","net_range":"1.1.1.0/24","net_name":"APNIC-LABS","roa_count":"1","roa_validity":"valid"},"type":{"is_bogon":false,"is_anycast":true,"is_mobile":false,"is_proxy":false,"is_dc":true,"dc_details":{"dc_name":"Cloudflare"},"is_ixp":false},"geolocation":{"city":"Magomeni","region":"Dar es Salaam","country":"Tanzania","cc":"TZ"},"reputation":{"status":"good","is_known_good":true,"known_as":"Cloudflare Public DNS"},"fingerprinting":{"ports":[53,80,443]}}]}
+```
+
+
 
 ## Thanks
 

@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.71.9"
+ASN_VERSION="0.72"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -21,11 +21,16 @@ ASN_VERSION="0.71.9"
 WhoisASN(){
 	found_asname=$(host -t TXT "AS${1}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
 	if [ -n "$found_asname" ]; then
+		((json_resultcount++))
 		pwhois_asn_info=$(whois -h whois.pwhois.org "registry source-as=$1" | grep -E "^Org-Name:|^Create-Date:")
 		found_org=$(echo -e "$pwhois_asn_info" | grep -E "^Org-Name:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
 		[[ -z "$found_org" ]] && found_org="N/A"
 		pwhois_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
-		[[ -z "$pwhois_createdate" ]] && found_createdate="N/A" || found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%d %H:%M:%S")
+		if [ "$JSON_OUTPUT" = true ]; then
+			[[ -z "$pwhois_createdate" ]] && found_createdate="" || found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%dT%H:%M:%S")
+		else
+			[[ -z "$pwhois_createdate" ]] && found_createdate="N/A" || found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%d %H:%M:%S")
+		fi
 	fi
 }
 
@@ -34,103 +39,108 @@ QueryRipestat(){
 	# BGP routing stats
 	ripestat_routing_data=$(timeout 5 curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	if [ -n "$ripestat_routing_data" ]; then
-		ripestat_ipv4=$(echo -e "$ripestat_routing_data" | jq -r '.data.announced_space.v4.prefixes')
-		ripestat_ipv6=$(echo -e "$ripestat_routing_data" | jq -r '.data.announced_space.v6.prefixes')
-		ripestat_bgp=$(echo -e "$ripestat_routing_data" | jq -r '.data.observed_neighbours')
+		ripestat_ipv4=$(jq -r '.data.announced_space.v4.prefixes' <<<"$ripestat_routing_data")
+		ripestat_ipv6=$(jq -r '.data.announced_space.v6.prefixes' <<<"$ripestat_routing_data")
+		ripestat_bgp=$(jq -r '.data.observed_neighbours' <<<"$ripestat_routing_data")
 	fi
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
 	ripestat_neighbours_data=$(timeout 5 curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
-	upstream_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="left") | .asn')
-	downstream_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="right") | .asn')
-	uncertain_peers=$(echo -e "$ripestat_neighbours_data" 	| jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="uncertain") | .asn')
+	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
+	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
+	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
+	if [ "$JSON_OUTPUT" = true ]; then
+		json_upstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$upstream_peers")
+		json_downstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$downstream_peers")
+		json_uncertain_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$uncertain_peers")
+	else
+		RESOLVE_COUNT=20
+		OUTPUT_PEERS_PER_LINE=4
 
-	RESOLVE_COUNT=20
-	OUTPUT_PEERS_PER_LINE=4
-
-	# resolve AS names of the first n upstreams
-	upstream_peercount=$(echo "$upstream_peers" | wc -l)
-	resolved_upstream_peers=""
-	count=0
-	for peer in $(echo -e "$upstream_peers" | head -n $RESOLVE_COUNT); do
-		(( count++ ))
-		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
-		if [ "$IS_ASN_CHILD" = true ]; then
-			resolved_upstream_peers+="${greenbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlgreen; color: $htmlblack;\">$peername ($peer)</a> ${default} "
-		else
-			resolved_upstream_peers+="${greenbg} $peername ($peer) ${default} "
-		fi
-		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_upstream_peers+="\n"
-	done
-	# and add the remaining ones as AS numbers only
-	unresolved_peercount=$(( upstream_peercount - RESOLVE_COUNT ))
-	if [ "$unresolved_peercount" -ge 1 ]; then
-		resolved_upstream_peers+="and more: "
-		for peer in $(echo -e "$upstream_peers" | tail -n $unresolved_peercount ); do
+		# resolve AS names of the first n upstreams
+		upstream_peercount=$(echo "$upstream_peers" | wc -l)
+		resolved_upstream_peers=""
+		count=0
+		for peer in $(echo -e "$upstream_peers" | head -n $RESOLVE_COUNT); do
+			(( count++ ))
+			peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 			if [ "$IS_ASN_CHILD" = true ]; then
-				resolved_upstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$peer</a>${default} "
+				resolved_upstream_peers+="${greenbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlgreen; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 			else
-				resolved_upstream_peers+="${green}${peer}${default} "
+				resolved_upstream_peers+="${greenbg} $peername ($peer) ${default} "
 			fi
+			[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_upstream_peers+="\n"
 		done
-	fi
-	upstream_peers="$resolved_upstream_peers"
-
-	# resolve AS names of the first n downstreams
-	downstream_peercount=$(echo "$downstream_peers" | wc -l)
-	resolved_downstream_peers=""
-	count=0
-	for peer in $(echo -e "$downstream_peers" | head -n $RESOLVE_COUNT); do
-		(( count++ ))
-		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
-		if [ "$IS_ASN_CHILD" = true ]; then
-			resolved_downstream_peers+="${yellowbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlyellow; color: $htmlblack;\">$peername ($peer)</a> ${default} "
-		else
-			resolved_downstream_peers+="${yellowbg} $peername ($peer) ${default} "
+		# and add the remaining ones as AS numbers only
+		unresolved_peercount=$(( upstream_peercount - RESOLVE_COUNT ))
+		if [ "$unresolved_peercount" -ge 1 ]; then
+			resolved_upstream_peers+="and more: "
+			for peer in $(echo -e "$upstream_peers" | tail -n $unresolved_peercount ); do
+				if [ "$IS_ASN_CHILD" = true ]; then
+					resolved_upstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$peer</a>${default} "
+				else
+					resolved_upstream_peers+="${green}${peer}${default} "
+				fi
+			done
 		fi
-		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_downstream_peers+="\n"
-	done
-	# and add the remaining ones as AS numbers only
-	unresolved_peercount=$(( downstream_peercount - RESOLVE_COUNT ))
-	if [ "$unresolved_peercount" -ge 1 ]; then
-		resolved_downstream_peers+="and more: "
-		for peer in $(echo -e "$downstream_peers" | tail -n $unresolved_peercount ); do
-			if [ "$IS_ASN_CHILD" = true ]; then
-				resolved_downstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlyellow;\">$peer</a>${default} "
-			else
-				resolved_downstream_peers+="${yellow}${peer}${default} "
-			fi
-		done
-	fi
-	downstream_peers="$resolved_downstream_peers"
+		upstream_peers="$resolved_upstream_peers"
 
-	# resolve AS names of the first n uncertains
-	uncertain_peercount=$(echo "$uncertain_peers" | wc -l)
-	resolved_uncertain_peers=""
-	count=0
-	for peer in $(echo -e "$uncertain_peers" | head -n $RESOLVE_COUNT); do
-		(( count++ ))
-		peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
-		if [ "$IS_ASN_CHILD" = true ]; then
-			resolved_uncertain_peers+="${lightgreybg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmllightgray; color: $htmlblack;\">$peername ($peer)</a> ${default} "
-		else
-			resolved_uncertain_peers+="${lightgreybg} $peername ($peer) ${default} "
-		fi
-		[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_uncertain_peers+="\n"
-	done
-	# and add the remaining ones as AS numbers only
-	unresolved_peercount=$(( uncertain_peercount - RESOLVE_COUNT ))
-	if [ "$unresolved_peercount" -ge 1 ]; then
-		resolved_uncertain_peers+="and more: "
-		for peer in $(echo -e "$uncertain_peers" | tail -n $unresolved_peercount ); do
+		# resolve AS names of the first n downstreams
+		downstream_peercount=$(echo "$downstream_peers" | wc -l)
+		resolved_downstream_peers=""
+		count=0
+		for peer in $(echo -e "$downstream_peers" | head -n $RESOLVE_COUNT); do
+			(( count++ ))
+			peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 			if [ "$IS_ASN_CHILD" = true ]; then
-				resolved_uncertain_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlwhite;\">$peer</a>${default} "
+				resolved_downstream_peers+="${yellowbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlyellow; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 			else
-				resolved_uncertain_peers+="${white}${peer}${default} "
+				resolved_downstream_peers+="${yellowbg} $peername ($peer) ${default} "
 			fi
+			[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_downstream_peers+="\n"
 		done
+		# and add the remaining ones as AS numbers only
+		unresolved_peercount=$(( downstream_peercount - RESOLVE_COUNT ))
+		if [ "$unresolved_peercount" -ge 1 ]; then
+			resolved_downstream_peers+="and more: "
+			for peer in $(echo -e "$downstream_peers" | tail -n $unresolved_peercount ); do
+				if [ "$IS_ASN_CHILD" = true ]; then
+					resolved_downstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlyellow;\">$peer</a>${default} "
+				else
+					resolved_downstream_peers+="${yellow}${peer}${default} "
+				fi
+			done
+		fi
+		downstream_peers="$resolved_downstream_peers"
+
+		# resolve AS names of the first n uncertains
+		uncertain_peercount=$(echo "$uncertain_peers" | wc -l)
+		resolved_uncertain_peers=""
+		count=0
+		for peer in $(echo -e "$uncertain_peers" | head -n $RESOLVE_COUNT); do
+			(( count++ ))
+			peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+			if [ "$IS_ASN_CHILD" = true ]; then
+				resolved_uncertain_peers+="${lightgreybg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmllightgray; color: $htmlblack;\">$peername ($peer)</a> ${default} "
+			else
+				resolved_uncertain_peers+="${lightgreybg} $peername ($peer) ${default} "
+			fi
+			[[ $(( count % OUTPUT_PEERS_PER_LINE )) -eq 0 ]] && resolved_uncertain_peers+="\n"
+		done
+		# and add the remaining ones as AS numbers only
+		unresolved_peercount=$(( uncertain_peercount - RESOLVE_COUNT ))
+		if [ "$unresolved_peercount" -ge 1 ]; then
+			resolved_uncertain_peers+="and more: "
+			for peer in $(echo -e "$uncertain_peers" | tail -n $unresolved_peercount ); do
+				if [ "$IS_ASN_CHILD" = true ]; then
+					resolved_uncertain_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlwhite;\">$peer</a>${default} "
+				else
+					resolved_uncertain_peers+="${white}${peer}${default} "
+				fi
+			done
+		fi
+		uncertain_peers="$resolved_uncertain_peers"
 	fi
-	uncertain_peers="$resolved_uncertain_peers"
 
 	StatusbarMessage "Retrieving prefix allocations and announcements for AS$1 ($found_asname)"
 	ipv4_inetnums=""
@@ -153,7 +163,7 @@ QueryRipestat(){
 
 	if [ -n "$ipv4_inetnums" ]; then
 		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
-		if [ "$IS_ASN_CHILD" = true ]; then
+		if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
 			html=""
 			for inetnum in $ipv4_inetnums; do
 				html+="<a href=\"/asn_lookup&$inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
@@ -163,13 +173,18 @@ QueryRipestat(){
 	fi
 	if [ -n "$ipv6_inetnums" ]; then
 		ipv6_inetnums=$(echo -e "$ipv6_inetnums" | sort -u)
-		if [ "$IS_ASN_CHILD" = true ]; then
+		if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
 			html=""
 			for inet6num in $ipv6_inetnums; do
 				html+="<a href=\"/asn_lookup&$inet6num\" class=\"hidden_underline\" style=\"color: $htmlyellow;\">$inet6num</a>\n"
 			done
 			ipv6_inetnums="$html"
 		fi
+	fi
+
+	if [ "$JSON_OUTPUT" = true ]; then
+		json_ipv4_inetnums=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv4_inetnums")
+		json_ipv6_inetnums=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv6_inetnums")
 	fi
 	StatusbarMessage
 }
@@ -187,10 +202,10 @@ RIPESuggestASN(){
 		done
 		StatusbarMessage
 		if [ -n "$ripe_suggest_output" ]; then
-			found_suggestions=$(echo -e "$ripe_suggest_output" | jq -r '.description' | sort -u)
+			found_suggestions=$(jq -r '.description' <<<"$ripe_suggest_output" | sort -u)
 			for suggestion in $found_suggestions; do
 				echo -e "\n${green}$suggestion${default}"
-				for suggestion_asn in $(echo -e "$ripe_suggest_output" | jq -r 'select (.description=="'"$suggestion"'") | .value' | awk 'NR==1{print}'); do
+				for suggestion_asn in $(jq -r 'select (.description=="'"$suggestion"'") | .value' <<<"$ripe_suggest_output" | awk 'NR==1{print}'); do
 					echo -e "\t${yellow}$suggestion_asn${default}"
 				done
 			done
@@ -217,12 +232,17 @@ RIPESuggestASN(){
 WhoisIP(){
 	# $1: (mandatory) IP to lookup
 	# $2: (optional) if set to anything, only perform a generic whois lookup (skip pWhois/RPKI/IXP lookups)
+	[[ "$JSON_OUTPUT" = true ]] && ((json_resultcount++))
 	GENERIC_WHOIS_LOOKUP_ONLY=false
 	[[ "$#" -gt 1 ]] && GENERIC_WHOIS_LOOKUP_ONLY=true
 	full_whois_data=$(timeout 5 whois "$1" 2>/dev/null)
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
+	ixp_data=""
+	ixp_geo=""
+	ip_type_json_output=""
 	# Check if input is a bogon address
 	if [ "$IS_BOGON" = false ]; then
+		ip_type_json_output+="\"is_bogon\":false"
 		if [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
 			abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
 			hostname=$(RdnsLookup "$1")
@@ -242,10 +262,14 @@ WhoisIP(){
 			IPGeoRepLookup "$1"
 			IPShodanLookup "$1"
 			# check if it's an IXP, otherwise fall back to generic whois
-			[[ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]] && IsIXP "$1" || ixp_data=""; ixp_geo=""
+			[[ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]] && IsIXP "$1"
 			if [ -n "$ixp_data" ]; then
-				pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
-				ip_type_data=" ${yellowbg} Internet Exchange ${default}"
+				if [ "$JSON_OUTPUT" = true ]; then
+					pwhois_org="$ixp_data"
+				else
+					pwhois_org="${bluebg} IXP ${default} ${blue}${ixp_data}${default}"
+					ip_type_data=" ${yellowbg} Internet Exchange ${default}"
+				fi
 			else
 				pwhois_org=$(echo -e "$network_whois_data" | grep -i -E "^orgname:|^org-name:|^owner:" | cut -d ':' -f 2 | sed 's/^[ \t]*//' | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//')
 			fi
@@ -260,11 +284,15 @@ WhoisIP(){
 				pwhois_geo="$ip_geo_data"
 			else
 				pwhois_geo=$(echo -e "$network_whois_data" | grep -m1 -i -E "^country:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
+				geo_cc_json_output="$pwhois_geo"
 			fi
 			[[ -z "$pwhois_geo" ]] && pwhois_geo="N/A"
 		fi
+	[[ -n "$ixp_data" ]] &&	ip_type_json_output+=",\"is_ixp\":true" || ip_type_json_output+=",\"is_ixp\":false"
 	else
 		# bogon address, skip lookups
+		ip_type_json_output+="\"is_bogon\":true"
+		ip_type_json_output+=",\"bogon_type\":\"$json_bogon_type\""
 		hostname="-"
 		found_asn="-"
 		pwhois_org="IANA"
@@ -290,34 +318,74 @@ WhoisIP(){
 		StatusbarMessage "Checking RPKI validity for ${bluebg}AS${found_asn}${lightgreybg} and prefix ${bluebg}${found_route}${lightgreybg}"
 		RPKILookup "$found_asn" "$found_route"
 		StatusbarMessage
-		echo ""
+		[[ "$JSON_OUTPUT" = false ]] && echo ""
 	elif [ "$IS_BOGON" = false ]; then
 		rpki_output="${red}N/A (address not announced)${default}"
 	else
 		rpki_output="-"
 	fi
 
-	printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
-	if [ "$IS_ASN_CHILD" = true ] && [ -n "$found_asname" ]; then
-		summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>"
-		ipinfolink="<a href=\"https://ipinfo.io/AS$found_asn/$found_route\" target=\"_blank\" style=\"color: $htmlyellow; font-style: italic;\">ipinfo.io</a>"
-		summary_ipinfo=" <span style=\"font-size: 75%; color: $htmlyellow;\">($ipinfolink🔗)</span>"
+	if [ "$JSON_OUTPUT" = true ]; then
+		# JSON output
+		final_json_output+="{"
+		final_json_output+="\"ip\":\"$1\","
+		grep -q ":" <<<"$1" && ipversion="6" || ipversion="4"
+		final_json_output+="\"ip_version\":\"$ipversion\","
+		[[ "$hostname" != "-" ]] && final_json_output+="\"reverse\":\"$hostname\","
+		final_json_output+="\"org_name\":\"$pwhois_org\","
+		if [ -n "$abusecontacts" ] && [ "$abusecontacts" != "-" ]; then
+			final_json_output+="\"abuse_contacts\":$abusecontacts,"
+		fi
+		final_json_output+="\"routing\":{"
+		if [ -n "$found_asname" ]; then
+			final_json_output+="\"is_announced\":true,"
+			final_json_output+="\"as_number\":\"$found_asn\","
+			final_json_output+="\"as_name\":\"$found_asname\","
+			final_json_output+="\"net_range\":\"$found_route\","
+			final_json_output+="\"net_name\":\"$pwhois_net\","
+			final_json_output+="\"roa_count\":\"$roacount_json_output\","
+			final_json_output+="\"roa_validity\":\"$roavalidity_json_output\""
+		else
+			final_json_output+="\"is_announced\":false,"
+			if [ "$found_route" != "N/A" ]; then
+				final_json_output+="\"net_name\":\"$found_route ($pwhois_net)\""
+			else
+				final_json_output+="\"net_name\":\"$pwhois_net\""
+			fi
+		fi
+		final_json_output+="},\"type\":{$ip_type_json_output}"
+		if [ "$IS_BOGON" != true ]; then
+			final_json_output+=",\"geolocation\":{"
+			final_json_output+="\"city\":\"$geo_city_json_output\","
+			final_json_output+="\"region\":\"$geo_region_json_output\","
+			final_json_output+="\"country\":\"$geo_country_json_output\","
+			final_json_output+="\"cc\":\"$geo_cc_json_output\""
+			final_json_output+="}"
+		fi
 	else
-		summary_asn="$found_asn"
-		summary_ipinfo=""
+		# Normal output
+		printf "${white}%${longest}s${default} ┌${bluebg}PTR${default} %s\n" "$1" "$hostname"
+		if [ "$IS_ASN_CHILD" = true ] && [ -n "$found_asname" ]; then
+			summary_asn="<a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlred;\">$found_asn</a>"
+			ipinfolink="<a href=\"https://ipinfo.io/AS$found_asn/$found_route\" target=\"_blank\" style=\"color: $htmlyellow; font-style: italic;\">ipinfo.io</a>"
+			summary_ipinfo=" <span style=\"font-size: 75%; color: $htmlyellow;\">($ipinfolink🔗)</span>"
+		else
+			summary_asn="$found_asn"
+			summary_ipinfo=""
+		fi
+		printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
+		printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
+		printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)%s${default}\n" "├" "$found_route" "$pwhois_net" "$summary_ipinfo"
+		printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
+		printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
+		[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "${ip_type_data}"
+		printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}" "├" "$pwhois_geo"
+		if [ "$IS_ASN_CHILD" = true ] && [ -n "$flag_icon_cc" ]; then
+			# signal to the parent connhandler the correct country flag to display for this IP
+			echo -n " #COUNTRYCODE $flag_icon_cc"
+		fi
+		printf "\n"
 	fi
-	printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
-	printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
-	printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)%s${default}\n" "├" "$found_route" "$pwhois_net" "$summary_ipinfo"
-	printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
-	printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
-	[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "${ip_type_data}"
-	printf "${white}%${indent}s${bluebg}GEO${default} ${magenta}%s${default}" "├" "$pwhois_geo"
-	if [ "$IS_ASN_CHILD" = true ] && [ -n "$flag_icon_cc" ]; then
-		# signal to the parent connhandler the correct country flag to display for this IP
-		echo -n " #COUNTRYCODE $flag_icon_cc"
-	fi
-	printf "\n"
 }
 
 IsBogon(){
@@ -365,6 +433,7 @@ IsBogon(){
 	fi
 	if [ -n "$bogon_tag" ]; then
 		IS_BOGON=true
+		json_bogon_type="$bogon_tag"
 		bogon_tag="${yellowbg} BOGON ${default} ${bogon_tag}"
 	fi
 }
@@ -420,12 +489,19 @@ ResolveHostnameToIPList(){
 }
 
 PrintErrorAndExit(){
-	if [ "$IS_ASN_CHILD" = true ]; then
+	if [ "$JSON_OUTPUT" = true ]; then
+		# json output
+		status_json_output="fail"
+		reason_json_output="$1"
+		PrintJsonOutput
+	elif [ "$IS_ASN_CHILD" = true ]; then
 		echo -e "\n${redbg}${1}${default}\n" # get the error in the html report
+		tput sgr0
 	else
+		# normal output
 		echo -e "\n${redbg}${1}${default}" >&2
+		tput sgr0
 	fi
-	tput sgr0
 	exit 1
 }
 
@@ -442,6 +518,8 @@ PrintUsage(){
 			"\n\n  ${green}-n    (no trace)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
 			"\n\n  ${green}-s    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
 			"\n\n  ${green}-o    (organization search)\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
+			"\n\n  ${green}-j    (compact JSON output)\n\t${default}Set output to compact JSON mode (ideal for machine parsing)" \
+			"\n\n  ${green}-J    (pretty-printed JSON output)\n\t${default}Set output to pretty-printed JSON mode" \
 			"\n\n  ${green}-h    (help)\n\t${default}Show this help screen" \
 			"\n\n  ${red}-l    (lookup server)\n\t${default}Launch the script in server mode. See ${red}SERVER OPTIONS${default} below" \
 			"\n\nTARGET:" \
@@ -554,10 +632,19 @@ AbuseLookup(){
 		abuselist+="$abusecontact"
 	done
 
-	if [ -n "$abuselist" ]; then
-		echo -e "$abuselist" | tr " " "\n" | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//'
+	if [ "$JSON_OUTPUT" = true ]; then
+		# json output
+		if [ -n "$abuselist" ]; then
+			echo -n "["
+			echo -e "$abuselist" | tr " " "\n" | sort -u | while read -r line; do echo -n "\"$line\", "; done | sed 's/, $/]/'
+		fi
 	else
-		echo "-"
+		# normal output
+		if [ -n "$abuselist" ]; then
+			echo -e "$abuselist" | tr " " "\n" | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//'
+		else
+			echo "-"
+		fi
 	fi
 }
 
@@ -1149,12 +1236,50 @@ $IPCALC_WARNING
 
 PrintReputationAndShodanData(){
 	# We already collected reputation and Shodan data since we called IPGeoRepLookup() and IPShodanLookup() previously
-	[[ -n "$ip_shodan_cpe_data" ]] && printf "${white}%${indent}s${bluebg}CPE${default}%s\n" "├" "${ip_shodan_cpe_data}"
-	[[ -n "$ip_shodan_ports_data" ]] && printf "${white}%${indent}s${bluebg}POR${default}%s\n" "├" "${ip_shodan_ports_data}"
-	[[ -n "$ip_shodan_tags_data" ]] && printf "${white}%${indent}s${bluebg}TAG${default}%s\n" "├" "${ip_shodan_tags_data}"
-	[[ -n "$ip_shodan_cve_data" ]] && printf "${white}%${indent}s${bluebg}CVE${default}%s\n" "├" "${ip_shodan_cve_data}"
-	printf "${white}%${indent}s${bluebg}REP${default} ${magenta}%s${default}\n\n" "└" "$ip_rep_data"
+	if [ "$JSON_OUTPUT" = true ]; then
+		# JSON output
+		final_json_output+=",\"reputation\":{"
+		[[ -n "$json_rep" ]] && final_json_output+="\"status\":\"$json_rep\""
+		[[ -n "$json_iqs_threat_score" ]] && final_json_output+="$json_iqs_threat_score"
+		[[ "$gn_noisy" = "true" ]] && final_json_output+=",\"is_noisy\":$gn_noisy"
+		[[ -n "$gn_json_is_knowngood" ]] && final_json_output+=",\"is_known_good\":$gn_json_is_knowngood"
+		[[ -n "$gn_json_is_knownbad" ]] && final_json_output+=",\"is_known_bad\":$gn_json_is_knownbad"
+		[[ -n "$gn_json_aka" ]] && final_json_output+=",\"known_as\":\"$gn_json_aka\""
+		[[ -n "$json_iqs_threat_tags" ]] && final_json_output+="$json_iqs_threat_tags"
+		final_json_output+="},\"fingerprinting\":{"
+		[[ -n "$shodan_cpes_json_output" ]] && final_json_output+="\"cpes\":$shodan_cpes_json_output,"
+		[[ -n "$shodan_ports_json_output" ]] && final_json_output+="\"ports\":$shodan_ports_json_output,"
+		[[ -n "$shodan_tags_json_output" ]] && final_json_output+="\"tags\":$shodan_tags_json_output,"
+		[[ -n "$shodan_vulns_json_output" ]] && final_json_output+="\"vulns\":$shodan_vulns_json_output,"
+		# truncate last comma
+		[[ ${final_json_output: -1} = "," ]] && final_json_output=${final_json_output::-1}
+		final_json_output+="}"
+		final_json_output+="}"
+	else
+		# normal output
+		[[ -n "$ip_shodan_cpe_data" ]] && printf "${white}%${indent}s${bluebg}CPE${default}%s\n" "├" "${ip_shodan_cpe_data}"
+		[[ -n "$ip_shodan_ports_data" ]] && printf "${white}%${indent}s${bluebg}POR${default}%s\n" "├" "${ip_shodan_ports_data}"
+		[[ -n "$ip_shodan_tags_data" ]] && printf "${white}%${indent}s${bluebg}TAG${default}%s\n" "├" "${ip_shodan_tags_data}"
+		[[ -n "$ip_shodan_cve_data" ]] && printf "${white}%${indent}s${bluebg}CVE${default}%s\n" "├" "${ip_shodan_cve_data}"
+		printf "${white}%${indent}s${bluebg}REP${default} ${magenta}%s${default}\n\n" "└" "$ip_rep_data"
+	fi
+}
 
+PrintJsonOutput(){
+	DisableColors
+	endtime=$(date +%s)
+	runtime=$((endtime-starttime))
+	json_to_print="{\"target\":\"$userinput\","
+	json_to_print+="\"target_type\":\"$json_target_type\","
+	json_to_print+="\"result\":\"$status_json_output\","
+	json_to_print+="\"reason\":\"$reason_json_output\","
+	json_to_print+="\"version\":\"$ASN_VERSION\","
+	json_to_print+="\"request_time\":\"$json_request_time\","
+	json_to_print+="\"request_duration\":\"$runtime\","
+	json_to_print+="\"result_count\":$json_resultcount,"
+	json_to_print+="\"results\":[${final_json_output}]}"
+	[[ "$JSON_PRETTY" = true ]] && jq -M <<<"$json_to_print" || echo -en "$json_to_print"
+	[[ "$IS_ASN_CHILD" = true ]] && echo "" # output trailing newline so that the client picks up the json output
 }
 
 RPKILookup(){
@@ -1162,12 +1287,13 @@ RPKILookup(){
 	found_rpkivalidity=""
 	INVALID_ROA=false
 	rpki_apioutput=$(curl -s "https://stat.ripe.net/data/rpki-validation/data.json?resource=$1&prefix=$2&sourceapp=nitefood-asn")
-	is_valid_json=$(echo "$rpki_apioutput" | jq type 2>/dev/null)
+	is_valid_json=$(jq type <<<"$rpki_apioutput" 2>/dev/null)
 	if [ -n "$is_valid_json" ]; then
-		found_rpkivalidity=$(echo "$rpki_apioutput" | jq -r '.data.status' | tr '[:lower:]' '[:upper:]')
-		found_rpkiroacount=$(echo "$rpki_apioutput" | jq '.data.validating_roas | length')
-		found_rpkiprefix=$(echo "$rpki_apioutput" | jq -r '.data.validating_roas[0].prefix')
-		found_rpkiorigins=$(echo "$rpki_apioutput" | jq -r '.data.validating_roas[] | select (.prefix=="'"$found_rpkiprefix"'") | .origin')
+		found_rpkivalidity=$(jq -r '.data.status' <<<"$rpki_apioutput" | tr '[:lower:]' '[:upper:]')
+		found_rpkiroacount=$(jq '.data.validating_roas | length' <<<"$rpki_apioutput")
+		roacount_json_output="$found_rpkiroacount"
+		found_rpkiprefix=$(jq -r '.data.validating_roas[0].prefix' <<<"$rpki_apioutput")
+		found_rpkiorigins=$(jq -r '.data.validating_roas[] | select (.prefix=="'"$found_rpkiprefix"'") | .origin' <<<"$rpki_apioutput")
 		found_rpkiorigin="["
 		origin_count=0
 		for origin in $found_rpkiorigins; do
@@ -1177,19 +1303,22 @@ RPKILookup(){
 		done
 		found_rpkiorigin+="]"
 
-		found_rpkimaxlength=$(echo "$rpki_apioutput" | jq -r '.data.validating_roas[0].max_length')
+		found_rpkimaxlength=$(jq -r '.data.validating_roas[0].max_length' <<<"$rpki_apioutput")
 		# TODO: iterate over ROAs (.data.validatingRoas[]) to give deeper source RIR insight
 		#found_rpkisource=$(echo "$rpki_apioutput" | jq -r '.data.validatingRoas[0].source')
 		case "$found_rpkivalidity" in
 			"VALID")
 				[[ "${found_rpkiroacount}" -gt 1 ]] && s="s" || s=""
 				rpki_output="${green}✓ VALID (${found_rpkiroacount} ROA$s found)${default}"
+				roavalidity_json_output="valid"
 				;;
 			"UNKNOWN")
 				rpki_output="${yellow}✓ UNKNOWN (no ROAs found)${default}"
+				roavalidity_json_output="unknown"
 				;;
 			"INVALID_ASN")
 				INVALID_ROA=true
+				roavalidity_json_output="invalid"
 				if [ "$found_rpkiorigin" = "0" ]; then
 					rpki_output="${red}❌ ${found_rpkivalidity} (no Origin authorized to announce Prefix '${found_rpkiprefix}' with Max-Length=${found_rpkimaxlength})${default}"
 				else
@@ -1198,11 +1327,14 @@ RPKILookup(){
 				;;
 			"INVALID_LENGTH")
 				INVALID_ROA=true
+				roavalidity_json_output="invalid"
 				rpki_output="${red}❌ ${found_rpkivalidity} (expected Max-Length=${found_rpkimaxlength} for Prefix '${found_rpkiprefix}')${default}"
 				;;
 		esac
 	else
 		rpki_output="${yellow}? (WRONG RPKI DATA or problem accessing RIPEStat API)${default}"
+		roacount_json_output="-1"
+		roavalidity_json_output="unknown (API error)"
 	fi
 }
 
@@ -1227,17 +1359,17 @@ IsIXP() {
 			[[ -z "$peeringdb_ipv6_dataset" ]] && peeringdb_ipv6_dataset=$(curl -s "https://www.peeringdb.com/api/ixpfx?protocol__in=IPv6")
 			peeringdb_dataset="$peeringdb_ipv6_dataset"
 		fi
-		ixp_prefixes=$(echo -e "$peeringdb_dataset" | jq -r '.data[].prefix')
+		ixp_prefixes=$(jq -r '.data[].prefix' <<<"$peeringdb_dataset")
 		# search for input prefix through PeeringDB IXP prefix list
 		for prefix in $ixp_prefixes; do
 			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
 				# the IP is part of an IXP prefix
 				# Query PeeringDB to match an IXP for that prefix.
-				ixlan_id=$(echo "$peeringdb_dataset" | jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id')
+				ixlan_id=$(jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id' <<<"$peeringdb_dataset")
 				ixp_full_ix_data=$(curl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
-				ixp_data=$(echo "$ixp_full_ix_data" | jq -r '.data[0].name, .data[0].name_long' | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
-				ixp_geo=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.city')
-				ixp_state=$(echo "$ixp_full_ix_data" | jq -r '.data[0].org.state')
+				ixp_data=$(jq -r '.data[0].name, .data[0].name_long' <<<"$ixp_full_ix_data" | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
+				ixp_geo=$(jq -r '.data[0].org.city' <<<"$ixp_full_ix_data")
+				ixp_state=$(jq -r '.data[0].org.state' <<<"$ixp_full_ix_data")
 				ip_type_data=" ${lightgreybg} IXP ${default}"
 				[[ -n "$ixp_state" ]] && ixp_geo+=" ($ixp_state)"
 				[[ "$IS_ASN_CHILD" = true ]] && ixp_data="<a href=\"https://www.peeringdb.com/ix/$ixlan_id\" target=\"_blank\" class=\"hidden_underline\" style=\"color: $htmlblue;\">$ixp_data</a>"
@@ -1251,10 +1383,11 @@ GetIXPresence(){
 	asn="$1"
 	ixps=""
 	outputix=""
+	json_ixps=""
 	netlist=$(curl -s "https://www.peeringdb.com/api/net?asn__in=$asn" | jq -r '.data[].id')
 	if [ -n "$netlist" ]; then
 		for net in $netlist; do
-			if [ "$IS_ASN_CHILD" = true ]; then
+			if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
 				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[] | "<a href=\"https://www.peeringdb.com/ix/\(.ix_id)\" target=\"_blank\" class=\"hidden_underline\" style=\"color: '"$htmlblue"';\">\(.name)</a>"')
 			else
 				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
@@ -1271,7 +1404,13 @@ GetIXPresence(){
 	else
 		outputix="${redbg} NONE ${default}"
 	fi
-	echo -e "$outputix\n"
+	if [ "$JSON_OUTPUT" = true ]; then
+		# json output
+		json_ixps=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ixps")
+	else
+		# normal output
+		echo -e "$outputix\n"
+	fi
 }
 
 IPGeoRepLookup(){
@@ -1281,33 +1420,42 @@ IPGeoRepLookup(){
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
 	ipapi_output=$(curl -m4 -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
-	ipapi_status=$(echo "$ipapi_output" | jq -r '.status')
+	ipapi_status=$(jq -r '.status' <<<"$ipapi_output")
 	if [ "$ipapi_status" = "fail" ]; then
-		ipapi_errmsg=$(echo "$ipapi_output" | jq -r '.message')
+		ipapi_errmsg=$(jq -r '.message' <<<"$ipapi_output")
 		ip_rep_data="${red}IP-API ERROR:${default} ${ipapi_errmsg}"
 	else
-		IS_MOBILE=$(echo "$ipapi_output" | jq -r '.mobile')
-		IS_PROXY=$(echo "$ipapi_output" | jq -r '.proxy')
-		IS_HOSTING=$(echo "$ipapi_output" | jq -r '.hosting')
+		IS_MOBILE=$(jq -r '.mobile' <<<"$ipapi_output")
+		IS_PROXY=$(jq -r '.proxy' <<<"$ipapi_output")
+		IS_HOSTING=$(jq -r '.hosting' <<<"$ipapi_output")
 	fi
 
 	IS_ANYCAST=""
-	if [[ -z $(echo "$ipmap_output" | jq 'select (.error != null) | .error') ]]; then
-		IS_ANYCAST=$(echo "$ipmap_output" | jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast')
+	if [[ -z $(jq 'select (.error != null) | .error' <<<"$ipmap_output") ]]; then
+		IS_ANYCAST=$(jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast' <<<"$ipmap_output")
 	fi
 
 	ip_geo_data=""
-	ipmap_location_data=$(echo "$ipmap_output" | jq 'select (.location != null) | .location')
+	geo_city_json_output=""
+	geo_region_json_output=""
+	geo_country_json_output=""
+	geo_cc_json_output=""
+	ipmap_location_data=$(jq 'select (.location != null) | .location' <<<"$ipmap_output")
 	if [ -n "$ipmap_location_data" ]; then
 		# RIPE IPmap has (at least some) geo data about this address, check city/region
-		ipmap_city=$(echo "$ipmap_location_data" | jq -r 'select (.cityNameAscii != null) | .cityNameAscii')
-		ipmap_region=$(echo "$ipmap_location_data" | jq -r 'select (.stateName != null) | .stateName')
+		ipmap_city=$(jq -r 'select (.cityNameAscii != null) | .cityNameAscii' <<<"$ipmap_location_data")
+		ipmap_region=$(jq -r 'select (.stateName != null) | .stateName' <<<"$ipmap_location_data")
 	fi
 	flag_icon_cc="" # will be used in HTML reports served over HTTP
 	if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ]; then
 		# RIPE IPmap has full geo data, continue
-		ipmap_cc=$(echo "$ipmap_location_data" | jq -r '.countryCodeAlpha2')
-		ipmap_country_name=$(echo "$ipmap_location_data" | jq -r '.countryName')
+		ipmap_cc=$(jq -r '.countryCodeAlpha2' <<<"$ipmap_location_data")
+		ipmap_country_name=$(jq -r '.countryName' <<<"$ipmap_location_data")
+		# populate json output fields from ipmap output
+		geo_city_json_output="$ipmap_city"
+		geo_region_json_output="$ipmap_region"
+		geo_country_json_output="$ipmap_country_name"
+		geo_cc_json_output="$ipmap_cc"
 		if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ] && [ -n "$ipmap_cc" ]; then
 			ip_geo_data="$ipmap_city, $ipmap_region ($ipmap_cc)"
 			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipmap_cc")
@@ -1318,10 +1466,15 @@ IPGeoRepLookup(){
 		fi
 	elif [ "$ipapi_status" = "success" ]; then
 		# IPmap has incomplete/no data about this address, fallback to ip-api.com
-		ipapi_city=$(echo "$ipapi_output" | jq -r '.city')
-		ipapi_region=$(echo "$ipapi_output" | jq -r '.regionName')
-		ipapi_cc=$(echo "$ipapi_output" | jq -r '.countryCode')
-		ipapi_countryname=$(echo "$ipapi_output" | jq -r '.country')
+		ipapi_city=$(jq -r '.city' <<<"$ipapi_output")
+		ipapi_region=$(jq -r '.regionName' <<<"$ipapi_output")
+		ipapi_cc=$(jq -r '.countryCode' <<<"$ipapi_output")
+		ipapi_countryname=$(jq -r '.country' <<<"$ipapi_output")
+		# populate json output fields from ip-api output
+		geo_city_json_output="$ipapi_city"
+		geo_region_json_output="$ipapi_region"
+		geo_country_json_output="$ipapi_countryname"
+		geo_cc_json_output="$ipapi_cc"
 		if [ -n "$ipapi_city" ] && [ -n "$ipapi_region" ] && [ -n "$ipapi_cc" ]; then
 			ip_geo_data="$ipapi_city, $ipapi_region ($ipapi_cc)"
 			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipapi_cc")
@@ -1334,81 +1487,130 @@ IPGeoRepLookup(){
 
 	# IP type identification
 	ip_type_data=""
-	[[ "$IS_ANYCAST" = true ]] && ip_type_data+=" ${yellowbg} Anycast IP ${default}"
-	[[ "$IS_MOBILE" = true ]] && ip_type_data+=" ${yellowbg} Mobile network ${default}"
-	[[ "$IS_PROXY" = true ]] && ip_type_data+=" ${yellowbg} Proxy host ${default}"
+	if [ "$IS_ANYCAST" = true ]; then
+		ip_type_data+=" ${yellowbg} Anycast IP ${default}"
+		ip_type_json_output+=",\"is_anycast\":true"
+	else
+		ip_type_json_output+=",\"is_anycast\":false"
+	fi
+	if [ "$IS_MOBILE" = true ]; then
+		ip_type_data+=" ${yellowbg} Mobile network IP ${default}"
+		ip_type_json_output+=",\"is_mobile\":true"
+	else
+		ip_type_json_output+=",\"is_mobile\":false"
+	fi
+	if [ "$IS_PROXY" = true ]; then
+		ip_type_data+=" ${yellowbg} Proxy host ${default}"
+		ip_type_json_output+=",\"is_proxy\":true"
+	else
+		ip_type_json_output+=",\"is_proxy\":false"
+	fi
 	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
 	incolumitas_dcdata=$(curl -s -m2  https://api.incolumitas.com/datacenter?ip=$1)
-	dcname=$(echo "$incolumitas_dcdata" | jq -r 'select (.datacenter != null) | .datacenter')
-	dcregion=$(echo "$incolumitas_dcdata" | jq -r 'select (.region != null) | .region')
+	dcname=$(jq -r 'select (.datacenter != null) | .datacenter' <<<"$incolumitas_dcdata")
+	dcregion=$(jq -r 'select (.region != null) | .region' <<<"$incolumitas_dcdata")
 	if [ -n "$dcname" ]; then
 		# incolumitas.com has details regarding this DC
 		ip_type_data+=" ${yellowbg} DC ${default}${yellow} $dcname"
-		[[ -n "$dcregion" ]] && ip_type_data+=" ($dcregion)"
+		ip_type_json_output+=",\"is_dc\":true"
+		ip_type_json_output+=",\"dc_details\":{\"dc_name\":\"$dcname\""
+		if [ -n "$dcregion" ]; then
+			ip_type_data+=" ($dcregion)"
+			ip_type_json_output+=",\"dc_region\":\"$dcregion\""
+		fi
+		ip_type_json_output+="}"
 		ip_type_data+="${default}"
 	elif [ "$IS_HOSTING" = true ]; then
 		# fallback to IP-API DC detection
 		ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
+		ip_type_json_output+=",\"is_dc\":true"
+	else
+		ip_type_json_output+=",\"is_dc\":false"
 	fi
 	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analisys (ipqualityscore.com)
 	ip_rep_data="${green}✓ NONE${default}"
+	json_rep="none"
+	json_iqs_threat_score=""
+	json_iqs_threat_tags=""
 	is_blacklisted=$(curl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
 	if [ "$is_blacklisted" = "1" ]; then
+		json_rep="bad"
 		# IP is blacklisted by StopForumSpam. Lookup detailed reputation data on IPQualityScore
 		ip_rep_data="${red}❌ BAD (on stopforumspam.org)${default}"
 		if [ -n "$IQS_TOKEN" ]; then
 			iqs_output=$(curl -m4 -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
-			iqs_success=$(echo "$iqs_output" | jq -r '.success')
+			iqs_success=$(jq -r '.success' <<<"$iqs_output")
 			if [ "$iqs_success" = true ]; then
-				iqs_score=$(echo "$iqs_output" | jq -r '.fraud_score')
-				iqs_proxy=$(echo "$iqs_output" | jq -r '.proxy')
-				iqs_vpn=$(echo "$iqs_output" | jq -r '.active_vpn')
-				iqs_tor=$(echo "$iqs_output" | jq -r '.active_tor')
-				iqs_recentabuse=$(echo "$iqs_output" | jq -r '.recent_abuse')
-				iqs_bot=$(echo "$iqs_output" | jq -r '.bot_status')
-				iqs_crawler=$(echo "$iqs_output" | jq -r '.is_crawler')
+				iqs_score=$(jq -r '.fraud_score' <<<"$iqs_output")
+				iqs_proxy=$(jq -r '.proxy' <<<"$iqs_output")
+				iqs_vpn=$(jq -r '.active_vpn' <<<"$iqs_output")
+				iqs_tor=$(jq -r '.active_tor' <<<"$iqs_output")
+				iqs_recentabuse=$(jq -r '.recent_abuse' <<<"$iqs_output")
+				iqs_bot=$(jq -r '.bot_status' <<<"$iqs_output")
+				iqs_crawler=$(jq -r '.is_crawler' <<<"$iqs_output")
+				json_iqs_threat_score+=",\"threat_score\":\"$iqs_score\""
 				if [ "$iqs_score" -lt 40 ]; then
 					ip_rep_data="✓ GOOD"
 					ip_rep_color="$green"
+					json_rep="good"
 				elif [ "$iqs_score" -lt 75 ]; then
 					ip_rep_data="✓ AVERAGE"
 					ip_rep_color="$green"
+					json_rep="average"
 				elif [ "$iqs_score" -lt 85 ]; then
 					ip_rep_data="! SUSPICIOUS"
 					ip_rep_color="$yellow"
+					json_rep="suspicious"
 				else
 					ip_rep_data="❌ BAD"
 					ip_rep_color="$red"
+					json_rep="bad"
 				fi
 				ip_rep_data="${ip_rep_color}${ip_rep_data} (Threat Score ${iqs_score}%)${default}"
-				[[ "$iqs_recentabuse" = true ]] && ip_rep_data+=" ${redbg} RECENT ABUSER ${default}"
-				[[ "$iqs_bot" = true ]] && ip_rep_data+=" ${redbg} BOT ${default}"
-				[[ "$iqs_proxy" = true ]] && ip_rep_data+=" ${redbg} PROXY ${default}"
-				[[ "$iqs_vpn" = true ]] && ip_rep_data+=" ${redbg} VPN ${default}"
-				[[ "$iqs_tor" = true ]] && ip_rep_data+=" ${redbg} TOR EXIT NODE ${default}"
-				[[ "$iqs_crawler" = true ]] && ip_rep_data+=" ${redbg} CRAWLER ${default}"
+				[[ "$iqs_recentabuse" = true ]] && ip_rep_data+=" ${redbg} RECENT ABUSER ${default}"; json_iqs_threat_tags+=",\"is_recent_abuser\": true"
+				[[ "$iqs_bot" = true ]] && ip_rep_data+=" ${redbg} BOT ${default}"; json_iqs_threat_tags+=",\"is_bot\": true"
+				[[ "$iqs_proxy" = true ]] && ip_rep_data+=" ${redbg} PROXY ${default}"; json_iqs_threat_tags+=",\"is_proxy\": true"
+				[[ "$iqs_vpn" = true ]] && ip_rep_data+=" ${redbg} VPN ${default}"; json_iqs_threat_tags+=",\"is_vpn\": true"
+				[[ "$iqs_tor" = true ]] && ip_rep_data+=" ${redbg} TOR EXIT NODE ${default}"; json_iqs_threat_tags+=",\"is_tor\": true"
+				[[ "$iqs_crawler" = true ]] && ip_rep_data+=" ${redbg} CRAWLER ${default}"; json_iqs_threat_tags+=",\"is_crawler\": true"
 			else
-				iqs_errmsg=$(echo "$iqs_output" | jq -r '.message')
+				iqs_errmsg=$(jq -r '.message' <<<"$iqs_output")
 				ip_rep_data+=" ${redbg} ERR ${default} (IpQualityScore API said: $iqs_errmsg)"
 			fi
 		fi
 	fi
 	# GreyNoise lookup
 	greynoise_data=$(curl -m5 -s "https://api.greynoise.io/v3/community/$1")
+	gn_noisy=false
+	gn_riot=""
+	gn_classification=""
+	gn_name=""
+	gn_json_is_knowngood=""
+	gn_json_is_knownbad=""
+	gn_json_aka=""
 	if [ -n "$greynoise_data" ]; then
 		gn_noisy=$(jq -r 'select (.noise != null) | .noise' <<<"$greynoise_data")
 		gn_riot=$(jq -r 'select (.riot != null) | .riot' <<<"$greynoise_data")
 		gn_classification=$(jq -r 'select (.classification != null) | .classification' <<<"$greynoise_data")
 		gn_name=$(jq -r 'select (.name != null) | .name' <<<"$greynoise_data")
-		[[ "$gn_name" = "unknown" ]] && gn_name="${default}" || gn_name="as \"$gn_name\" ${default}"
+		if [ "$gn_name" = "unknown" ]; then
+			gn_name="${default}"
+		else
+			gn_json_aka="$gn_name"
+			gn_name="as \"$gn_name\" ${default}"
+		fi
 		if [ "$gn_riot" = "true" ] || [ "$gn_classification" = "benign" ]; then
 			# GreyNoise known-good
 			ip_rep_data="${green}✓${default} ${greenbg} KNOWN GOOD $gn_name"
+			json_rep="good"
+			gn_json_is_knowngood=true
 			[[ "$gn_noisy" = "true" ]] && ip_rep_data+=" ${yellowbg} SEEN SCANNING ${default}"
 		elif [ "$gn_classification" = "malicious" ]; then
 			# GreyNoise known-bad
 			[[ "$is_blacklisted" != "1" ]] && ip_rep_data="${red}❌ BAD${default}" # tag the IP with a bad REP, it wasn't caught by StopForumSpam earlier
 			ip_rep_data+=" ${redbg} SCANNER $gn_name"
+			json_rep="bad"
+			gn_json_is_knownbad=true
 		else
 			# GreyNoise not listed, or tagged as "noisy" but not explicitly good or bad
 			[[ "$gn_noisy" = "true" ]] && ip_rep_data+=" ${yellowbg} SEEN SCANNING ${default}"
@@ -1424,13 +1626,21 @@ IPShodanLookup(){
 	ip_shodan_ports_data=""
 	ip_shodan_tags_data=""
 	ip_shodan_cve_data=""
+	shodan_cpes_json_output=""
+	shodan_ports_json_output=""
+	shodan_tags_json_output=""
+	shodan_vulns_json_output=""
 	StatusbarMessage "Collecting open ports, CPE and CVE data"
 	shodan_data=$(curl -m5 -s "https://internetdb.shodan.io/$1" | grep -v "No information available")
 	if [ -n "$shodan_data" ]; then
-		shodan_cpes=$(echo "$shodan_data" | jq -r 'select (.cpes != null) | .cpes[]')
-		shodan_ports=$(echo "$shodan_data" | jq -r 'select (.ports != null) | .ports[]')
-		shodan_tags=$(echo "$shodan_data" | jq -r 'select (.tags != null) | .tags[]')
-		shodan_cve_count=$(echo "$shodan_data" | jq 'select (.vulns != null) | .vulns | length')
+		shodan_cpes=$(jq -r '.cpes[]' <<<"$shodan_data")
+		shodan_cpes_json_output=$(jq -cMr 'select (.cpes | length > 0) | .cpes' <<<"$shodan_data")
+		shodan_ports=$(jq -r '.ports[]' <<<"$shodan_data")
+		shodan_ports_json_output=$(jq -cMr 'select (.ports | length > 0) | .ports' <<<"$shodan_data")
+		shodan_tags=$(jq -r '.tags[]' <<<"$shodan_data")
+		shodan_tags_json_output=$(jq -cMr 'select (.tags | length > 0) | .tags' <<<"$shodan_data")
+		shodan_cve_count=$(jq '.vulns | length' <<<"$shodan_data")
+		shodan_vulns_json_output=$(jq -cMr 'select (.vulns | length > 0) | .vulns' <<<"$shodan_data")
 
 		# fetch CPE types, possible values:
 		# a for Applications, h for Hardware, o for Operating Systems
@@ -1482,7 +1692,7 @@ IPShodanLookup(){
 
 AsnServerListener(){
 
-	DisableColorsIfHeadless
+	DisableColors
 
 	BoxHeader "ASN Lookup Server v$ASN_VERSION on $HOSTNAME"
 
@@ -1558,6 +1768,9 @@ Ctrl_C() {
 }
 
 BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
+
+	# no output if in json mode
+	[[ "$JSON_OUTPUT" = true ]] && return
 	local message="$*"
 
 	if [ "$IS_ASN_CHILD" = true ]; then
@@ -1605,10 +1818,10 @@ WhatIsMyIP() {
 	fi
 }
 
-DisableColorsIfHeadless() {
-	# avoid colors for headless server runs (e.g. systemd logs/status)
-	# and for listener runs
-	if [ "$IS_HEADLESS" = true ]; then
+DisableColors() {
+	# avoid colors for headless server runs (e.g. systemd logs/status),
+	# for listener runs and for json output
+	if [ "$IS_HEADLESS" = true ] || [ "$JSON_OUTPUT" = true ]; then
 		green=""
 		magenta=""
 		yellow=""
@@ -1739,7 +1952,7 @@ CheckPrerequisites() {
 			break
 		fi
 	done
-	if [ -z "$IQS_TOKEN" ]; then
+	if [ -z "$IQS_TOKEN" ] && [ "$JSON_OUTPUT" = false ]; then
 		# warn the user about the absence of in-depth IP reputation API token
 		if [ "$IS_HEADLESS" = true ]; then
 			line="------------------------------------------------------------"
@@ -1797,11 +2010,13 @@ HandleNcatClientConnection() {
 	# │ MAIN NCAT CLIENT CONNECTION HANDLER │
 	# ╰─────────────────────────────────────╯
 
-	DisableColorsIfHeadless
+	DisableColors
 
 	# HTTP response headers
 	http_ok='HTTP/1.0 200 OK\r\nContent-Type: text/html\r\n\r\n'
+	http_ok_json='HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n'
 	http_ko='HTTP/1.0 400\r\nContent-Type: text/html\r\n\r\n<html><body><h1>400 Bad Request</h1>\nYour request could not be processed.</body></html>'
+	http_ko_json='HTTP/1.0 400\r\nContent-Type: application/json\r\n'
 
 	# Javascript bookmarklet
 	js_bookmarklet='javascript:(function(){var asnserver="localhost:49200",target=window.location.hostname,'
@@ -2088,8 +2303,18 @@ HandleNcatClientConnection() {
 		# close the client connection without any output
 		exit 1
 
-	elif (echo -e "$line" | grep -Eq "^GET /asn_lookup&"); then
+	elif (echo -e "$line" | grep -Eq "^GET /asn_lookup&|^GET /asn_lookup_json&"); then
+		JSON_OUTPUT=false
+		starttime=$(date +'%s')
+		startdatetime=$(date +'%F %T')
+		reportdatetime=$(date +'%F %T (%Z)')
 
+		# detect output method requested by the user
+		method=$(echo -e "$line" | cut -d '&' -f 1)
+		if grep -q "json" <<<"$method"; then
+			# user requested json output from the server
+			JSON_OUTPUT=true
+		fi
 		# handle 'asn_lookup' command. This will start a lookup for the target.
 		# 1) trim down target length to at most 100 characters
 		# 2) extract target from client request (cut on ampersand first, space next, e.g.: 'GET /asn_lookup&google.com HTTP/1.1' should return google.com)
@@ -2111,13 +2336,15 @@ HandleNcatClientConnection() {
 			# this is a valid client request, set up request identifier
 			reqid=$(date +'%N')
 
-			starttime=$(date +'%s')
-			startdatetime=$(date +'%F %T')
-			reportdatetime=$(date +'%F %T (%Z)')
 			echo -e "[$startdatetime] ${yellowbg} STARTED ${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
 
-			# send HTTP 200 OK response and display HTML headers
-			echo -e "${http_ok}${html_header}"
+			if [ "$JSON_OUTPUT" = true ]; then
+				# send HTTP 200 OK response
+				echo -e "${http_ok_json}"
+			else
+				# send HTTP 200 OK response and display HTML headers
+				echo -e "${http_ok}${html_header}"
+			fi
 			countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$server_country" | jq -r '.[].name.common')
 			if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 				title_tag="title='$countryname'"
@@ -2125,178 +2352,193 @@ HandleNcatClientConnection() {
 				title_tag=""
 			fi
 			# display ASN server info table
-			echo -e "
-				<table style='border: none; white-space: nowrap';>
-					<tr>
-						<th colspan='5' style='background-color: $htmllightgray;'>ASN Lookup Server Report</th>
-					</tr>
-					<tr>
-						<th>Lookup Target</td>
-						<th>Client IP</td>
-						<th>Lookup Server ASN</td>
-						<th>Lookup Server Hostname</td>
-						<th>Date and time</td>
-					</tr>
-					<tr>
-						<td style='color:$htmlred;'>$host</td>
-						<td style='color:$htmlyellow;'>$NCAT_REMOTE_ADDR</td>
-						<td style='color:$htmlgreen;'><a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlgreen;\">$found_asn</a> ($found_asname
-						<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$server_country.svg' $title_tag style='height:1.05em; border-radius: 0; vertical-align: middle;'>)
-						</td>
-						<td style='color:$htmlmagenta;'>$HOSTNAME</td>
-						<td style='color:$htmlwhite;'>$reportdatetime</td>
-					</tr>
-				</table>
-				<hr />
-			"
-			# launch ASN trace to URL and convert its output to HTML
+			if [ "$JSON_OUTPUT" = false ]; then
+				echo -e "
+					<table style='border: none; white-space: nowrap';>
+						<tr>
+							<th colspan='5' style='background-color: $htmllightgray;'>ASN Lookup Server Report</th>
+						</tr>
+						<tr>
+							<th>Lookup Target</td>
+							<th>Client IP</td>
+							<th>Lookup Server ASN</td>
+							<th>Lookup Server Hostname</td>
+							<th>Date and time</td>
+						</tr>
+						<tr>
+							<td style='color:$htmlred;'>$host</td>
+							<td style='color:$htmlyellow;'>$NCAT_REMOTE_ADDR</td>
+							<td style='color:$htmlgreen;'><a href=\"/asn_lookup&AS$found_asn\" style=\"color: $htmlgreen;\">$found_asn</a> ($found_asname
+							<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$server_country.svg' $title_tag style='height:1.05em; border-radius: 0; vertical-align: middle;'>)
+							</td>
+							<td style='color:$htmlmagenta;'>$HOSTNAME</td>
+							<td style='color:$htmlwhite;'>$reportdatetime</td>
+						</tr>
+					</table>
+					<hr />
+				"
+			fi
 
 			ServerDebugPrint "Spawning child"
-			INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false TERM=dumb "$0" "$host" |
-			{
-				#* ╭──────────────────────────────────────────────╮
-				#* │ Main child output parsing loop command group │
-				#* ╰──────────────────────────────────────────────╯
 
-				TextHeader() {
-					headerwidth="150"
-					padchar="_"
-					padding="$(printf '%0.1s' ' '{1..500})"
-					printf "%${headerwidth}s\n\n" "" | tr " " "${padchar}"
-					printf '%*.*s %s %*.*s\n' 0 "$(((headerwidth-2-${#1})/2))" "$padding" "$1" 0 "$(((headerwidth-1-${#1})/2))" "$padding"
-					printf "%${headerwidth}s\n" "" | tr " " "${padchar}"
+			if [ "$JSON_OUTPUT" = true ]; then
+				# launch ASN trace to URL and output JSON to the client
+				INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false INTERNAL_ASNSERVER_JSON_OUTPUT=true TERM=dumb "$0" "$host" |
+				{
+					#* ╭─────────────────────────────────────────────────────╮
+					#* │ Main child output parsing loop command group (JSON) │
+					#* ╰─────────────────────────────────────────────────────╯
+					while IFS= read -r outputline; do
+						echo -en "$outputline"
+					done
 				}
+			else
+				# launch ASN trace to URL and convert its output to HTML
+				INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false TERM=dumb "$0" "$host" |
+				{
+					#* ╭─────────────────────────────────────────────────────╮
+					#* │ Main child output parsing loop command group (HTML) │
+					#* ╰─────────────────────────────────────────────────────╯
 
-				# initialize textual trace log variable
-				tracedata=""
-				while IFS= read -r outputline; do
-					# ServerDebugPrint "[$reqid] CHILD OUTPUT: $outputline" "false"
-					if echo -e "$outputline" | grep -Eq "^BOXHEADER "; then
-						# child instance is displaying a BoxHeader, transform it into a <table>
-						message=$(echo -e "$outputline" | cut -d ' ' -f 2-)
-						echo -e "<table style='width: 30%; height: 5%;'><tr><th style='background-color: $htmlblack; color: $htmlwhite;'>$message</th></tr></table>\n"
-						# append boxheader to tracefile
-						# tracedata+="$(BoxHeader "$message")\n"
-						tracedata+=$(TextHeader "[ $message ]")
-						tracedata+="\n\n"
-						if echo -e "$message" | grep -q "Trace to "; then
-							echo -e "<script>top.document.title='[IN PROGRESS] Path trace to $host'</script>"
-						fi
-					elif grep -Eq "#COUNTRYCODE" <<<"$outputline"; then
-						# child instance is indicating a country code for the current IP, map it to a SVG and display it on the HTML report
-						# alternative URLs for the flag SVGs:
-						# JSdelivr CDN: https://cdn.jsdelivr.net/npm/flag-icon-css/flags/4x3/$cc.svg
-						# Github Pages: https://lipis.github.io/flag-icon-css/flags/4x3/$cc.svg
-						# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
-						cc=$(echo -e "$outputline" | awk '{print $NF}')
-						# lookup full country name
-						countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
-						if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
-							title_tag="title='$countryname'"
-						else
-							title_tag=""
-						fi
-						target_flag_img="<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg' $title_tag style='height:1.05em; border-radius: 0; vertical-align: middle;'>"
-						outputline=$(echo -e "$outputline" | sed -e 's/#COUNTRYCODE.*//')
-						tracedata+="$outputline\n"
-						outputline=$(echo -e "$outputline" | tr -d '\r\n' | aha -b -n)
-						printf "%s%s\n" "$outputline" "$target_flag_img"
-					elif grep -Eq "<a href=" <<<"$outputline"; then
-						href_stripped=$(awk '{gsub(/<[^>]*>/,""); print }' <<<"$outputline")
-						tracedata+="$href_stripped\n"
-						printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
-					elif grep -Eq "#PERFORMWHOIS" <<<"$outputline"; then
-						# child instance is asking us to perform a whois lookup for the target domain
-						# and show it to the user in the form of a tooltip
-						targetdomain=$(echo -e "$outputline" | awk '{print $NF}')
-						targetdomaindata=$(whois -H "$targetdomain" | grep -Ev "^\*")
-						hostio_href="<a href=\"https://host.io/$targetdomain\" target=\"_blank\" style=\"color: $htmlyellow; font-style: italic;\">host.io</a>"
-						hostio_link=" <span style=\"font-size: 75%; color: $htmlyellow;\">$hostio_href🔗</span>"
-						read -r -d '' whoisbutton <<- END_OF_MODAL_HTML
-							<!-- Trigger/Open The Modal -->
-							<button id="whoisbtn" style="cursor:pointer; background: none!important; border: none; padding: 0!important; text-decoration: underline dotted; font-size: 75%; font-style: italic; color: $htmlyellow;">WHOIS</button>
-							<!-- The Modal -->
-							<div id="myModal" class="modal">
-								<!-- Modal content -->
-								<div class="modal-content">
-									<span class="close"></span>
-									<p style="font-size: 120%; font-style: italic; text-align: center;">Whois information for domain <span style="font-weight: bold; color: $htmlred;">$targetdomain</span><br /><pre>$targetdomaindata</pre></p>
+					TextHeader() {
+						headerwidth="150"
+						padchar="_"
+						padding="$(printf '%0.1s' ' '{1..500})"
+						printf "%${headerwidth}s\n\n" "" | tr " " "${padchar}"
+						printf '%*.*s %s %*.*s\n' 0 "$(((headerwidth-2-${#1})/2))" "$padding" "$1" 0 "$(((headerwidth-1-${#1})/2))" "$padding"
+						printf "%${headerwidth}s\n" "" | tr " " "${padchar}"
+					}
+
+					# initialize textual trace log variable
+					tracedata=""
+					while IFS= read -r outputline; do
+						# ServerDebugPrint "[$reqid] CHILD OUTPUT: $outputline" "false"
+						if echo -e "$outputline" | grep -Eq "^BOXHEADER "; then
+							# child instance is displaying a BoxHeader, transform it into a <table>
+							message=$(echo -e "$outputline" | cut -d ' ' -f 2-)
+							echo -e "<table style='width: 30%; height: 5%;'><tr><th style='background-color: $htmlblack; color: $htmlwhite;'>$message</th></tr></table>\n"
+							# append boxheader to tracefile
+							# tracedata+="$(BoxHeader "$message")\n"
+							tracedata+=$(TextHeader "[ $message ]")
+							tracedata+="\n\n"
+							if echo -e "$message" | grep -q "Trace to "; then
+								echo -e "<script>top.document.title='[IN PROGRESS] Path trace to $host'</script>"
+							fi
+						elif grep -Eq "#COUNTRYCODE" <<<"$outputline"; then
+							# child instance is indicating a country code for the current IP, map it to a SVG and display it on the HTML report
+							# alternative URLs for the flag SVGs:
+							# JSdelivr CDN: https://cdn.jsdelivr.net/npm/flag-icon-css/flags/4x3/$cc.svg
+							# Github Pages: https://lipis.github.io/flag-icon-css/flags/4x3/$cc.svg
+							# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
+							cc=$(echo -e "$outputline" | awk '{print $NF}')
+							# lookup full country name
+							countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
+							if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
+								title_tag="title='$countryname'"
+							else
+								title_tag=""
+							fi
+							target_flag_img="<img src='https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg' $title_tag style='height:1.05em; border-radius: 0; vertical-align: middle;'>"
+							outputline=$(echo -e "$outputline" | sed -e 's/#COUNTRYCODE.*//')
+							tracedata+="$outputline\n"
+							outputline=$(echo -e "$outputline" | tr -d '\r\n' | aha -b -n)
+							printf "%s%s\n" "$outputline" "$target_flag_img"
+						elif grep -Eq "<a href=" <<<"$outputline"; then
+							href_stripped=$(awk '{gsub(/<[^>]*>/,""); print }' <<<"$outputline")
+							tracedata+="$href_stripped\n"
+							printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
+						elif grep -Eq "#PERFORMWHOIS" <<<"$outputline"; then
+							# child instance is asking us to perform a whois lookup for the target domain
+							# and show it to the user in the form of a tooltip
+							targetdomain=$(echo -e "$outputline" | awk '{print $NF}')
+							targetdomaindata=$(whois -H "$targetdomain" | grep -Ev "^\*")
+							hostio_href="<a href=\"https://host.io/$targetdomain\" target=\"_blank\" style=\"color: $htmlyellow; font-style: italic;\">host.io</a>"
+							hostio_link=" <span style=\"font-size: 75%; color: $htmlyellow;\">$hostio_href🔗</span>"
+							read -r -d '' whoisbutton <<- END_OF_MODAL_HTML
+								<!-- Trigger/Open The Modal -->
+								<button id="whoisbtn" style="cursor:pointer; background: none!important; border: none; padding: 0!important; text-decoration: underline dotted; font-size: 75%; font-style: italic; color: $htmlyellow;">WHOIS</button>
+								<!-- The Modal -->
+								<div id="myModal" class="modal">
+									<!-- Modal content -->
+									<div class="modal-content">
+										<span class="close"></span>
+										<p style="font-size: 120%; font-style: italic; text-align: center;">Whois information for domain <span style="font-weight: bold; color: $htmlred;">$targetdomain</span><br /><pre>$targetdomaindata</pre></p>
+									</div>
 								</div>
-							</div>
-							<script>
-								// Get the modal
-								var modal = document.getElementById("myModal");
+								<script>
+									// Get the modal
+									var modal = document.getElementById("myModal");
 
-								// Get the button that opens the modal
-								var btn = document.getElementById("whoisbtn");
+									// Get the button that opens the modal
+									var btn = document.getElementById("whoisbtn");
 
-								// Get the <span> element that closes the modal
-								var span = document.getElementsByClassName("close")[0];
+									// Get the <span> element that closes the modal
+									var span = document.getElementsByClassName("close")[0];
 
-								// When the user clicks the button, open the modal
-								btn.onclick = function() {
-								modal.style.display = "block";
-								}
+									// When the user clicks the button, open the modal
+									btn.onclick = function() {
+									modal.style.display = "block";
+									}
 
-								// When the user clicks on <span> (x), close the modal
-								span.onclick = function() {
-								modal.style.display = "none";
-								}
-
-								// When the user clicks anywhere outside of the modal, close it
-								window.onclick = function(event) {
-								if (event.target == modal) {
+									// When the user clicks on <span> (x), close the modal
+									span.onclick = function() {
 									modal.style.display = "none";
-								}
-								}
-							</script>
-						END_OF_MODAL_HTML
-						outputline=$(echo -e "$outputline" | sed -e 's/#PERFORMWHOIS.*//')
-						tracedata+="${outputline}\n"
-						outputline+="(<nobr>$whoisbutton</nobr>•$hostio_link )"
-						printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
-					else
-						tracedata+="$outputline\n"
-						printf "%s\n" "$outputline" | aha -b -n
-					fi
-					printf "<script>window.scrollTo(0,document.body.scrollHeight);</script>" # cheers https://stackoverflow.com/a/55471426
-				done
+									}
 
-				#* Child asn instance finished, finish up the html
+									// When the user clicks anywhere outside of the modal, close it
+									window.onclick = function(event) {
+									if (event.target == modal) {
+										modal.style.display = "none";
+									}
+									}
+								</script>
+							END_OF_MODAL_HTML
+							outputline=$(echo -e "$outputline" | sed -e 's/#PERFORMWHOIS.*//')
+							tracedata+="${outputline}\n"
+							outputline+="(<nobr>$whoisbutton</nobr>•$hostio_link )"
+							printf "%s\n" "$outputline" | aha -b -n | sed -e 's/&lt;/</g' -e 's/&gt;/>/g' -e 's/&quot;/"/g' -e 's/&amp;/&/g'
+						else
+							tracedata+="$outputline\n"
+							printf "%s\n" "$outputline" | aha -b -n
+						fi
+						printf "<script>window.scrollTo(0,document.body.scrollHeight);</script>" # cheers https://stackoverflow.com/a/55471426
+					done
 
-				# append text footer to tracedata (will only be displayed when sharing results on termbin)
-				footermsg="Report generated by ASN Lookup Server v${ASN_VERSION} (https://github.com/nitefood/asn) on $reportdatetime"
-				footermsglen=${#footermsg}
-				footerhr=$(printf "%150s" "" | tr " " "_")
-				tracedata+="$(printf "%s\n\n%*s\n" "$footerhr" $(((footermsglen+150)/2)) "$footermsg")"
+					#* Child asn instance finished, finish up the html
 
-				# print closing headers
-				endtime=$(date +%s)
-				runtime=$((endtime-starttime))
-				echo -e "<div style='text-align: center;'>" \
-							"<hr>" \
-							"<span style='color: darkgray; font-style: italic; font-size: 0.8em;'>" \
-								"Generated by <a href='https://github.com/nitefood/asn' target='_blank'>ASN Lookup Server</a> v${ASN_VERSION} running on $HOSTNAME in ${runtime}s (request ID: $reqid)" \
-							"</span>" \
-							"<br /><br /><span id='share-container'><button id='termbinShareButton' class='sharebutton' onclick='termbinshare()'>Share Results</button></span>" \
-							"<div id='share-output-container' class='textoutput hidden'> </div>" \
-							"<a href='#' onclick=\"document.getElementById('help-container').classList.toggle('hidden');return false;\" style='color: darkgray; font-size: 0.7em;'>What is that?</a>" \
-							"\n<span id='help-container' class='textoutput hidden' style='color: $htmlgreen;'>This report will be shared on <a href='https://termbin.com' target='_blank'>Termbin</a> (a Pastebin-like sharing service for terminal data).\nTermbin pastes have a lifespan of 1 month.</span>" \
-						"</div>" \
-						"</pre>"
+					# append text footer to tracedata (will only be displayed when sharing results on termbin)
+					footermsg="Report generated by ASN Lookup Server v${ASN_VERSION} (https://github.com/nitefood/asn) on $reportdatetime"
+					footermsglen=${#footermsg}
+					footerhr=$(printf "%150s" "" | tr " " "_")
+					tracedata+="$(printf "%s\n\n%*s\n" "$footerhr" $(((footermsglen+150)/2)) "$footermsg")"
 
-				# create a hidden div with the gzipped+b64 encoded trace output for optional termbin sharing
-				tracedata_encoded="$(StripAnsi "$tracedata" | gzip | base64 -w0)"
-				echo -e "<div style='display: none;' id='tracedata'>${tracedata_encoded}</div>"
+					# print closing headers
+					endtime=$(date +%s)
+					runtime=$((endtime-starttime))
+					echo -e "<div style='text-align: center;'>" \
+								"<hr>" \
+								"<span style='color: darkgray; font-style: italic; font-size: 0.8em;'>" \
+									"Generated by <a href='https://github.com/nitefood/asn' target='_blank'>ASN Lookup Server</a> v${ASN_VERSION} running on $HOSTNAME in ${runtime}s (request ID: $reqid)" \
+								"</span>" \
+								"<br /><br /><span id='share-container'><button id='termbinShareButton' class='sharebutton' onclick='termbinshare()'>Share Results</button></span>" \
+								"<div id='share-output-container' class='textoutput hidden'> </div>" \
+								"<a href='#' onclick=\"document.getElementById('help-container').classList.toggle('hidden');return false;\" style='color: darkgray; font-size: 0.7em;'>What is that?</a>" \
+								"\n<span id='help-container' class='textoutput hidden' style='color: $htmlgreen;'>This report will be shared on <a href='https://termbin.com' target='_blank'>Termbin</a> (a Pastebin-like sharing service for terminal data).\nTermbin pastes have a lifespan of 1 month.</span>" \
+							"</div>" \
+							"</pre>"
 
-				echo -e "$html_footer"
-			}
+					# create a hidden div with the gzipped+b64 encoded trace output for optional termbin sharing
+					tracedata_encoded="$(StripAnsi "$tracedata" | gzip | base64 -w0)"
+					echo -e "<div style='display: none;' id='tracedata'>${tracedata_encoded}</div>"
 
+					echo -e "$html_footer"
+				}
+			fi
 			#  end the ncat client connection for this request ID
 			childretval="$?"
 			if [ "$childretval" -eq 0 ]; then
 				ServerDebugPrint "Child process completed successfully with exit code $?"
-				echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
+				[[ "$JSON_OUTPUT" = false ]] && echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
 				# log lookup request completed on server side
 				echo -e "[$(date +"%F %T")] ${greenbg}COMPLETED${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
 			else
@@ -2308,8 +2550,15 @@ HandleNcatClientConnection() {
 			fi
 		else
 			# send HTTP code 400 Bad Request to client
-			echo -e "$http_ko"
-
+			if [ "$JSON_OUTPUT" = false ]; then
+				echo -e "$http_ko"
+			else
+				echo -e "$http_ko_json"
+				userinput="$host"
+				json_resultcount=0
+				final_json_output=""
+				PrintErrorAndExit "bad request"
+			fi
 			# log lookup request ignored on server side
 			echo -e "[$(date +"%F %T")] ${redbg} IGNORED ${default} Malformed data in request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default}" >&2
 		fi
@@ -2416,6 +2665,15 @@ fi
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
 SERVER_MODE=false
+JSON_OUTPUT=false
+JSON_PRETTY=false
+status_json_output="ok"
+reason_json_output="success"
+json_request_time=$(date "+%Y-%m-%dT%H:%M:%S")
+starttime="$(date +%s)"
+final_json_output=""
+json_target_type="unknown"
+json_resultcount=0
 ASN_DEBUG=false
 
 # optspec contains:
@@ -2424,7 +2682,7 @@ ASN_DEBUG=false
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvln:d:o:s:"
+optspec=":hvlj:J:n:d:o:s:"
 
 OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
 while getopts "$optspec" optchar; do {
@@ -2456,6 +2714,19 @@ while getopts "$optspec" optchar; do {
 		"n")
 			TRACEASNPATH=false
 			DETAILED_TRACE=false
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"j")
+			TRACEASNPATH=false
+			DETAILED_TRACE=false
+			JSON_OUTPUT=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"J")
+			TRACEASNPATH=false
+			DETAILED_TRACE=false
+			JSON_OUTPUT=true
+			JSON_PRETTY=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"d")
@@ -2559,6 +2830,12 @@ if [ "$SERVER_MODE" = true ]; then
 	AsnServerListener
 fi
 
+# handle json output for child instances
+if [ -n "$INTERNAL_ASNSERVER_JSON_OUTPUT" ]; then
+	JSON_OUTPUT=true
+	TRACEASNPATH=false
+fi
+
 BoxHeader "ASN lookup for $userinput"
 
 if [ "$FORCE_ORGSEARCH" = true ]; then
@@ -2589,26 +2866,33 @@ if [ -z "$input" ]; then
 			# run the IP regex again in case input is an IP(v6) URL (e.g. https://1.2.3.4/) and skip resolution if an IP is found
 			ip=$(echo "$userinput" | grep -Eo "$ipv4v6regex")
 			if [ -z "$ip" ]; then
-				if [ "$IS_ASN_CHILD" = true ]; then
+				if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
+					# this instance is an ASN server child (not in JSON mode)
 					targetdomain=$(rev <<<"$userinput" | cut -d '.' -f 1,2 | rev)
 					echo -e "\n${blue}- Resolving \"$userinput\"... #PERFORMWHOIS $targetdomain\n"
-				else
+				elif [[ "$JSON_OUTPUT" = false ]]; then
+					# normal output
 					echo -e -n "\n${blue}- Resolving \"$userinput\"... "
 				fi
+				json_target_type="hostname"
 				ip=$(ResolveHostnameToIPList "$userinput")
 				if [ -z "$ip" ]; then
 					resolver_error="${red}Error: unable to resolve hostname${default}"
-					if [ "$IS_ASN_CHILD" = true ]; then
+					if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
 						echo -e "$resolver_error\n"
-					else
+					elif [ "$IS_ASN_CHILD" = false ] && [ "$JSON_OUTPUT" = false ]; then
+						# normal output
 						echo -e "${resolver_error}\n\n(Hint: if you wanted to search by organization, try the ${blue}'-o'${default} switch)\n" >&2
+					else
+						# json output (both ASN child and normal instance)
+						PrintErrorAndExit "unable to resolve hostname"
 					fi
 					exit 1
 				fi
 			fi
 			numips=$(echo "$ip" | wc -l)
 			[[ $numips = 1 ]] && s="" || s="es"
-			echo -e "${blue}$numips IP address$s found:${default}\n"
+			[[ "$JSON_OUTPUT" = false ]] && echo -e "${blue}$numips IP address$s found:${default}\n"
 			# grab the longest IP to properly size output padding
 			longest=0
 			for singleip in $ip; do
@@ -2618,8 +2902,8 @@ if [ -z "$input" ]; then
 			# output actual results
 			ip_to_trace=""
 			WhatIsMyIP
-			if [ "$IS_ASN_CHILD" = true ] && [ "$numips" -gt 1 ]; then
-				# Running headless as an ASN server connhandler child, and more than 1 IP detected.
+			if [ "$IS_ASN_CHILD" = true ] && [ "$numips" -gt 1 ] && [ "$JSON_OUTPUT" = false ]; then
+				# Running headless as an ASN server connhandler child, not in JSON mode, and more than 1 IP detected.
 				# Speed up the operation and only process the first appropriate IP (v4/v6)
 				if [ "$HAVE_IPV6" = true ] && grep -q ':' <<<"$ip"; then
 					ip_to_trace=$(echo "$ip" | grep -m1 ':')
@@ -2644,12 +2928,17 @@ if [ -z "$input" ]; then
 				TraceASPath "$ip_to_trace"
 			else
 				for singleip in $ip; do
+					if [ -n "$ip_to_trace" ] && [ "$JSON_OUTPUT" = true ]; then
+						# add a comma to separate json output in case we hit multiple dns lookup results
+						final_json_output+=","
+					fi
 					LookupASNAndRouteFromIP "$singleip"
 					WhoisIP "$singleip"
 					PrintReputationAndShodanData "$singleip"
 					# save the first IP from the dns lookup result
 					[[ -z "$ip_to_trace" ]] && ip_to_trace="$singleip"
 				done
+				[[ "$JSON_OUTPUT" = true ]] && PrintJsonOutput
 				# Check if AS path tracing is requested
 				if [ "$TRACEASNPATH" = true ]; then
 					# In case of multiple IPs (DNS RR), trace the first one.
@@ -2662,8 +2951,10 @@ if [ -z "$input" ]; then
 					TraceASPath "$ip_to_trace"
 				fi
 			fi
-			tput sgr0
-			echo ""
+			if [ "$JSON_OUTPUT" = false ]; then
+				tput sgr0
+				echo ""
+			fi
 			exit 0
 		else
 			# not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
@@ -2675,66 +2966,105 @@ if [ -z "$input" ]; then
 		fi
 	else
 		# Input is an ASN
+		json_target_type="asn"
 		WhoisASN "$asn"
 		if [ -z "$found_asname" ]; then
 			PrintErrorAndExit "Error: no data found for AS${asn}"
 		fi
-		echo -en "\n${bluebg} AS Number     ──>${default} ${red}${asn}"
-		if [ "$IS_ASN_CHILD" = true ]; then
-			ripestat_link="<a href=\"https://stat.ripe.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">RIPEStat</a>"
-			he_link="<a href=\"https://bgp.he.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">HE.NET</a>"
-			bgpview_link="<a href=\"https://bgpview.io/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPView</a>"
-			peeringdb_link="<a href=\"https://www.peeringdb.com/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">PeeringDB</a>"
-			echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $peeringdb_link🔗)</span>"
+		if [ "$JSON_OUTPUT" = true ]; then
+			# JSON output
+			final_json_output+="{"
+			final_json_output+="\"asn\":\"${asn}\""
+			final_json_output+=",\"asname\":\"${found_asname}\""
+			final_json_output+=",\"org\":\"${found_org}\""
+			final_json_output+=",\"registration_date\":\"${found_createdate}\""
+			GetIXPresence "$asn"
+			final_json_output+=",\"ixp_presence\":$json_ixps"
+			QueryRipestat "$asn"
+			# peer count
+			if [ -n "$ripestat_routing_data" ]; then
+				final_json_output+=",\"prefix_count_v4\":${ripestat_ipv4}"
+				final_json_output+=",\"prefix_count_v6\":${ripestat_ipv6}"
+				final_json_output+=",\"bgp_peer_count\":${ripestat_bgp}"
+			fi
+			# peer list
+			if [ -n "$ripestat_neighbours_data" ]; then
+				final_json_output+=",\"bgp_peers\":{"
+				final_json_output+="\"upstream\":$json_upstream_peers"
+				final_json_output+=",\"downstream\":$json_downstream_peers"
+				final_json_output+=",\"uncertain\":$json_uncertain_peers"
+				final_json_output+="}"
+			fi
+			# announced prefixes
+			final_json_output+=",\"announced_prefixes\":{"
+			final_json_output+="\"v4\":$json_ipv4_inetnums"
+			final_json_output+=",\"v6\":$json_ipv6_inetnums"
+			final_json_output+="}}"
+
+			PrintJsonOutput
+		else
+			# normal output
+			echo -en "\n${bluebg} AS Number     ──>${default} ${red}${asn}"
+			if [ "$IS_ASN_CHILD" = true ]; then
+				ripestat_link="<a href=\"https://stat.ripe.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">RIPEStat</a>"
+				he_link="<a href=\"https://bgp.he.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">HE.NET</a>"
+				bgpview_link="<a href=\"https://bgpview.io/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPView</a>"
+				peeringdb_link="<a href=\"https://www.peeringdb.com/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">PeeringDB</a>"
+				echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $peeringdb_link🔗)</span>"
+			fi
+			echo ""
+			echo -en "${bluebg} AS Name       ──>${default} ${green}${found_asname}"
+			if [ "$IS_ASN_CHILD" = true ]; then
+				# signal to the parent connhandler the correct country flag to display for this ASN
+				flag_icon_cc=$(echo "${found_asname##*,}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+				[[ -n "$flag_icon_cc" ]] && echo -n " #COUNTRYCODE $flag_icon_cc"
+			fi
+			printf "\n"
+			echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_org}"
+			echo -e "${bluebg} AS Reg. date  ──>${default} ${white}${found_createdate}"
+			echo -en "${bluebg} Peering @IXPs ──>${default} "
+			GetIXPresence "$asn"
+			BoxHeader "BGP informations for AS${asn} (${found_asname})"
+			echo ""
+			QueryRipestat "${asn}"
+			if [ -n "$ripestat_routing_data" ]; then
+				echo -e "${bluebg} IPv4 Prefixes  ────>${default} ${green}${ripestat_ipv4}"
+				echo -e "${bluebg} IPv6 Prefixes  ────>${default} ${yellow}${ripestat_ipv6}"
+				echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}\n"
+			fi
+			if [ -n "$ripestat_neighbours_data" ]; then
+				[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
+				[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
+				[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
+				BoxHeader "Peering informations for AS${asn} (${found_asname})"
+				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
+				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
+				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
+			fi
+			BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
+			echo -e "\n${green}───── IPv4 ─────${default}"
+			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
+			echo -e "\n${yellow}───── IPv6 ─────${default}"
+			[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
+			tput sgr0
+			echo ""
 		fi
-		echo ""
-		echo -en "${bluebg} AS Name       ──>${default} ${green}${found_asname}"
-		if [ "$IS_ASN_CHILD" = true ]; then
-			# signal to the parent connhandler the correct country flag to display for this ASN
-			flag_icon_cc=$(echo "${found_asname##*,}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
-			[[ -n "$flag_icon_cc" ]] && echo -n " #COUNTRYCODE $flag_icon_cc"
-		fi
-		printf "\n"
-		echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_org}"
-		echo -e "${bluebg} AS Reg. date  ──>${default} ${white}${found_createdate}"
-		echo -en "${bluebg} Peering @IXPs ──>${default} "
-		GetIXPresence "$asn"
-		BoxHeader "BGP informations for AS${asn} (${found_asname})"
-		echo ""
-		QueryRipestat "${asn}"
-		if [ -n "$ripestat_routing_data" ]; then
-			echo -e "${bluebg} IPv4 Prefixes  ────>${default} ${green}${ripestat_ipv4}"
-			echo -e "${bluebg} IPv6 Prefixes  ────>${default} ${yellow}${ripestat_ipv6}"
-			echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}\n"
-		fi
-		if [ -n "$ripestat_neighbours_data" ]; then
-			[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
-			[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
-			[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
-			BoxHeader "Peering informations for AS${asn} (${found_asname})"
-			echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
-			echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
-			echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
-		fi
-		BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
-		echo -e "\n${green}───── IPv4 ─────${default}"
-		[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
-		echo -e "\n${yellow}───── IPv6 ─────${default}"
-		[[ -n "$ipv6_inetnums" ]] && echo -e "${yellow}${ipv6_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
-		tput sgr0
-		echo ""
 		exit 0
 	fi
 else
 	# Input is an IP address
+	grep -q ":" <<<"$input" && json_target_type="ipv6" || json_target_type="ipv4"
 	# Perform IP lookup
 	LookupASNAndRouteFromIP "$input"
 	(( longest=${#input}+1 ))
 	WhoisIP "$input"
 	PrintReputationAndShodanData "$input"
+	[[ "$JSON_OUTPUT" = true ]] && PrintJsonOutput
 	# Perform AS path tracing if requested
 	[[ "$TRACEASNPATH" = true ]] && TraceASPath "$input"
-	tput sgr0
-	echo ""
+	if [ "$JSON_OUTPUT" = false ]; then
+		tput sgr0
+		echo ""
+	fi
 	exit 0
 fi
