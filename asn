@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72"
+ASN_VERSION="0.72.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -22,9 +22,18 @@ WhoisASN(){
 	found_asname=$(host -t TXT "AS${1}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
 	if [ -n "$found_asname" ]; then
 		((json_resultcount++))
-		pwhois_asn_info=$(whois -h whois.pwhois.org "registry source-as=$1" | grep -E "^Org-Name:|^Create-Date:")
+		pwhois_full_asn_info=$(whois -h whois.pwhois.org "registry source-as=$1")
+		# fetch last org only (in case there are multiple orgs listed for this AS)
+		pwhois_asn_info=$(tac <<<"$pwhois_full_asn_info" | grep -m1 -E "^Org-Name")
+		pwhois_asn_info+="\n"
+		pwhois_asn_info+=$(tac <<<"$pwhois_full_asn_info" | grep -m1 -E "^Create-Date")
+		found_holder=$(timeout 5 curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -r 'select (.data.holder != null) | .data.holder')
+		# RIPE usually outputs holder as "ASNAME - actual company name", trim it to just the company name in such cases
+		found_holder=$(awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' <<<"$found_holder")
 		found_org=$(echo -e "$pwhois_asn_info" | grep -E "^Org-Name:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
 		[[ -z "$found_org" ]] && found_org="N/A"
+		found_abuse_contact=$(timeout 5 curl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$asn&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts[0] != null) | .data.abuse_contacts[0]')
+		[[ -z "$found_abuse_contact" ]] && found_abuse_contact="-"
 		pwhois_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
 		if [ "$JSON_OUTPUT" = true ]; then
 			[[ -z "$pwhois_createdate" ]] && found_createdate="" || found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%dT%H:%M:%S")
@@ -46,15 +55,17 @@ QueryRipestat(){
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
 	ripestat_neighbours_data=$(timeout 5 curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
-	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
-	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
-	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse | .[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
+	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
+	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
+	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
 	if [ "$JSON_OUTPUT" = true ]; then
+		json_abuse_contacts=$(timeout 5 curl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -cM 'select (.data.abuse_contacts != null) | .data.abuse_contacts')
+		[[ -z "$json_abuse_contacts" ]] && json_abuse_contacts="[]"
 		json_upstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$upstream_peers")
 		json_downstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$downstream_peers")
 		json_uncertain_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$uncertain_peers")
 	else
-		RESOLVE_COUNT=20
+		RESOLVE_COUNT=8
 		OUTPUT_PEERS_PER_LINE=4
 
 		# resolve AS names of the first n upstreams
@@ -144,20 +155,102 @@ QueryRipestat(){
 
 	StatusbarMessage "Retrieving prefix allocations and announcements for AS$1 ($found_asname)"
 	ipv4_inetnums=""
+	ipv4_other_inetnums=""
 	ipv6_inetnums=""
-	for prefix in $(timeout 5 curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes | .[] | .prefix'); do
-		if [[ "$prefix" == *':'* ]]; then
-			inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
-							grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
-			for inet6num in $inet6nums; do
-				# exclude RIR supernets
-				prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
-				[[ "$prefix_size" -lt 29 ]] && continue || ipv6_inetnums+="${inet6num}\n"
-			done
+	json_ipv4_other_inetnums=""
+	json_ipv6_other_inetnums=""
+	ripe_prefixes=$(timeout 5 curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
+	json_ripe_prefixes=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | {v4:map(select(contains(":")|not)), v6:map(select(contains(":")))}' <<<"$ripe_prefixes")
+	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
+	ipv4_ripe_prefixes_count=$(wc -l <<<"$ipv4_ripe_prefixes")
+	ipv6_ripe_prefixes=$(grep ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
+	ipv6_ripe_prefixes_count=$(wc -l <<<"$ipv6_ripe_prefixes")
+	prefixcounter=0
+	for prefix in $ipv6_ripe_prefixes; do
+		((prefixcounter++))
+		StatusbarMessage "Retrieving information for IPv6 prefix $prefixcounter/$ipv6_ripe_prefixes_count"
+		inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
+						grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
+		for inet6num in $inet6nums; do
+			# exclude RIR supernets
+			prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
+			[[ "$prefix_size" -lt 29 ]] && continue || ipv6_inetnums+="${inet6num}\n"
+		done
+	done
+
+	# open persistent tcp connection to RIPE whois server
+	exec 3<>/dev/tcp/whois.ripe.net/43
+	prefixcounter=0
+	for prefix in $ipv4_ripe_prefixes; do
+		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
+		((prefixcounter++))
+		# old way (one whois lookup per prefix)
+		# parent_inetnum=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
+		# 				grep -E -m1 "^inetnum" | awk '{print $2"-"$4}' | xargs ipcalc -r 2>/dev/null | grep -v "deaggregate")
+		# new way (direct tcp connection to whois server with persistent whois connection)
+		echo -e "-k -T inetnum -K -L --resource $prefix" >&3
+		whoisoutput=""
+		# read whois output from the tcp stream line by line
+		while IFS= read -r -u 3 whoisoutputline; do
+				if [ -n "$whoisoutputline" ]; then
+					whoisoutput+="$whoisoutputline\n"
+					continue
+				fi
+				# last line was empty, check if next line is empty too
+				# if we get two empty lines in a row, the whois output is finished
+				IFS= read -r -u 3 whoisoutputline
+				[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
+		done
+		parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
+		if [ -n "$parent_inetnum" ]; then
+			parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum" | xargs ipcalc -r 2>/dev/null | tail -n 1)
+			# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
+			# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
+			LookupASNAndRouteFromIP "$parent_inetnum"
+			if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
+				# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
+				ipv4_inetnums+="$parent_inetnum\n"
+			else
+				# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
+				ipv4_inetnums+="$prefix\n"
+			fi
 		else
-			ipv4_inetnums+=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
-							grep -m1 inetnum | cut -d ':' -f 2 | sed 's/^[ \t]*//' | xargs ipcalc -r | grep -v "deaggregate")
-			ipv4_inetnums+="\n"
+			ipv4_inetnums+="$prefix\n"
+		fi
+	done
+	# close persistent tcp connection to RIPE whois server
+	if { true >&3; } 2<> /dev/null; then
+		echo -e "-k" >&3
+	fi
+
+	# fetch further inetnums allocated to this AS from pWhois
+	pwhois_prefixes=$(PwhoisListPrefixesForOrg "$found_org")
+	pwhois_unique_prefixes=$(comm -13 <(echo -e "$ipv4_ripe_prefixes" | sort) <(echo -e "$pwhois_prefixes" | sort))
+	pwhois_unique_prefixes_count=$(wc -l <<<"$pwhois_unique_prefixes")
+	prefixcounter=0
+	for prefix in $pwhois_unique_prefixes; do
+		# found a new prefix in pWhois, check if it's announced by a different AS
+		# (e.g. target AS has delegated announcements for this prefix to another AS)
+		((prefixcounter++))
+		StatusbarMessage "Identifying origin AS for additional IPv4 prefix $prefixcounter/$pwhois_unique_prefixes_count"
+		LookupASNAndRouteFromIP "$prefix"
+		prefix_originator_asn="$found_asn"
+		if [ -z "$prefix_originator_asn" ] || [ "$prefix_originator_asn" = "$1" ]; then
+			# prefix originator is same as target AS, or prefix not announced
+			# add this prefix to the allocated IP resources for this AS
+			ipv4_inetnums+="$prefix\n"
+		else
+			# this prefix is allocated to target AS, but is being announced by a different AS
+			prefix_originator_org=$(timeout 5 curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
+				jq -r 'select (.data.holder != null) | .data.holder' | \
+				awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
+			)
+			if [ "$JSON_OUTPUT" = true ]; then
+				[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
+				json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"$prefix_originator_org\"}"
+			else
+				ipv4_inetnums+="$prefix (announced by AS${prefix_originator_asn} - ${prefix_originator_org})\n"
+			fi
 		fi
 	done
 
@@ -166,7 +259,16 @@ QueryRipestat(){
 		if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
 			html=""
 			for inetnum in $ipv4_inetnums; do
-				html+="<a href=\"/asn_lookup&$inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
+				if grep -q "announced by" <<<"$inetnum"; then
+					# handle special case "<prefix> (announced by AS<asn>)"
+					actual_inetnum=$(cut -d ' ' -f 1 <<<"$inetnum")
+					originator=$(cut -d ' ' -f 4 <<<"$inetnum")
+					rest_of_line=$(cut -d ' ' -f 5- <<<"$inetnum")
+					html+="<a href=\"/asn_lookup&$actual_inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$actual_inetnum</a> (announced by "
+					html+="<a href=\"/asn_lookup&$originator\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$originator</a> ${rest_of_line}\n"
+				else
+					html+="<a href=\"/asn_lookup&$inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
+				fi
 			done
 			ipv4_inetnums="$html"
 		fi
@@ -181,10 +283,12 @@ QueryRipestat(){
 			ipv6_inetnums="$html"
 		fi
 	fi
-
+	if [ -n "$ipv4_other_inetnums" ]; then
+		ipv4_other_inetnums=$(echo -e "$ipv4_other_inetnums" | sort -u)
+	fi
 	if [ "$JSON_OUTPUT" = true ]; then
-		json_ipv4_inetnums=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv4_inetnums")
-		json_ipv6_inetnums=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv6_inetnums")
+		json_ipv4_aggregated_inetnums=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv4_inetnums")
+		json_ipv6_aggregated_inetnums=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv6_inetnums")
 	fi
 	StatusbarMessage
 }
@@ -198,7 +302,7 @@ RIPESuggestASN(){
 			StatusbarMessage "Retrieving suggested ASNs for ${bluebg}${input_variation}${lightgreybg}"
 			# lookup input variation (AS_<input>, AS-<input>, <input>_AS, <input>-AS)
 			ripe_suggest_output+=$(curl -s "https://stat.ripe.net/data/searchcomplete/data.json?resource=${input_variation}&sourceapp=nitefood-asn" | \
-									jq -r '.data.categories | .[] | select ( .category == "ASNs" ) | .suggestions[]')
+									jq -r '.data.categories[] | select ( .category == "ASNs" ) | .suggestions[]')
 		done
 		StatusbarMessage
 		if [ -n "$ripe_suggest_output" ]; then
@@ -244,10 +348,10 @@ WhoisIP(){
 	if [ "$IS_BOGON" = false ]; then
 		ip_type_json_output+="\"is_bogon\":false"
 		if [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
-			abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
 			hostname=$(RdnsLookup "$1")
-			abusecontacts=$(AbuseLookup "$abuse_whois_data")
 			[[ -z "$hostname" ]] && hostname="-"
+			abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
+			abusecontacts=$(AbuseLookupForPrefix "$abuse_whois_data" "$1")
 		fi
 		if [ "$UNANNOUNCED_PREFIX" = false ] && [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
 			# Prefix found in the Team Cymru DB
@@ -611,22 +715,16 @@ RdnsLookup(){
 	echo "$rdns"
 }
 
-AbuseLookup(){
+AbuseLookupForPrefix(){
+	# $1="whois data", $2=prefix
+	whoisdata="$1"
+	prefix="$2"
 	abuselist=""
-	for abusecontact in $(echo -e "$1" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
-		if echo "$abusecontact" | grep -vq '@'; then
-			# $abusecontact is not an email, try a whois lookup (it should be a handle)
-			resolvedabuse=$(whois "$abusecontact" | grep -E -i "^abuse-mailbox:" | awk '{print $2}' | tr -d \')
-			if [ -z "$resolvedabuse" ]; then
-				# whois couldn't resolve the abuse handle. Try identifying the
-				# original answering whois server and forcing a lookup on the same server
-				original_whois_server=$(echo -e "$full_whois_data" | grep -E "^%.*whois\..*$" | awk 'NR==1 {print $NF}' | tr -d '[]')
-				if [ -n "$original_whois_server" ]; then
-					# original whois server found, try manually querying it with an extended set of grep patterns
-					resolvedabuse=$(whois -h "$original_whois_server" "$abusecontact" 2>/dev/null | grep -E -m1 -i "^abuse-mailbox:|^e-mail:" | awk '{print $2}' | tr -d \')
-				fi
-			fi
+	for abusecontact in $(echo -e "$whoisdata" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
+		if ! grep -q '@' <<<"$abusecontact"; then
+			resolvedabuse=$(timeout 5 curl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
 			[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
+
 		fi
 		[[ -n "$abuselist" ]] && abuselist+="\n"
 		abuselist+="$abusecontact"
@@ -635,13 +733,13 @@ AbuseLookup(){
 	if [ "$JSON_OUTPUT" = true ]; then
 		# json output
 		if [ -n "$abuselist" ]; then
-			echo -n "["
-			echo -e "$abuselist" | tr " " "\n" | sort -u | while read -r line; do echo -n "\"$line\", "; done | sed 's/, $/]/'
+			echo -e "$abuselist" | jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | unique'
 		fi
 	else
 		# normal output
 		if [ -n "$abuselist" ]; then
-			echo -e "$abuselist" | tr " " "\n" | sort -u | while read -r line; do echo -n "$line / "; done | sed 's/ \/ $//'
+			# use jq to join contacts together and separate them with the " / " multi-character delimiter, while getting rid of spurious newlines
+			echo -e "$abuselist" | jq -r --slurp --raw-input 'split("\n") | map(select(length > 0)) | unique | join(" / ")'
 		else
 			echo "-"
 		fi
@@ -1165,7 +1263,7 @@ ShowMenu(){ # show selection menu for search-by-company results
 	if [ "$HAVE_IPCALC" = true ]; then
 		IPCALC_WARNING=""
 	else
-		IPCALC_WARNING=$'\n'"${yellow}Warning: program ${red}ipcalc${yellow} not found."$'\n'"Install it with ${green}apt install ipcalc${yellow}"$'\n'"to enable netblock->CIDR prefix aggregation.${default}"$'\n'
+		IPCALC_WARNING=$'\n'"${yellow}Warning: program ${red}ipcalc${yellow} not found."$'\n'"Install it to enable netblock->CIDR"$'\n'"prefix aggregation.${default}"$'\n'
 	fi
 	PS3="${yellow}────────────────────────────────────────────────────${default}
 $ACTIVE_FILTERS_STRING
@@ -1275,11 +1373,11 @@ PrintJsonOutput(){
 	json_to_print+="\"reason\":\"$reason_json_output\","
 	json_to_print+="\"version\":\"$ASN_VERSION\","
 	json_to_print+="\"request_time\":\"$json_request_time\","
-	json_to_print+="\"request_duration\":\"$runtime\","
+	json_to_print+="\"request_duration\":$runtime,"
 	json_to_print+="\"result_count\":$json_resultcount,"
 	json_to_print+="\"results\":[${final_json_output}]}"
-	[[ "$JSON_PRETTY" = true ]] && jq -M <<<"$json_to_print" || echo -en "$json_to_print"
-	[[ "$IS_ASN_CHILD" = true ]] && echo "" # output trailing newline so that the client picks up the json output
+	[[ "$JSON_PRETTY" = true ]] && json_to_print=$(jq -M '.' <<<"$json_to_print")
+	echo -e "$json_to_print"
 }
 
 RPKILookup(){
@@ -1634,13 +1732,13 @@ IPShodanLookup(){
 	shodan_data=$(curl -m5 -s "https://internetdb.shodan.io/$1" | grep -v "No information available")
 	if [ -n "$shodan_data" ]; then
 		shodan_cpes=$(jq -r '.cpes[]' <<<"$shodan_data")
-		shodan_cpes_json_output=$(jq -cMr 'select (.cpes | length > 0) | .cpes' <<<"$shodan_data")
+		shodan_cpes_json_output=$(jq -cM 'select (.cpes | length > 0) | .cpes' <<<"$shodan_data")
 		shodan_ports=$(jq -r '.ports[]' <<<"$shodan_data")
-		shodan_ports_json_output=$(jq -cMr 'select (.ports | length > 0) | .ports' <<<"$shodan_data")
+		shodan_ports_json_output=$(jq -cM 'select (.ports | length > 0) | .ports' <<<"$shodan_data")
 		shodan_tags=$(jq -r '.tags[]' <<<"$shodan_data")
-		shodan_tags_json_output=$(jq -cMr 'select (.tags | length > 0) | .tags' <<<"$shodan_data")
+		shodan_tags_json_output=$(jq -cM 'select (.tags | length > 0) | .tags' <<<"$shodan_data")
 		shodan_cve_count=$(jq '.vulns | length' <<<"$shodan_data")
-		shodan_vulns_json_output=$(jq -cMr 'select (.vulns | length > 0) | .vulns' <<<"$shodan_data")
+		shodan_vulns_json_output=$(jq -cM 'select (.vulns | length > 0) | .vulns' <<<"$shodan_data")
 
 		# fetch CPE types, possible values:
 		# a for Applications, h for Hardware, o for Operating Systems
@@ -1688,6 +1786,20 @@ IPShodanLookup(){
 	fi
 
 	StatusbarMessage
+}
+
+PwhoisListPrefixesForOrg(){
+	# list all IPv4 prefixes on pWhois based on an Org-Name
+	# $1 = Org-Name handle
+	[[ "$HAVE_IPCALC" = false ]] && return
+	org="$1"
+	full_org_search_data=$(whois -h whois.pwhois.org "registry org-name=$org")
+	orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+	for orgid in $orgids; do
+		for prefix in $(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>"); do
+			echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ' | xargs ipcalc -r 2>/dev/null | grep -A1 "deaggregate" | tail -n 1
+		done
+	done
 }
 
 AsnServerListener(){
@@ -1745,6 +1857,7 @@ AsnServerListener(){
 			 	server_country=\"$server_country\" \
 				INTERNAL_CONNHANDLER_CHILD=false \
 			 	INTERNAL_ASNSERVER_CONNHANDLER=true \
+			 	ASN_DEBUG=\"$ASN_DEBUG\" \
 			 	\"$0\"
 		 	"
 	END_OF_NCAT_CMD
@@ -2303,17 +2416,20 @@ HandleNcatClientConnection() {
 		# close the client connection without any output
 		exit 1
 
-	elif (echo -e "$line" | grep -Eq "^GET /asn_lookup&|^GET /asn_lookup_json&"); then
-		JSON_OUTPUT=false
+	elif (grep -Eq "^GET /asn_lookup(_json[p]?)?&" <<<"$line"); then
+		OUTPUT_TYPE=""
 		starttime=$(date +'%s')
 		startdatetime=$(date +'%F %T')
 		reportdatetime=$(date +'%F %T (%Z)')
 
 		# detect output method requested by the user
 		method=$(echo -e "$line" | cut -d '&' -f 1)
-		if grep -q "json" <<<"$method"; then
-			# user requested json output from the server
-			JSON_OUTPUT=true
+		if grep -q "jsonp" <<<"$method"; then
+			# user requested pretty-print json output from the server
+			OUTPUT_TYPE="jsonp"
+		elif grep -q "json" <<<"$method"; then
+			# user requested compact json output from the server
+			OUTPUT_TYPE="json"
 		fi
 		# handle 'asn_lookup' command. This will start a lookup for the target.
 		# 1) trim down target length to at most 100 characters
@@ -2338,8 +2454,8 @@ HandleNcatClientConnection() {
 
 			echo -e "[$startdatetime] ${yellowbg} STARTED ${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
 
-			if [ "$JSON_OUTPUT" = true ]; then
-				# send HTTP 200 OK response
+			if [ "$OUTPUT_TYPE" = "json" ] || [ "$OUTPUT_TYPE" = "jsonp" ]; then
+				# send HTTP 200 OK response with JSON Content-Type
 				echo -e "${http_ok_json}"
 			else
 				# send HTTP 200 OK response and display HTML headers
@@ -2351,8 +2467,9 @@ HandleNcatClientConnection() {
 			else
 				title_tag=""
 			fi
-			# display ASN server info table
-			if [ "$JSON_OUTPUT" = false ]; then
+
+			if [ -z "$OUTPUT_TYPE" ]; then
+				# default HTML mode, display ASN server info table
 				echo -e "
 					<table style='border: none; white-space: nowrap';>
 						<tr>
@@ -2379,27 +2496,21 @@ HandleNcatClientConnection() {
 				"
 			fi
 
+			# spawn ASN child and output results to the client
 			ServerDebugPrint "Spawning child"
 
-			if [ "$JSON_OUTPUT" = true ]; then
-				# launch ASN trace to URL and output JSON to the client
-				INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false INTERNAL_ASNSERVER_JSON_OUTPUT=true TERM=dumb "$0" "$host" |
-				{
-					#* ╭─────────────────────────────────────────────────────╮
-					#* │ Main child output parsing loop command group (JSON) │
-					#* ╰─────────────────────────────────────────────────────╯
+			INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false INTERNAL_ASNSERVER_OUTPUT_TYPE="$OUTPUT_TYPE" TERM=dumb "$0" "$host" |
+			{
+				#* ╭──────────────────────────────────────────────╮
+				#* │ Main child output parsing loop command group │
+				#* ╰──────────────────────────────────────────────╯
+				if [ -n "$OUTPUT_TYPE" ]; then
+					# JSON/JSONP mode
 					while IFS= read -r outputline; do
-						echo -en "$outputline"
+						echo -e "$outputline"
 					done
-				}
-			else
-				# launch ASN trace to URL and convert its output to HTML
-				INTERNAL_CONNHANDLER_CHILD=true INTERNAL_ASNSERVER_CONNHANDLER=false TERM=dumb "$0" "$host" |
-				{
-					#* ╭─────────────────────────────────────────────────────╮
-					#* │ Main child output parsing loop command group (HTML) │
-					#* ╰─────────────────────────────────────────────────────╯
-
+				else
+					# HTML mode
 					TextHeader() {
 						headerwidth="150"
 						padchar="_"
@@ -2532,13 +2643,13 @@ HandleNcatClientConnection() {
 					echo -e "<div style='display: none;' id='tracedata'>${tracedata_encoded}</div>"
 
 					echo -e "$html_footer"
-				}
-			fi
+				fi
+			}
 			#  end the ncat client connection for this request ID
 			childretval="$?"
 			if [ "$childretval" -eq 0 ]; then
 				ServerDebugPrint "Child process completed successfully with exit code $?"
-				[[ "$JSON_OUTPUT" = false ]] && echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
+				[[ -z "$OUTPUT_TYPE" ]] && echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
 				# log lookup request completed on server side
 				echo -e "[$(date +"%F %T")] ${greenbg}COMPLETED${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
 			else
@@ -2665,6 +2776,7 @@ fi
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
 SERVER_MODE=false
+ASN_DEBUG=false
 JSON_OUTPUT=false
 JSON_PRETTY=false
 status_json_output="ok"
@@ -2674,7 +2786,6 @@ starttime="$(date +%s)"
 final_json_output=""
 json_target_type="unknown"
 json_resultcount=0
-ASN_DEBUG=false
 
 # optspec contains:
 # - options followed by a colon: parameter is mandatory
@@ -2830,10 +2941,19 @@ if [ "$SERVER_MODE" = true ]; then
 	AsnServerListener
 fi
 
-# handle json output for child instances
-if [ -n "$INTERNAL_ASNSERVER_JSON_OUTPUT" ]; then
-	JSON_OUTPUT=true
+# handle output type for child instances
+# supported output types: json, jsonp
+if [ -n "$INTERNAL_ASNSERVER_OUTPUT_TYPE" ]; then
 	TRACEASNPATH=false
+	case "${INTERNAL_ASNSERVER_OUTPUT_TYPE}" in
+		"json")
+			JSON_OUTPUT=true
+		;;
+		"jsonp")
+			JSON_OUTPUT=true
+			JSON_PRETTY=true
+		;;
+	esac
 fi
 
 BoxHeader "ASN lookup for $userinput"
@@ -2971,16 +3091,19 @@ if [ -z "$input" ]; then
 		if [ -z "$found_asname" ]; then
 			PrintErrorAndExit "Error: no data found for AS${asn}"
 		fi
+		target_asname="$found_asname"
 		if [ "$JSON_OUTPUT" = true ]; then
 			# JSON output
+			GetIXPresence "$asn"
+			QueryRipestat "$asn"
 			final_json_output+="{"
 			final_json_output+="\"asn\":\"${asn}\""
-			final_json_output+=",\"asname\":\"${found_asname}\""
+			final_json_output+=",\"asname\":\"${target_asname}\""
 			final_json_output+=",\"org\":\"${found_org}\""
+			final_json_output+=",\"holder\":\"${found_holder}\""
+			final_json_output+=",\"abuse_contacts\":${json_abuse_contacts}"
 			final_json_output+=",\"registration_date\":\"${found_createdate}\""
-			GetIXPresence "$asn"
 			final_json_output+=",\"ixp_presence\":$json_ixps"
-			QueryRipestat "$asn"
 			# peer count
 			if [ -n "$ripestat_routing_data" ]; then
 				final_json_output+=",\"prefix_count_v4\":${ripestat_ipv4}"
@@ -2996,10 +3119,14 @@ if [ -z "$input" ]; then
 				final_json_output+="}"
 			fi
 			# announced prefixes
-			final_json_output+=",\"announced_prefixes\":{"
-			final_json_output+="\"v4\":$json_ipv4_inetnums"
-			final_json_output+=",\"v6\":$json_ipv6_inetnums"
-			final_json_output+="}}"
+			final_json_output+=",\"announced_prefixes\":$json_ripe_prefixes"
+			final_json_output+=",\"inetnums\":{"
+			final_json_output+="\"v4\":$json_ipv4_aggregated_inetnums"
+			final_json_output+=",\"v6\":$json_ipv6_aggregated_inetnums}"
+			final_json_output+=",\"inetnums_announced_by_other_as\":{"
+			final_json_output+="\"v4\":[$json_ipv4_other_inetnums]"
+			final_json_output+=",\"v6\":[$json_ipv6_other_inetnums]}"
+			final_json_output+="}"
 
 			PrintJsonOutput
 		else
@@ -3013,18 +3140,19 @@ if [ -z "$input" ]; then
 				echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $peeringdb_link🔗)</span>"
 			fi
 			echo ""
-			echo -en "${bluebg} AS Name       ──>${default} ${green}${found_asname}"
+			echo -en "${bluebg} AS Name       ──>${default} ${green}${target_asname}"
 			if [ "$IS_ASN_CHILD" = true ]; then
 				# signal to the parent connhandler the correct country flag to display for this ASN
-				flag_icon_cc=$(echo "${found_asname##*,}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
+				flag_icon_cc=$(echo "${target_asname##*,}" | tr -d ' ' | tr '[:upper:]' '[:lower:]')
 				[[ -n "$flag_icon_cc" ]] && echo -n " #COUNTRYCODE $flag_icon_cc"
 			fi
 			printf "\n"
-			echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_org}"
+			echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_holder} (${found_org})"
+			echo -e "${bluebg} Abuse contact ──>${default} ${blue}${found_abuse_contact}"
 			echo -e "${bluebg} AS Reg. date  ──>${default} ${white}${found_createdate}"
 			echo -en "${bluebg} Peering @IXPs ──>${default} "
 			GetIXPresence "$asn"
-			BoxHeader "BGP informations for AS${asn} (${found_asname})"
+			BoxHeader "BGP informations for AS${asn} (${target_asname})"
 			echo ""
 			QueryRipestat "${asn}"
 			if [ -n "$ripestat_routing_data" ]; then
@@ -3036,12 +3164,12 @@ if [ -z "$input" ]; then
 				[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
 				[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
 				[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
-				BoxHeader "Peering informations for AS${asn} (${found_asname})"
+				BoxHeader "Peering informations for AS${asn} (${target_asname})"
 				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
 				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
 				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
 			fi
-			BoxHeader "Announced prefixes (aggregated) for AS${asn} (${found_asname})"
+			BoxHeader "Aggregated IP resources for AS${asn} (${target_asname})"
 			echo -e "\n${green}───── IPv4 ─────${default}"
 			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
 			echo -e "\n${yellow}───── IPv6 ─────${default}"

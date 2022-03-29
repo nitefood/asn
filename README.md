@@ -110,7 +110,7 @@ Requires Bash v4.2+. Tested on:
 
 * _Autonomous system number lookup with BGP stats, peering and prefix informations_
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/98995579-d3162080-2531-11eb-886a-c929ad9dc24c.png)
+![asnlookup](https://user-images.githubusercontent.com/24555810/160516155-d00d3d9b-915d-41f4-8496-bc5e9b98f4b0.png)
 
 * _Hostname/URL lookup_
 
@@ -559,9 +559,9 @@ root@KRUSTY:~# asn -J 8.8.8.8
   "target_type": "ipv4",
   "result": "ok",
   "reason": "success",
-  "version": "0.72",
-  "request_time": "2022-03-26T22:42:34",
-  "request_duration": "3",
+  "version": "0.72.1",
+  "request_time": "2022-03-28T22:42:34",
+  "request_duration": 3,
   "result_count": 1,
   "results": [
     {
@@ -624,15 +624,19 @@ root@KRUSTY:~# asn -J 5505
   "target_type": "asn",
   "result": "ok",
   "reason": "success",
-  "version": "0.72",
-  "request_time": "2022-03-26T21:59:51",
-  "request_duration": "4",
+  "version": "0.72.1",
+  "request_time": "2022-03-28T21:59:51",
+  "request_duration": 4,
   "result_count": 1,
   "results": [
     {
       "asn": "5505",
       "asname": "VADAVO, ES",
       "org": "VDV-VLC-RED05 VDV-VLC-RED05 - CLIENTES DATACENTER",
+      "holder": "VADAVO SOLUCIONES SL",
+      "abuse_contacts": [
+        "abuse@vadavo.com"
+      ],
       "registration_date": "2016-12-13T08:28:07",
       "ixp_presence": [
         "NIXVAL-ix: Peering LAN1",
@@ -651,16 +655,16 @@ root@KRUSTY:~# asn -J 5505
           "34549",
           "13030",
           "25369",
-          "25091",
           "33891",
-          "41327",
           "35280",
+          "25091",
+          "41327",
           "1239",
           "34927",
           "60501",
-          "13786",
           "4455",
           "24482",
+          "13786",
           "8218",
           "15830"
         ],
@@ -670,33 +674,59 @@ root@KRUSTY:~# asn -J 5505
           "207495",
           "208248",
           "205093",
-          "205086",
-          "202054"
+          "202054",
+          "205086"
         ],
         "uncertain": [
+          "61573",
           "51185",
-          "34854",
           "271253",
           "264479",
+          "34854",
           "25160",
-          "61573",
           "37721"
         ]
       },
       "announced_prefixes": {
         "v4": [
-          "185.123.204.0/22",
-          "185.210.224.0/22",
-          "188.130.232.0/21",
-          "188.130.240.0/20"
+          "185.123.206.0/24",
+          "185.210.227.0/24",
+          "185.123.205.0/24",
+          "185.123.204.0/24",
+          "185.123.207.0/24",
+          "185.210.226.0/24",
+          "188.130.247.0/24",
+          "185.210.225.0/24"
         ],
         "v6": [
           "2a03:9320::/32"
         ]
+      },
+      "inetnums": {
+        "v4": [
+          "185.123.204.0/22",
+          "185.123.204.0/24",
+          "185.123.205.0/24",
+          "185.123.206.0/24",
+          "185.123.207.0/24",
+          "185.210.225.0/24",
+          "185.210.226.0/24",
+          "185.210.227.0/24",
+          "188.130.247.0/24"
+        ],
+        "v6": [
+          "2a03:9320::/32"
+        ]
+      },
+      "inetnums_announced_by_other_as": {
+        "v4": [],
+        "v6": []
       }
     }
   ]
 }
+
+
 ```
 
 *Example 3 - enumerating abuse contacts for every IP to which a hostname resolves:*
@@ -717,13 +747,48 @@ root@KRUSTY:~# asn -j 45.67.34.100 | jq '.results[].fingerprinting.vulns[]'
 
 #### Remotely (API endpoint)
 
-By running the script in [server mode](#running-lookups-from-the-browser), it is possible to use it as a self-hosted lookup API service by running HTTP queries against it and retrieving the results in JSON format. The server exposes the `asn_lookup_json` endpoint for this purpose. The syntax is the same as with normal browser-based remote queries.
+By running the script in [server mode](#running-lookups-from-the-browser), it is possible to use it as a self-hosted lookup API service by running HTTP queries against it and retrieving the results in compact or pretty-printed JSON format. The server exposes the `asn_lookup_json` and `asn_lookup_jsonp` endpoints for this purpose. The syntax is the same as with normal browser-based remote queries.
 
-*Example 1: querying the server remotely using `curl`:*
+*Example 1: querying the server remotely using `curl` (compact output):*
 
 ```shell
 root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_json&1.1.1.1"
-{"target":"1.1.1.1","target_type":"ipv4","result":"ok","reason":"success","version":"0.72","request_time":"2022-03-26T22:21:24","request_duration":"3","result_count":1,"results":[{"ip":"1.1.1.1","ip_version":"4","reverse":"one.one.one.one","org_name":"APNIC and Cloudflare DNS Resolver project","abuse_contacts":["helpdesk@apnic.net"],"routing":{"is_announced":true,"as_number":"13335","as_name":"CLOUDFLARENET, US","net_range":"1.1.1.0/24","net_name":"APNIC-LABS","roa_count":"1","roa_validity":"valid"},"type":{"is_bogon":false,"is_anycast":true,"is_mobile":false,"is_proxy":false,"is_dc":true,"dc_details":{"dc_name":"Cloudflare"},"is_ixp":false},"geolocation":{"city":"Magomeni","region":"Dar es Salaam","country":"Tanzania","cc":"TZ"},"reputation":{"status":"good","is_known_good":true,"known_as":"Cloudflare Public DNS"},"fingerprinting":{"ports":[53,80,443]}}]}
+{"target":"1.1.1.1","target_type":"ipv4","result":"ok","reason":"success","version":"0.72.1","request_time":"2022-03-29T00:13:11","request_duration":5,"result_count":1,"results":[{"ip":"1.1.1.1","ip_version":"4","reverse":"one.one.one.one","org_name":"APNIC and Cloudflare DNS Resolver project","abuse_contacts":["helpdesk@apnic.net"],"routing":{"is_announced":true,"as_number":"13335","as_name":"CLOUDFLARENET, US","net_range":"1.1.1.0/24","net_name":"APNIC-LABS","roa_count":"1","roa_validity":"valid"},"type":{"is_bogon":false,"is_anycast":true,"is_mobile":false,"is_proxy":false,"is_dc":true,"dc_details":{"dc_name":"Cloudflare"},"is_ixp":false},"geolocation":{"city":"Magomeni","region":"Dar es Salaam","country":"Tanzania","cc":"TZ"},"reputation":{"status":"good","is_known_good":true,"known_as":"Cloudflare Public DNS"},"fingerprinting":{"ports":[53,80,443]}}]}
+```
+
+*Example 2: querying the server remotely using `curl` (pretty printed output):* 
+
+```shell
+root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_jsonp&10.0.0.1"
+{
+  "target": "10.0.0.1",
+  "target_type": "ipv4",
+  "result": "ok",
+  "reason": "success",
+  "version": "0.72.1",
+  "request_time": "2022-03-29T00:14:57",
+  "request_duration": 0,
+  "result_count": 1,
+  "results": [
+    {
+      "ip": "10.0.0.1",
+      "ip_version": "4",
+      "org_name": "IANA",
+      "routing": {
+        "is_announced": false,
+        "net_name": "PRIVATE-ADDRESS-ABLK-RFC1918-IANA-RESERVED"
+      },
+      "type": {
+        "is_bogon": true,
+        "bogon_type": "rfc1918 (Private Space)"
+      },
+      "reputation": {},
+      "fingerprinting": {}
+    }
+  ]
+}
+
+
 ```
 
 
