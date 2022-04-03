@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.1"
+ASN_VERSION="0.72.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -510,10 +510,10 @@ IsBogon(){
 
 	if [[ "$1" =~ $localhostregex ]]; then
 		bogon_tag="rfc1122 (Localhost)"
-		TRACEASNPATH=false
+		MTR_TRACING=false
 	elif [[ "$1" =~ $thisnetregex ]]; then
 		bogon_tag="rfc1122 ('this' network)"
-		TRACEASNPATH=false
+		MTR_TRACING=false
 	elif [[ "$1" =~ $privateregex ]]; then
 		bogon_tag="rfc1918 (Private Space)"
 	elif [[ "$1" =~ $cgnregex ]]; then
@@ -530,10 +530,10 @@ IsBogon(){
 		bogon_tag="rfc7526 (6to4 anycast relay)"
 	elif [[ "$1" =~ $multicastregex ]]; then
 		bogon_tag="(Multicast Address)"
-		TRACEASNPATH=false
+		MTR_TRACING=false
 	elif [[ "$1" =~ $reservedregex ]]; then
 		bogon_tag="(Reserved Address)"
-		TRACEASNPATH=false
+		MTR_TRACING=false
 	fi
 	if [ -n "$bogon_tag" ]; then
 		IS_BOGON=true
@@ -597,6 +597,7 @@ PrintErrorAndExit(){
 		# json output
 		status_json_output="fail"
 		reason_json_output="$1"
+		json_resultcount=0
 		PrintJsonOutput
 	elif [ "$IS_ASN_CHILD" = true ]; then
 		echo -e "\n${redbg}${1}${default}\n" # get the error in the html report
@@ -612,16 +613,22 @@ PrintErrorAndExit(){
 PrintUsage(){
 	# if an argument is passed, it will be displayed on stderr and the script will exit with error
 	script_name=$(basename "$0")
+	JSON_OUTPUT=false
 	BoxHeader "ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool" >&2
 	echo -e "\nVERSION:\n\n  ${ASN_VERSION}" \
 			"\n\nUSAGE:\n\n  $script_name [${green}OPTIONS${default}] [${blue}TARGET${default}]" \
 			"\n  $script_name [${red}-v${default}] ${red}-l${default} [${red}SERVER OPTIONS${default}]" \
 			"\n\nOPTIONS:" \
-			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
-			"\n\t(This option also enables RPKI validation/BGP hijacking detection for every hop)" \
+			"\n\n  ${green}-t    (enable trace)\n\t${default}Enable AS path trace to the ${blue}TARGET${default} (this is the default behavior)" \
 			"\n\n  ${green}-n    (no trace)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
-			"\n\n  ${green}-s    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
+			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
+			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
+			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
+			"\n\n  ${green}-s    (Shodan scan)\n\t${default}Query Shodan's InternetDB for CVE/CPE/Tags/Ports/Hostnames data about ${blue}TARGET${default}" \
+			"\n\tThis mode supports multiple targets and stdin input, e.g." \
+			"\n\t'asn -s < iplist' or 'echo 1.1.1.0/24 google.com | asn -s'" \
 			"\n\n  ${green}-o    (organization search)\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
+			"\n\n  ${green}-m    (monochrome output)\n\t${default}Disable colored output" \
 			"\n\n  ${green}-j    (compact JSON output)\n\t${default}Set output to compact JSON mode (ideal for machine parsing)" \
 			"\n\n  ${green}-J    (pretty-printed JSON output)\n\t${default}Set output to pretty-printed JSON mode" \
 			"\n\n  ${green}-h    (help)\n\t${default}Show this help screen" \
@@ -771,7 +778,6 @@ HopPrint(){
 TraceASPath(){
 	starttime=$(date +%s)
 	host_to_trace="$1"
-	mtr_rounds=5
 	border_color="$lightblue"
 	# attepmt to be as responsive as possible
 	# ideal output width : 150 (size of headers in normal traces)
@@ -803,7 +809,7 @@ TraceASPath(){
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
 
 	# start the mtr trace
-	mtr_output=$(mtr -C -n -c"$mtr_rounds" "$host_to_trace" | tail -n +2)
+	mtr_output=$(mtr -C -n -c"$MTR_ROUNDS" "$host_to_trace" | tail -n +2)
 	declare -a tracehops_array
 	declare -a aspath_array
 	# initialize the aspath array with our source AS
@@ -1048,7 +1054,13 @@ TraceASPath(){
 	endtime=$(date +%s)
 	runtime=$((endtime-starttime))
 	StatusbarMessage
-	echo -e "\nTrace complete in $runtime seconds.\n"
+	if [ "$IS_ASN_CHILD" = true ]; then
+		# date and time is already displayed elsewhere in server mode
+		echo -e "\nTrace completed in $runtime seconds.\n"
+	else
+		tracetime=$(date +'%F %T %Z')
+		echo -e "\nTrace completed in $runtime seconds on $tracetime\n"
+	fi
 
 	BoxHeader "AS path to $userinput"
 	echo -en "\n  "
@@ -1363,6 +1375,350 @@ PrintReputationAndShodanData(){
 	fi
 }
 
+ShodanRecon(){
+	shodan_starttime=$(date +%s)
+	shodan_json_output=""
+	curloutput=""
+	urllist=""
+
+	# identify target(s) type
+	targetlist=$(echo -e "$1" | tr ' ' '\n') # skip comments and blanks
+	target_count=$(echo -e "$targetlist" | wc -l)
+	if [ "$target_count" -gt 1 ]; then
+		# user passed multiple targets "e.g. asn -s 1.1.1.1 8.8.8.8"
+		userinput="multiple targets"
+	fi
+	# sanitize input (\n from stdin would mangle BoxHeader)
+	userinput=$(echo -e "$userinput")
+	BoxHeader "Shodan scan for $userinput"
+
+	for target in $targetlist; do
+		input=$(echo "$target" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
+		if [ -z "$input" ]; then
+			# Input is not an IP Address. See if it's a hostname (includes at least one dot)
+			if echo "$target" | grep -q "\."; then
+				target=$(awk -F[/:] '{gsub(".*//", ""); gsub(".*:.*@", ""); print $1}' <<<"$target")
+				target=$(ResolveHostnameToIPList "$target")
+				[[ -z "$target" ]] && continue # could not resolve hostname
+				json_target_type="hostname"
+				target=$(grep -v ":" <<<"$target")
+				numips=$(wc -l <<<"$target")
+				[[ $numips = 1 ]] && s="" || s="es"
+			else
+				# not an IP, not a hostname
+				continue
+			fi
+		else
+			json_target_type="ip"
+		fi
+		# prepare shodan InternetDB API URL list for every IP in the given CIDR range
+		for ip in $target; do
+			if grep -q ":" <<<"$ip"; then
+				# Shodan has no data for IPv6 addresses
+				continue
+			fi
+			[[ -n "$urllist" ]] && urllist+="\n"
+			urllist+=$(nmap -sL -n "$ip" | awk '/Nmap scan report/{print "https://internetdb.shodan.io/"$NF}') # cheers https://stackoverflow.com/a/31412705
+		done
+	done
+	[[ -z "$urllist" ]] && PrintErrorAndExit "no valid targets found"
+	numtargets=$(echo -e "$urllist" | wc -l)
+
+	firsturl=1
+	while true; do
+		saved_lasturl="$lasturl"
+		lasturl=$(( firsturl + MAX_CONCURRENT_SHODAN_REQUESTS ))
+		# check if concurrent Shodan requests setting is > number of IPs yet to scan
+		# if so, perform a batch lookup with all the urls and break. Otherwise
+		# perform max concurrent lookups, sleep and continue
+		if [ "$lasturl" -ge "$numtargets" ]; then
+			lasturl="$numtargets"
+			LAST_BATCH=true
+		fi
+		urlbatch=$(echo -e "$urllist" | awk "NR==$firsturl,NR==$lasturl")
+		StatusbarMessage "Collecting data for IPs ${bluebg}${firsturl}-${lasturl}${lightgreybg} of ${bluebg}$numtargets${lightgreybg} total ($MAX_CONCURRENT_SHODAN_REQUESTS threads)"
+		batchoutput=$( xargs -P "$MAX_CONCURRENT_SHODAN_REQUESTS" -n 1 curl -s < <(echo -e "$urlbatch") )
+		if grep -q "Rate limit exceeded" <<<"$batchoutput"; then
+			# rate limit exceeded during current batch of queries, loop while waiting to continue
+			retryafter=$(curl -s -i "https://internetdb.shodan.io/127.0.0.1" | awk '/^retry-after:/ {print $2}' | tr -d '\r\n')
+			while [[ ${retryafter} -gt 1 ]]; do
+				StatusbarMessage "Shodan rate limit hit during batch ${bluebg}${firsturl}-${lasturl}${lightgreybg}, server requires waiting for ${redbg}${retryafter}${lightgreybg}s"
+				sleep 1
+				retryafter=$(( retryafter-1 ))
+			done
+			# retry last batch
+			lasturl="$saved_lasturl"
+			continue
+		else
+			curloutput+="$batchoutput"
+			[[ "$LAST_BATCH" = true ]] && break
+			# enable below to introduce a delay between batches of curl queries to Shodan (could help with rate limiting)
+			# sleep .5
+			firsturl=$(( lasturl++ ))
+		fi
+	done
+	StatusbarMessage
+
+	# convert single API output results to array, delete IPs for which Shodan had no data available
+	json=$(jq -cM --slurp 'del (.[] | select(.ip==null))' <<<"$curloutput")
+	if [ "$json" = "[]" ]; then
+		final_json_output="$json"
+		PrintErrorAndExit "Shodan has no data for $userinput"
+	fi
+
+	shodan_json_output="$json"
+	[[ "$JSON_OUTPUT" = true ]] && return
+
+	shodan_endtime=$(date +%s)
+	shodan_runtime=$((shodan_endtime-shodan_starttime))
+
+	StatusbarMessage "Parsing collected data"
+	vulnlist=""
+	hostnamelist=""
+	portlist=""
+	taglist=""
+	cpelist=""
+	total_hosts_with_vulns=0
+	total_hosts_with_ports=0
+	total_hosts_with_tags=0
+	total_hosts_with_cpe=0
+	total_hosts_with_hostnames=0
+
+	# find all IPs in the json having a non-null ".ip" attribute. It means Shodan has some data about that IP.
+	interesting_iplist=$(echo -e "$json" | jq -r '.[].ip' | sort | uniq)
+	# iterate over interesting IPs
+	for ip in $interesting_iplist; do
+		output+="\n${white}•${default} $ip"
+		attribs=$(jq -r '.[] | select(.ip=="'"$ip"'")| to_entries | .[] | .key + "=" + (.value | @sh)' <<<"$json")
+		numattrs=$(grep -Evc "=$|^ip=" <<<"$attribs"); # get number of populated attributes
+		# "attribs" contains a list of attributes for a single IP, composed like this:
+		#
+		# cpes='cpename1' 'cpename2'
+		# hostnames='abc.com'
+		# ip='1.2.3.4'
+		# ports=22 80 8080
+		# tags='vpn'
+		# vulns='CVE-123' 'CVE-345'
+
+		# iterate over resulting attributes.
+		count=0 # will be used to decide which tree symbol to use (├ or └)
+
+		# - hostnames
+		ip_hostnames=$(grep -E "^hostnames=" <<<"$attribs" | cut -d '=' -f 2- | tr -d "'" | uniq)
+		hostnamelist+=$(echo -e "\n$ip_hostnames" | tr ' ' '\n')
+		if [ -n "$ip_hostnames" ]; then
+			count=$(( count+1 ))
+			[[ "$count" -eq "$numattrs" ]] && treesymbol="└" || treesymbol="├"
+			ip_hostnames=$(echo -e "$ip_hostnames" | sed -e 's/ / • /g' -e "s/.\{136\}/&\n               /g")
+			total_hosts_with_hostnames=$(( total_hosts_with_hostnames+1 ))
+			output+="\n\t${treesymbol}${bluebg} PTR ${default} ${white}$ip_hostnames${default}"
+		fi
+
+		# - cpes
+		ip_cpes=$(grep -E "^cpes=" <<<"$attribs" | cut -d '=' -f 2- | tr -d "'" | uniq)
+		# use more user-friendly names for some CPEs
+		ip_cpes=$(echo -e "$ip_cpes" | \
+			sed -e 's,cpe:/a:apache:http_server,Apache-HTTPD,g' \
+				-e 's,cpe:/o:linux:linux_kernel,[O/S]-Linux,g' \
+				-e 's,cpe:/o:microsoft:windows,[O/S]-Microsoft-Windows,g' \
+				-e 's,cpe:/o:debian:debian_linux,[O/S]-Debian-Linux,g' \
+				-e 's,cpe:/a:microsoft:internet_information_services,Microsoft-IIS,g' \
+				-e 's,cpe:/a:openbsd:openssh,OpenSSH,g' \
+				-e 's,cpe:/a:igor_sysoev:nginx,Nginx,g' \
+				-e 's,cpe:/a:php:php,PHP,g' \
+				-e 's,cpe:/a:jquery:jquery,jQuery,g' \
+				-e 's,cpe:/a:getbootstrap:bootstrap,Bootstrap,g' \
+				-e 's,cpe:/a:pureftpd:pure-ftpd,Pure-FTPd,g' \
+				-e 's,cpe:/a:postfix:postfix,Postfix,g' \
+				-e 's,cpe:/a:openssl:openssl,Postfix,g' \
+				-e 's,cpe:/a:mysql:mysql,MySQL,g' \
+			)
+		cpelist+=$(echo -e "\n$ip_cpes" | tr ' ' '\n')
+		if [ -n "$ip_cpes" ]; then
+			count=$(( count+1 ))
+			[[ "$count" -eq "$numattrs" ]] && treesymbol="└" || treesymbol="├"
+			ip_cpes=$(echo -e "$ip_cpes" | sed -e 's/ / • /g' -e "s/.\{136\}/&\n               /g")
+			total_hosts_with_cpe=$(( total_hosts_with_cpe+1 ))
+			output+="\n\t${treesymbol}${bluebg} CPE ${default} ${blue}$ip_cpes${default}"
+		fi
+
+		# - ports
+		ip_ports=$(grep -E "^ports=" <<<"$attribs" | cut -d '=' -f 2- | uniq)
+		portlist+=$(echo -e "\n$ip_ports" | tr ' ' '\n')
+		if [ -n "$ip_ports" ]; then
+			count=$(( count+1 ))
+			[[ "$count" -eq "$numattrs" ]] && treesymbol="└" || treesymbol="├"
+			ip_ports=$(echo -e "$ip_ports" | sed -e 's/ / • /g' -e "s/.\{136\}/&\n               /g")
+			total_hosts_with_ports=$(( total_hosts_with_ports+1 ))
+			output+="\n\t${treesymbol}${bluebg} POR ${default} ${green}$ip_ports${default}"
+		fi
+
+		# - tags
+		ip_tags=$(grep -E "^tags=" <<<"$attribs" | cut -d '=' -f 2- | tr -d "'" | uniq)
+		taglist+=$(echo -e "\n$ip_tags" | tr ' ' '\n')
+		if [ -n "$ip_tags" ]; then
+			count=$(( count+1 ))
+			[[ "$count" -eq "$numattrs" ]] && treesymbol="└" || treesymbol="├"
+			ip_tags=$(echo -e "$ip_tags" | sed -e 's/ / • /g' -e "s/.\{136\}/&\n               /g")
+			total_hosts_with_tags=$(( total_hosts_with_tags+1 ))
+			output+="\n\t${treesymbol}${bluebg} TAG ${default} ${yellow}$ip_tags${default}"
+		fi
+
+		# - vulns
+		ip_vulns=$(grep -E "^vulns=" <<<"$attribs" | cut -d '=' -f 2- | tr -d "'" | uniq)
+		vulnlist+=$(echo -e "\n$ip_vulns" | tr ' ' '\n')
+		if [ -n "$ip_vulns" ]; then
+			count=$(( count+1 ))
+			[[ "$count" -eq "$numattrs" ]] && treesymbol="└" || treesymbol="├"
+			# ip_vulns=$(echo -e "$ip_vulns" | sed -e 's/ / • /g')
+			ip_vulns=$(echo -e "$ip_vulns" | sed -e 's/ / • /g' -e "s/.\{136\}/&\n               /g")
+			total_hosts_with_vulns=$(( total_hosts_with_vulns+1 ))
+			output+="\n\t${treesymbol}${bluebg} CVE ${default} ${red}$ip_vulns${default}"
+		fi
+
+		output+="\n"
+
+	done
+
+	StatusbarMessage
+	echo -e "$output"
+
+	final_stats="${default}\n______________________________\n\n"
+	final_stats+="${green}$total_hosts_with_ports exposed${default} host"; [[ "$total_hosts_with_ports" != "1" ]] && final_stats+="s"; final_stats+=" found"
+	final_stats+="\n${blue}$total_hosts_with_cpe hosts${default} identified with a known CPE"
+	final_stats+="\n${yellow}$total_hosts_with_tags tagged${default} host"; [[ "$total_hosts_with_tags" != "1" ]] && final_stats+="s"; final_stats+=" identified"
+	final_stats+="\n$total_hosts_with_hostnames hostname"; [[ "$total_hosts_with_hostnames" != "1" ]] && final_stats+="s"; final_stats+=" discovered"
+	final_stats+="\n${red}$total_hosts_with_vulns vulnerable${default} host"; [[ "$total_hosts_with_vulns" != "1" ]] && final_stats+="s"; final_stats+=" found"
+	final_stats+="\n\n$numtargets host"; [[ "$numtargets" != "1" ]] && final_stats+="s"; final_stats+=" analyzed in $shodan_runtime seconds.\n"
+
+	# display final statistics (non-JSON output mode only)
+	BoxHeader "Statistics"
+
+	# top N ports
+	echo -e "\n${green}[TOP ${SHODAN_SHOW_TOP_N} Open Ports] \n"
+	if [ -z "$portlist" ]; then
+		# no ports found
+		echo -e "${green}         Nothing found${default}\n"
+	else
+		for port in $(echo -e "$portlist" | sort | grep -Ev '^$' | uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
+			porthits=$(awk '{print $1}' <<<"$port")
+			portnum=$(awk '{print $2}' <<<"$port")
+			portname=$(ResolveWellKnownPort "$portnum")
+			[[ -n "$portname" ]] && portname="(${portname})"
+			printf "%10s host(s) —> Port %5s %s\n" "$porthits" "$portnum" "$portname"
+		done
+		echo -e "$default"
+	fi
+
+	# top N CPEs
+	echo -e "${blue}[TOP ${SHODAN_SHOW_TOP_N} CPEs] \n"
+	if [ -z "$cpelist" ]; then
+		# no CPEs found
+		echo -e "${blue}         Nothing found${default}\n"
+	else
+		for cpe in $(echo -e "$cpelist" | sort | grep -Ev '^$' |uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
+			cpehits=$(awk '{print $1}' <<<"$cpe")
+			cpefullname=$(awk '{print $2}' <<<"$cpe")
+			cpetype=$(echo "$cpefullname" | cut -d ':' -f 2)
+			cpename=$(echo "$cpefullname" | cut -d ':' -f 3-)
+			case "${cpetype}" in
+				"/a")
+					type="APP"
+				;;
+				"/o")
+					type="O/S"
+				;;
+				"/h")
+					type="H/W"
+				;;
+				*)
+					type=""
+				;;
+			esac
+			[[ -n "$type" ]] && cpename="[$type] $cpefullname" || cpename="$cpefullname"
+			printf "%10s host(s) —> %s\n" "$cpehits" "$cpename"
+		done
+		echo -e "$default"
+	fi
+	# top N tags
+	echo -e "${yellow}[TOP ${SHODAN_SHOW_TOP_N} Tags] \n"
+	if [ -z "$taglist" ]; then
+		# no tags found
+		echo -e "${yellow}         Nothing found${default}\n"
+	else
+		for tag in $(echo -e "$taglist" | sort | grep -Ev '^$' | uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
+			taghits=$(awk '{print $1}' <<<"$tag")
+			tagname=$(awk '{print $2}' <<<"$tag")
+			printf "%10s host(s) —> %s\n" "$taghits" "$tagname"
+		done
+		echo -e "$default"
+	fi
+	# first N hostnames discovered
+	echo -e "${white}[First ${SHODAN_SHOW_TOP_N} Hostnames discovered] \n"
+	if [ -z "$hostnamelist" ]; then
+		# no tags found
+		echo -e "${yellow}         Nothing found${default}\n"
+	else
+		for hostname in $(echo -e "$hostnamelist" | grep -Ev '^$' | head -n "${SHODAN_SHOW_TOP_N}"); do
+			printf "         %s\n" "$hostname"
+		done
+		echo -e "$default"
+	fi
+	# top N vulnerabilities
+	echo -e "${red}[TOP ${SHODAN_SHOW_TOP_N} Vulnerabilities] \n"
+	StatusbarMessage "Identifying CVE score and severity for vulnerable hosts"
+	cvestats_text=""
+	if [ -z "$vulnlist" ]; then
+		# no vulns found
+		cvestats_text="${red}         Nothing found${default}"
+	else
+		for cve in $(echo -e "$vulnlist" | sort | grep -Ev '^$' | uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
+			vulnhits=$(awk '{print $1}' <<<"$cve")
+			cvenum=$(awk '{print $2}' <<<"$cve")
+			cvejsondata=$(curl -s "https://services.nvd.nist.gov/rest/json/cve/1.0/$cvenum")
+			v3score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseScore | select(length>0)' <<<"$cvejsondata")
+			v3severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseSeverity | select(length>0)' <<<"$cvejsondata")
+			v2score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.cvssV2.baseScore' <<<"$cvejsondata")
+			v2severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.severity' <<<"$cvejsondata")
+			cvescore=""
+			cveseverity=""
+			if [ -n "$v3score" ] && [ -n "$v3severity" ]; then
+				cvescore="$v3score"
+				cveseverity="$v3severity"
+			elif [ -n "$v2score" ] && [ -n "$v2severity" ]; then
+				cvescore="$v2score"
+				cveseverity="$v2severity"
+			fi
+			[[ "${#cvescore}" -eq 1 ]] && cvescore+=".0"
+
+			case "${cveseverity}" in
+				"LOW")
+					cvetext="${greenbg}    ${cvescore} (LOW)   ${default}${red}"
+				;;
+				"MEDIUM")
+					cvetext="${yellowbg}  ${cvescore} (MEDIUM)  ${default}${red}"
+				;;
+				"HIGH")
+					cvetext="${redbg}   ${cvescore} (HIGH)   ${default}${red}"
+				;;
+				"CRITICAL")
+					cvetext="${redbg} ${cvescore} (CRITICAL) ${default}${red}"
+				;;
+				*)
+					cvescore="N/A"
+					cvetext="${lightgreybg} ${cvescore} (UNKNOWN)  ${default}${red}"
+				;;
+			esac
+
+			cvestats_text+=$(printf "${red}%10s host(s) —> %-15s [%s] • %s" "$vulnhits" "$cvetext" "$cvenum" "https://nvd.nist.gov/vuln/detail/$cvenum")
+			cvestats_text+="\n"
+		done
+	fi
+	StatusbarMessage
+	echo -e "$cvestats_text"
+	echo -e "$final_stats"
+}
+
 PrintJsonOutput(){
 	DisableColors
 	endtime=$(date +%s)
@@ -1375,9 +1731,19 @@ PrintJsonOutput(){
 	json_to_print+="\"request_time\":\"$json_request_time\","
 	json_to_print+="\"request_duration\":$runtime,"
 	json_to_print+="\"result_count\":$json_resultcount,"
-	json_to_print+="\"results\":[${final_json_output}]}"
+	if [ "$RECON_MODE" = true ]; then
+		# we already have an array as a final json output, append it as-is
+		json_to_print+="\"results\":${final_json_output}}"
+	else
+		json_to_print+="\"results\":[${final_json_output}]}"
+	fi
 	[[ "$JSON_PRETTY" = true ]] && json_to_print=$(jq -M '.' <<<"$json_to_print")
 	echo -e "$json_to_print"
+}
+
+ResolveWellKnownPort(){
+	# input: port number, output: service name
+	[[ -n "$WELL_KNOWN_PORTS" ]] && awk "/\t$1\/(tc|ud)p/{print \$1; exit}" <<<"$WELL_KNOWN_PORTS"
 }
 
 RPKILookup(){
@@ -1731,14 +2097,14 @@ IPShodanLookup(){
 	StatusbarMessage "Collecting open ports, CPE and CVE data"
 	shodan_data=$(curl -m5 -s "https://internetdb.shodan.io/$1" | grep -v "No information available")
 	if [ -n "$shodan_data" ]; then
-		shodan_cpes=$(jq -r '.cpes[]' <<<"$shodan_data")
-		shodan_cpes_json_output=$(jq -cM 'select (.cpes | length > 0) | .cpes' <<<"$shodan_data")
-		shodan_ports=$(jq -r '.ports[]' <<<"$shodan_data")
-		shodan_ports_json_output=$(jq -cM 'select (.ports | length > 0) | .ports' <<<"$shodan_data")
-		shodan_tags=$(jq -r '.tags[]' <<<"$shodan_data")
-		shodan_tags_json_output=$(jq -cM 'select (.tags | length > 0) | .tags' <<<"$shodan_data")
-		shodan_cve_count=$(jq '.vulns | length' <<<"$shodan_data")
-		shodan_vulns_json_output=$(jq -cM 'select (.vulns | length > 0) | .vulns' <<<"$shodan_data")
+		shodan_cpes=$(jq -r '.cpes[]' <<<"$shodan_data" 2>/dev/null)
+		shodan_cpes_json_output=$(jq -cM 'select (.cpes | length > 0) | .cpes' <<<"$shodan_data" 2>/dev/null)
+		shodan_ports=$(jq -r '.ports[]' <<<"$shodan_data" 2>/dev/null)
+		shodan_ports_json_output=$(jq -cM 'select (.ports | length > 0) | .ports' <<<"$shodan_data" 2>/dev/null)
+		shodan_tags=$(jq -r '.tags[]' <<<"$shodan_data" 2>/dev/null)
+		shodan_tags_json_output=$(jq -cM 'select (.tags | length > 0) | .tags' <<<"$shodan_data" 2>/dev/null)
+		shodan_cve_count=$(jq '.vulns | length' <<<"$shodan_data" 2>/dev/null)
+		shodan_vulns_json_output=$(jq -cM 'select (.vulns | length > 0) | .vulns' <<<"$shodan_data" 2>/dev/null)
 
 		# fetch CPE types, possible values:
 		# a for Applications, h for Hardware, o for Operating Systems
@@ -1750,10 +2116,10 @@ IPShodanLookup(){
 					type="APP"
 				;;
 				"/o")
-					type="OS"
+					type="O/S"
 				;;
 				"/h")
-					type="HW"
+					type="H/W"
 				;;
 				*)
 					type="UNK"
@@ -1778,8 +2144,8 @@ IPShodanLookup(){
 
 		# fetch Shodan CVE count
 		ip_shodan_cve_data=""
-		if [ -n "$shodan_cve_count" ] && [ "$shodan_cve_count" -ne 0 ]; then
-			[[ "$shodan_cve_count" -gt 1 ]] && vulntext="VULNERABILITIES" || vulntext="VULNERABILITY"
+		if [ -n "$shodan_cve_count" ] && [ "$shodan_cve_count" != "0" ]; then
+			[[ "$shodan_cve_count" != "1" ]] && vulntext="VULNERABILITIES" || vulntext="VULNERABILITY"
 			ip_shodan_cve_data+=" ${redbg} $shodan_cve_count $vulntext FOUND ${default} (check "
 			[[ "$IS_ASN_CHILD" = true ]] && ip_shodan_cve_data+="<a href=\"https://internetdb.shodan.io/$1\" target=\"_blank\" \">Shodan</a>)" || ip_shodan_cve_data+="https://internetdb.shodan.io/$1)"
 		fi
@@ -1848,7 +2214,9 @@ AsnServerListener(){
 		exit 0
 		' INT TERM
 
-	#* Assemble the ncat listener command
+	#* Assemble the ncat listener command. Also pass on MONOCHROME/DEBUG preferences
+	#* to the listener child (which will output to stderr on server's console)
+	#* and print informations about client requests (1 child spawned per client connected)
 	read -r -d '' ncat_cmd <<- END_OF_NCAT_CMD
 	ncat -k -l $ASN_SRV_BINDADDR $ASN_SRV_BINDPORT $userinput --sh-exec "
 				export NCAT_REMOTE_ADDR; \
@@ -1857,6 +2225,7 @@ AsnServerListener(){
 			 	server_country=\"$server_country\" \
 				INTERNAL_CONNHANDLER_CHILD=false \
 			 	INTERNAL_ASNSERVER_CONNHANDLER=true \
+			 	MONOCHROME_MODE=\"$MONOCHROME_MODE\" \
 			 	ASN_DEBUG=\"$ASN_DEBUG\" \
 			 	\"$0\"
 		 	"
@@ -1933,8 +2302,9 @@ WhatIsMyIP() {
 
 DisableColors() {
 	# avoid colors for headless server runs (e.g. systemd logs/status),
-	# for listener runs and for json output
+	# for listener runs, json output and monochrome mode
 	if [ "$IS_HEADLESS" = true ] || [ "$JSON_OUTPUT" = true ]; then
+		# disable all colors for headless/json
 		green=""
 		magenta=""
 		yellow=""
@@ -1951,6 +2321,20 @@ DisableColors() {
 		greenbg=""
 		yellowbg=""
 		default=""
+	elif [ "$MONOCHROME_MODE" = true ]; then
+		# set all colors to white, leave black/white/default intact
+		green="$white"
+		magenta="$white"
+		yellow="$white"
+		blue="$white"
+		red="$white"
+		lightyellow="$white"
+		lightred="$white"
+		lightblue="$white"
+		bluebg="$lightgreybg"
+		redbg="$lightgreybg"
+		greenbg="$lightgreybg"
+		yellowbg="$lightgreybg"
 	fi
 }
 
@@ -1983,12 +2367,13 @@ CheckPrerequisites() {
 	saveIFS="$IFS"
 	IFS=' '
 	prerequisite_tools="jq whois host curl" # mandatory tools
-	optionals_tools="mtr ipcalc grepcidr ncat aha"	# optional tools
+	optionals_tools="nmap mtr ipcalc grepcidr ncat aha"	# optional tools
 	missing_tools=""
 	disabled_features=""
 	HARD_FAIL=false
 
 	HAVE_IPCALC=true
+	HAVE_NMAP=true
 	IXP_DETECTION=true
 	UNABLE_TO_SERVE=false
 
@@ -2018,7 +2403,11 @@ CheckPrerequisites() {
 			case "$tool" in
 				"mtr")
 					disabled_feat="AS path tracing"
-					TRACEASNPATH=false
+					MTR_TRACING=false
+					;;
+				"nmap")
+					disabled_feat="Recon mode (Shodan scanning)"
+					HAVE_NMAP=false
 					;;
 				"ipcalc")
 					disabled_feat="CIDR deaggregation"
@@ -2039,21 +2428,25 @@ CheckPrerequisites() {
 	done
 
 	if [ -n "$missing_tools" ]; then
-		BoxHeader "! WARNING !"
-		echo -e "\nThe following tools were not found on this system:" \
-				"${red} ${missing_tools}${default}" >&2
+		if [ "$JSON_OUTPUT" = false ]; then
+			BoxHeader "! WARNING !"
+			echo -e "\nThe following tools were not found on this system:" \
+					"${red} ${missing_tools}${default}" >&2
 
-		if [ -n "$disabled_features" ]; then
-			echo -e "\nThe following features will be disabled:" \
-					"${yellow}${disabled_features}${default}" >&2
+			if [ -n "$disabled_features" ]; then
+				echo -e "\nThe following features will be disabled:" \
+						"${yellow}${disabled_features}${default}" >&2
+			fi
+
+			echo -e "\nPlease install the necessary prerequisite packages\nfor your system by following these instructions:" \
+					"\n\n>> ${blue}https://github.com/nitefood/asn#prerequisite-packages${default} <<\n" >&2
+
+			[[ "$HARD_FAIL" = true ]] && PrintErrorAndExit "Can not continue without (at least) the following tools: ${prerequisite_tools// /, }"
+
+			read -srp "${lightgreybg}Press ENTER to continue...${default}" >&2
+		else
+			[[ "$HARD_FAIL" = true ]] && PrintErrorAndExit "Can not continue without (at least) the following tools: ${prerequisite_tools// /, }"
 		fi
-
-		echo -e "\nPlease install the necessary prerequisite packages\nfor your system by following these instructions:" \
-				"\n\n>> ${blue}https://github.com/nitefood/asn#prerequisite-packages${default} <<\n" >&2
-
-		[[ "$HARD_FAIL" = true ]] && PrintErrorAndExit "Can not continue without (at least) the following tools: ${prerequisite_tools// /, }"
-
-		read -srp "${lightgreybg}Press ENTER to continue...${default}" >&2
 	fi
 
 	IQS_TOKEN=""
@@ -2753,10 +3146,6 @@ fi
 # Files will be parsed in the order they are declared (first path found takes precedence)
 IQS_TOKEN_FILES="$HOME/.asn/iqs_token:/etc/asn/iqs_token"
 
-# Server mode binding defaults
-DEFAULT_SERVER_BINDADDR="127.0.0.1"
-DEFAULT_SERVER_BINDPORT="49200"
-
 # SIGINT trapping
 NO_ERROR_ON_INTERRUPT=false
 trap Ctrl_C INT
@@ -2764,6 +3153,9 @@ trap Ctrl_C INT
 # PeeringDB list of IXP prefixes
 peeringdb_dataset=""
 peeringdb_ipv6_dataset=""
+
+# Well known ports list
+[[ -r "/etc/services" ]] && WELL_KNOWN_PORTS=$(cat /etc/services) || WELL_KNOWN_PORTS=""
 
 #*
 #* Parse command line options
@@ -2773,12 +3165,28 @@ if [[ $# -lt 1 ]]; then
 	exit 1
 fi
 
-FORCE_ORGSEARCH=false
-SUGGEST_SEARCH=false
-SERVER_MODE=false
+# default options (configurable via $HOME/.asnrc)
+MTR_TRACING=true
+DETAILED_TRACE=false
+MTR_ROUNDS=5
+MAX_CONCURRENT_SHODAN_REQUESTS=20
+SHODAN_SHOW_TOP_N=5
+MONOCHROME_MODE=false
 ASN_DEBUG=false
 JSON_OUTPUT=false
 JSON_PRETTY=false
+DEFAULT_SERVER_BINDADDR="127.0.0.1"
+DEFAULT_SERVER_BINDPORT="49200"
+
+# read optional preferences from "$HOME/.asnrc" (only for non-headless runs)
+if [ "$IS_HEADLESS" = false ]; then
+	rcfile="/${HOME}/.asnrc"
+	if [ -r "$rcfile" ]; then
+		# shellcheck disable=SC1090
+		. "$rcfile"
+	fi
+fi
+
 status_json_output="ok"
 reason_json_output="success"
 json_request_time=$(date "+%Y-%m-%dT%H:%M:%S")
@@ -2793,8 +3201,12 @@ json_resultcount=0
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvlj:J:n:d:o:s:"
+optspec=":hvmljJsn:t:d:o:a:"
 
+FORCE_ORGSEARCH=false
+SUGGEST_SEARCH=false
+SERVER_MODE=false
+RECON_MODE=false
 OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
 while getopts "$optspec" optchar; do {
 
@@ -2820,28 +3232,19 @@ while getopts "$optspec" optchar; do {
 		done
 	}
 
+	userinput=""
 	OPTIONS_PRESENT=true
     case "${optchar}" in
 		"n")
-			TRACEASNPATH=false
-			DETAILED_TRACE=false
+			MTR_TRACING=false
 			GetFullParamsFromCurrentPosition "$@"
 			;;
-		"j")
-			TRACEASNPATH=false
-			DETAILED_TRACE=false
-			JSON_OUTPUT=true
-			GetFullParamsFromCurrentPosition "$@"
-			;;
-		"J")
-			TRACEASNPATH=false
-			DETAILED_TRACE=false
-			JSON_OUTPUT=true
-			JSON_PRETTY=true
+		"t")
+			MTR_TRACING=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"d")
-			TRACEASNPATH=true
+			MTR_TRACING=true
 			DETAILED_TRACE=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
@@ -2849,9 +3252,28 @@ while getopts "$optspec" optchar; do {
 			FORCE_ORGSEARCH=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
-		"s")
+		"a")
 			SUGGEST_SEARCH=true
 			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"s")
+			MTR_TRACING=false
+			RECON_MODE=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"m")
+			MONOCHROME_MODE=true
+			;;
+		"j")
+			MTR_TRACING=false # json output for mtr traces not implemented yet
+			JSON_OUTPUT=true
+			# GetFullParamsFromCurrentPosition "$@"
+			;;
+		"J")
+			MTR_TRACING=false # json output for mtr traces not implemented yet
+			JSON_OUTPUT=true
+			JSON_PRETTY=true
+			# GetFullParamsFromCurrentPosition "$@"
 			;;
 		"l")
 			SERVER_MODE=true
@@ -2910,7 +3332,7 @@ while getopts "$optspec" optchar; do {
 			ASN_DEBUG=true
 			;;
 		*)
-			if [ "$OPTERR" = 1 ]; then
+			if [ "$OPTERR" = 1 ] && [ -t 0 ]; then
 				[[ "$optchar" = "?" ]] && PrintUsage "Error: unknown option '-$OPTARG'"
 				[[ "$optchar" = ":" ]] && PrintUsage "Error: option '-$OPTARG' requires an argument"
 				exit 1
@@ -2920,14 +3342,35 @@ while getopts "$optspec" optchar; do {
 }
 done
 
-if [ "$OPTIONS_PRESENT" = false ]; then
-	# defaults
-	TRACEASNPATH=true
-	DETAILED_TRACE=false
-	ENABLE_ORGSEARCH=true
-	# shellcheck disable=2124
-	userinput="$@"
+if [ -t 0 ]; then
+	# input is from the terminal
+	if [ "$OPTIONS_PRESENT" = false ]; then
+		# shellcheck disable=SC2124
+		userinput="$@"
+	elif [ -z "$userinput" ] && [ "$SERVER_MODE" =  false ]; then
+		# an option was passed, but it was not one that requires a param (e.g. -m for monochrome mode)
+		# fetch the actual target
+		GetFullParamsFromCurrentPosition "$@"
+		# trim the leading whitespace from the argument
+		userinput="${userinput#' '}"
+		[[ -z "$userinput" ]] && PrintUsage "Error: no target specified"
+	fi
+else
+	# script was invoked with input from stdin (e.g. "asn -s < iplist")
+	# read IP list from stdin
+	while read -r inputline; do
+		inputline=$(echo -e "$inputline" | grep -Ev '^$|^[ \t]*#') # trim blanks and comments
+		[[ -n "$inputline" ]] && userinput+="$inputline\n"
+	done < /dev/stdin
 fi
+
+[[ "$MONOCHROME_MODE" = true ]] && DisableColors
+
+# options consistency check:
+# enable JSON_OUTPUT if the user has JSON_PRETTY=true in the preferences file
+# also explicitly disable tracing if the user forgot to pass "-n"
+[[ "$JSON_PRETTY" = true ]] && JSON_OUTPUT=true
+[[ "$JSON_OUTPUT" = true ]] && MTR_TRACING=false
 
 #* Check prerequisite and optional tools
 CheckPrerequisites
@@ -2944,7 +3387,7 @@ fi
 # handle output type for child instances
 # supported output types: json, jsonp
 if [ -n "$INTERNAL_ASNSERVER_OUTPUT_TYPE" ]; then
-	TRACEASNPATH=false
+	MTR_TRACING=false
 	case "${INTERNAL_ASNSERVER_OUTPUT_TYPE}" in
 		"json")
 			JSON_OUTPUT=true
@@ -2954,6 +3397,22 @@ if [ -n "$INTERNAL_ASNSERVER_OUTPUT_TYPE" ]; then
 			JSON_PRETTY=true
 		;;
 	esac
+fi
+
+if [ "$RECON_MODE" = true ]; then
+	# user passed the "-s" switch
+	final_json_output="[]"
+	[[ "$HAVE_NMAP" = false ]] && PrintErrorAndExit "Nmap is required to use -s, but not available on this system"
+	# launch Shodan scan
+	ShodanRecon "$userinput"
+	if [ "$JSON_OUTPUT" = true ]; then
+		json_resultcount=$(jq '. | length' <<<"$shodan_json_output")
+		final_json_output="$shodan_json_output"
+		PrintJsonOutput
+	else
+		tput sgr0
+	fi
+	exit 0
 fi
 
 BoxHeader "ASN lookup for $userinput"
@@ -3060,7 +3519,7 @@ if [ -z "$input" ]; then
 				done
 				[[ "$JSON_OUTPUT" = true ]] && PrintJsonOutput
 				# Check if AS path tracing is requested
-				if [ "$TRACEASNPATH" = true ]; then
+				if [ "$MTR_TRACING" = true ]; then
 					# In case of multiple IPs (DNS RR), trace the first one.
 					# Additionally, if we're on an IPv6 connection, default to
 					# tracing to the first resolved IPv6 address (if any)
@@ -3077,8 +3536,7 @@ if [ -z "$input" ]; then
 			fi
 			exit 0
 		else
-			# not an IP, not an ASN, not a hostname. Consider it an Organization name unless a cmdline option was specified
-			[[ -z "$ENABLE_ORGSEARCH" ]] && PrintErrorAndExit "Error: To search by organization, please pass the [-o] command line switch (or no switch at all)"
+			# not an IP, not an ASN, not a hostname. Consider it an Organization name
 			ORG_FILTER=false
 			declare -a orgfilters_array
 			declare -a excl_orgfilters_array
@@ -3189,7 +3647,7 @@ else
 	PrintReputationAndShodanData "$input"
 	[[ "$JSON_OUTPUT" = true ]] && PrintJsonOutput
 	# Perform AS path tracing if requested
-	[[ "$TRACEASNPATH" = true ]] && TraceASPath "$input"
+	[[ "$MTR_TRACING" = true ]] && TraceASPath "$input"
 	if [ "$JSON_OUTPUT" = false ]; then
 		tput sgr0
 		echo ""

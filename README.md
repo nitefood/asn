@@ -11,9 +11,12 @@
 
 ## Description
 
-ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation / IP geolocation / IP fingerprinting lookup tool / Web traceroute server.
+ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation / IP geolocation / IP fingerprinting / Network recon / lookup tool / Web traceroute server.
 
 This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
+
+It can be used as a **recon tool** by querying Shodan for data about any type of target (CIDR blocks/URLs/single IPs/hostnames). This will quickly give the user a complete breakdown about open ports, known vulnerabilities, known software and hardware running on the target, and more - without ever sending a single packet to the target.
+JSON output of the results, multiple simultaneous targets and IP list file inputs and are also supported. Click [here](https://github.com/nitefood/asn/edit/master/README.md#shodan-scanning-1) for more information about Shodan scanning mode.
 
 It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](#running-lookups-from-the-browser) for more information about server mode functionality.
 
@@ -22,38 +25,27 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 #### Features:
 
 * It will lookup relevant Autonomous System information for any given AS number, including:
-  
-  * **Organization name**
-  * **IXP Presence** (*Internet Exchange facilities where the AS is present*)
-  * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
-  * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
-  * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
-- It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
+    * **Organization name**
+    * **IXP Presence** (*Internet Exchange facilities where the AS is present*)
+    * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
+    * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
+    * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
+* It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
+* It will detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
+* It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
+* It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
+    * *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
+    * *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
+* It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
+* It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
+* It will perform **IP fingerprinting** using Shodan's [InternetDB API](%5Bhttps://internetdb.shodan.io/%5D(https://internetdb.shodan.io/)) and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops (detailed traces only).
+    * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More informations [here](https://github.com/nitefood/asn/edit/master/README.md#shodan-scanning-1) about how to use the script as a recon tool.
 
-- It will detect **IXPs** (Internet Exchange Points) traversed during the trace, and highlight them for clarity.
-
-- It will attempt to lookup all relevant **abuse contacts** for any given IP or prefix.
-
-- It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
-  
-  - *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
-  - *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
-
-- It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
-
-- It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
-
-- It will perform **IP fingerprinting** using Shodan's [InternetDB API]([https://internetdb.shodan.io/](https://internetdb.shodan.io/)) and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops (detailed traces only).
-
-- It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
-  
-  - It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
-
-- It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
-
-- It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
-
-- Lookup data can be integrated by third party tools by choosing **JSON output** and parsing the results externally, turning the script into a lookup API endpoint.
+* It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
+    * It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
+* It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
+* It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
+* Lookup data can be integrated by third party tools by choosing **JSON output** and parsing the results externally, turning the script into a lookup API endpoint.
 
 Screenshots for every lookup option are below.
 
@@ -86,39 +78,39 @@ Requires Bash v4.2+. Tested on:
 * Windows (WSL2, Cygwin)
 * MacOS *(thanks [Antonio Prado](https://github.com/Antonio-Prado) and Alessandro Barisone)*
 
----
+- - -
 
 ## Screenshots
 
 ### Generic usage
 
-* _IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as known good_
+* *IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as known good*
 
 ![ipv4lookup](https://user-images.githubusercontent.com/24555810/159185461-cb7a8601-dcae-4188-b531-1eafec6ed19b.png)
 
-* _IPv4 lookup (bad reputation IP) with threat analysis/scoring, CPE/CVE identification and open ports reporting_
+* *IPv4 lookup (bad reputation IP) with threat analysis/scoring, CPE/CVE identification and open ports reporting*
 
 ![ipv4badlookup](https://user-images.githubusercontent.com/24555810/159185495-1c2a0c71-2019-4f46-9d27-48d40ed9887a.png)
 
-- *IP fingerprinting with advanced datacenter+region identification, known vulnerabilities affecting the target and honeypot identification according to Shodan data*
+* *IP fingerprinting with advanced datacenter+region identification, known vulnerabilities affecting the target and honeypot identification according to Shodan data*
 
 ![](https://user-images.githubusercontent.com/24555810/159185618-fa20f45c-91b4-45b4-ad82-02becc648fa5.png)
 
-* _IPv6 lookup_
+* *IPv6 lookup*
 
 ![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
 
-* _Autonomous system number lookup with BGP stats, peering and prefix informations_
+* *Autonomous system number lookup with BGP stats, peering and prefix informations*
 
 ![asnlookup](https://user-images.githubusercontent.com/24555810/160516155-d00d3d9b-915d-41f4-8496-bc5e9b98f4b0.png)
 
-* _Hostname/URL lookup_
+* *Hostname/URL lookup*
 
 ![hostnamelookup](https://user-images.githubusercontent.com/24555810/159185854-f07c005e-e014-4d11-921d-db0684c70981.png)
 
 ### AS Path tracing
 
-* _ASPath trace to www.github.com_
+* *ASPath trace to www.github.com*
 
 ![pathtrace](https://user-images.githubusercontent.com/24555810/117336096-1d9ea700-ae9c-11eb-82dc-6aaf9dc68a6e.png)
 
@@ -126,93 +118,89 @@ Requires Bash v4.2+. Tested on:
 
 ![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100301579-b4d00c00-2f98-11eb-82c5-047c190ffcd6.png)
 
-* _Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 6_
+* *Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 6*
 
 ![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/117335188-28a50780-ae9b-11eb-98d9-cfd3bc2f1295.png)
 
 ### Network search by organization
 
-* _Organization search for "github"_
+* *Organization search for "github"*
 
 ![search_by_org](https://user-images.githubusercontent.com/24555810/99845076-5b20a980-2b74-11eb-9312-986867034cc9.png)
 
+### Shodan scanning
+
+* *Scanning for Shodan informations for a list of IPs*
+
+  ![shodanscan](https://user-images.githubusercontent.com/24555810/161406477-a9aa5446-554d-43a7-a371-1a044e919dfa.png)
+
 ### Suggested ASNs search
 
-* _Suggested ASNs for "google"_
+* *Suggested ASNs for "google"*
 
 ![asnsuggest](https://user-images.githubusercontent.com/24555810/98309344-7e6f2480-1fca-11eb-9ec6-df2cb63a62ce.png)
 
----
+- - -
 
 ## Installation
 
 ### Prerequisite packages
 
-This script requires **BASH v4.2** or later. You can check your version by running from your shell: 
+This script requires **BASH v4.2** or later. You can check your version by running from your shell:
 
 `bash -c 'echo $BASH_VERSION'`
 
 Some additional packages are also required for full functionality:
 
 * **Debian 10 / Ubuntu 20.04 (or newer):**
-  
-  ```
-  apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr ncat aha
-  ```
+
+```
+apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap ncat aha
+```
 
 * **Debian 9 / Ubuntu 18.04 (or older):**
-  
-  ```
-  apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc make && \
-  git clone https://github.com/theZiz/aha.git && \
-  make install -C aha/
-  ```
+
+```
+apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc make && \
+git clone https://github.com/theZiz/aha.git && \
+make install -C aha/
+```
 
 * **CentOS / RHEL / Rocky Linux 8:**
-  
-  ```
-  dnf -y install epel-release && \
-  dnf -y install curl whois bind-utils mtr jq nmap-ncat ipcalc aha grepcidr
-  ```
+
+```
+dnf -y install epel-release && \
+dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
+```
 
 * **Fedora:**
-  
-  ```
-  dnf -y install curl whois bind-utils mtr jq nmap-ncat ipcalc aha grepcidr
-  ```
+
+```
+dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
+```
 
 * **Manjaro/Arch Linux:**
-  
-  ```
-   yay -S asn-git
-  ```
+
+```
+ yay -S asn-git
+```
 
 * **FreeBSD**:
-  
-  `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
-
+`env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
 * **MacOS** (using [Homebrew](https://brew.sh)):
-  
   `brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr`
   
   *Notes for MacOS users:*
   
-  * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
-  * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
-
+    * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
+    * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
 * **Windows**:
-  
-  * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
-    
-    Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
-    Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
-    
-    *Note for WSL2 users:*
-    
-    * *systemd is not currently available in WSL2, so you won't be able to run the **asn server** in daemon mode as described below (if you want server mode you'll have to launch it manually using `asn -l`). An alternative could be to run it as a background process (optionally also using `nohup`), or using Windows' own task scheduler to start it at boot.*
-  
-  * **using [Cygwin](https://cygwin.com/index.html):**
-    
+    * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
+      Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
+      Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
+      *Note for WSL2 users:*
+        * *systemd is not currently available in WSL2, so you won't be able to run the **asn server** in daemon mode as described below (if you want server mode you'll have to launch it manually using `asn -l`). An alternative could be to run it as a background process (optionally also using `nohup`), or using Windows' own task scheduler to start it at boot.*
+    * **using [Cygwin](https://cygwin.com/index.html):**
     Most of the prerequisite packages listed above for *Debian 10 / Ubuntu 20.04 (or newer)* are obtainable directly with Cygwin's own Setup wizard (or through scripts like *apt-cyg*). You will still have to manually compile (or find a suitable third-party precompiled binary) the *mtr*, *grepcidr* and *aha* tools. Instructions on how to do so can be found directly on the respective projects homepages.
 
 ### Script download and installation
@@ -230,38 +218,34 @@ You can then use the script by running `asn`.
 To control the **asn server** with utilities like *systemctl* and *service*, and to enable it to automatically start at boot, follow these steps:
 
 1. create a new file called `/etc/systemd/system/asn.service` with the following content (make sure you edit the *ExecStart* line to match your installation path and desired startup options):
-   
-   ```
-   [Unit]
-   Description=ASN lookup and traceroute server
-   After=network.target
-   StartLimitIntervalSec=0
-   
-   [Service]
-   Type=simple
-   Restart=always
-   RestartSec=1
-   User=nobody
-   ExecStart=/usr/bin/asn -l 0.0.0.0
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
 
-2. Enable the *CAP_NET_RAW* capability for the mtr-packet binary:
-   
-   `setcap cap_net_raw+ep $(which mtr-packet)`
-   
-   *Explanation: this will allow mtr-packet to create raw sockets (and thus perform traces) when launched as an unprivileged user (we're setting up the service to run as user nobody for added security), without the requirement of the setuid-root bit and without having to invoke mtr as root. A thorough explanation for this can be found [here](https://github.com/traviscross/mtr/blob/master/SECURITY).*
+```
+[Unit]
+Description=ASN lookup and traceroute server
+After=network.target
+StartLimitIntervalSec=0
 
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=nobody
+ExecStart=/usr/bin/asn -l 0.0.0.0
+
+[Install]
+WantedBy=multi-user.target
+```
+
+2. Enable the *CAP\_NET\_RAW* capability for the mtr-packet binary:
+`setcap cap_net_raw+ep $(which mtr-packet)`
+*Explanation: this will allow mtr-packet to create raw sockets (and thus perform traces) when launched as an unprivileged user (we're setting up the service to run as user nobody for added security), without the requirement of the setuid-root bit and without having to invoke mtr as root. A thorough explanation for this can be found [here](https://github.com/traviscross/mtr/blob/master/SECURITY).*
 3. Now you can refer to standard systemd utilities to perform service operations:
-   
-   * To start the service: `systemctl start asn`
-   * To stop the service: `systemctl stop asn`
-   * To check its status and latest logs: `systemctl status asn`
-   * To follow its logging in real time: `journalctl -f -u asn`
-   * To start the service automatically on boot: `systemctl enable asn`
-   * To disable automatic start on boot: `systemctl disable asn`
+    * To start the service: `systemctl start asn`
+    * To stop the service: `systemctl stop asn`
+    * To check its status and latest logs: `systemctl status asn`
+    * To follow its logging in real time: `journalctl -f -u asn`
+    * To start the service automatically on boot: `systemctl enable asn`
+    * To disable automatic start on boot: `systemctl disable asn`
 
 ### IP reputation API token
 
@@ -298,92 +282,177 @@ Either way, `asn` will pick up your token on the next run (no need to restart th
 
 where `TARGET` can be one of the following:
 
-* **AS number** -- lookup matching ASN and BGP announcements/neighbours data. Supports "as123" and "123" formats (case insensitive)
-* **IPv4/IPv6/Prefix** -- lookup matching route(4/6), IP reputation and ASN data
-* **Hostname** -- resolve the host and lookup data (same as IPv4/IPv6 lookup. Supports multiple IPs - e.g. DNS RR)
-* **URL** -- extract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and [prepended credentials](https://en.wikipedia.org/wiki/Basic_access_authentication#URL_encoding)
-* **Organization name** -- search by company name and lookup network ranges exported by (or related to) the company
+* **AS number** \-\- lookup matching ASN and BGP announcements/neighbours data\. Supports "as123" and "123" formats \(case insensitive\)
+* **IPv4/IPv6/Prefix** \-\- lookup matching route\(4/6), IP reputation and ASN data
+* **Hostname** \-\- resolve the host and lookup data \(same as IPv4/IPv6 lookup\. Supports multiple IPs \- e\.g\. DNS RR\)
+* **URL** \-\- extract hostname/IP from the URL and lookup relative data\. Supports any protocol prefix\, non\-standard ports and [prepended credentials](https://en.wikipedia.org/wiki/Basic_access_authentication#URL_encoding)
+* **Organization name** \-\- search by company name and lookup network ranges exported by \(or related to\) the company
 
 <u>Options</u>:
 
+* `[-t]`
+
+    * enables lookup and path tracing for targets **(this is the default behavior)**
+
+      _.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)_
+
 * `[-d]`
-  * enables *detailed mode* (more info below)
+    
+    * enables detailed trace mode (more info below)
+    
+      _.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)_
+    
 * `[-n]`
-  * disables path tracing and only outputs lookup info
-* `[-o]`
-  * forces a Search-By-Organization lookup and skip all target identification checks
+    
+    * disables path tracing and only outputs lookup info for targets
+    
+      _.asnrc option equivalent: `MTR_TRACING=false` (default: `true`)_
+    
 * `[-s]`
-  * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+    
+    * Launch a Shodan InternetDB scan for the target(s). Supports multiple targets,
+      mixed target types (IP/hostname/CIDR/URL) and piping from stdin.
+    
+* `[-o]`
+    
+    * forces a Search-By-Organization lookup and skip all target identification checks
+    
+* `[-a]`
+    
+    * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+    
 * `[-j]`
-  * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
+    
+    * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
+    
+      _.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)_
+    
 * `[-J]`
-  * enables pretty-printed JSON output.
+    
+    * enables pretty-printed JSON output.
+    
+      _.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)_
+    
+* `[-m]`
+
+    * enables monochrome mode (disables all colors).
+
+      _.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)_
+
 * `[-h]`
-  * Show usage information.
+    
+    * Show usage information.
+    
 * `[-l]`
-  * Launch the script in *server mode*. See **Server Options** below
+    
+    * Launch the script in *server mode*. See **Server Options** below
 
 <u>Server Options</u>:
 
 * `BIND_ADDRESS`
-  * IP address (v4/v6) to bind the listening server to (e.g. `asn -l 0.0.0.0`)
-* `BIND_PORT` 
-  * TCP Port to bind the listening server to (e.g. `asn -l 12345`)
+    
+    * IP address (v4/v6) to bind the listening server to (e.g. `asn -l 0.0.0.0`)
+    
+      _.asnrc option equivalent: `DEFAULT_SERVER_BINDADDR="<ipaddress>"` (default: `"127.0.0.1"`)_
+    
+* `BIND_PORT`
+    
+    * TCP Port to bind the listening server to (e.g. `asn -l 12345`)
+    
+      _.asnrc option equivalent: `DEFAULT_SERVER_BINDPORT="<port>"` (default: `"49200"`)_
+    
 * `BIND_ADDRESS BIND_PORT`
-  * IP address and port to bind the listening server to (e.g. `asn -l ::1 12345`)
+    
+    * IP address and port to bind the listening server to (e.g. `asn -l ::1 12345`)
+    
 * `-v`
-  * Enable verbose output and debug messages in server mode
+    
+    * Enable verbose output and debug messages in server mode
+    
+      _.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)_
+    
 * `--allow host[,host,...]`
-  * Allow only given hosts to connect to the server
+    
+    * Allow only given hosts to connect to the server
+    
 * `--allowfile file`
-  * A file of hosts allowed to connect to the server
+    
+    * A file of hosts allowed to connect to the server
+    
 * `--deny host[,host,...]`
-  * Deny given hosts from connecting to the server
+    
+    * Deny given hosts from connecting to the server
+    
 * `--denyfile file`
-  * A file of hosts denied from connecting to the server
-* `-m, --max-conns <n>`
-  * The maximum number of simultaneous connections accepted by the server. 100 is the default.
+    
+    * A file of hosts denied from connecting to the server
+    
+* `--max-conns <n>`
+    
+    * The maximum number of simultaneous connections accepted by the server. 100 is the default.
 
 *Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
 *Unless specified, the default IP:PORT values of **127.0.0.1:49200** will be used (e.g.* `asn -l`*)*
 
-Default behavior:
+##### *Default behavior:*
 
-* The script will attempt to automatically identify the `TARGET` type, if invoked with `-d` , `-n` or without options, 
+* The script will attempt to automatically identify the `TARGET` type, if invoked with `-t`, `-n`, `-d` or without options,
 * AS path tracing is **enabled by default** for all lookups involving an IP or hostname. In case of multiple IP results, the script will trace the first IP, with a preference for IPv6 if possible on the user's host.
 
-##### *Detailed mode (`-d`)*
 
-- Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
-  
-  Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
+
+##### *Preferences file (`$HOME/.asnrc`)*
+
+Options defaults can be overridden by creating a file called `.asnrc` in the user's **home directory**.
+The following values are the defaults. Any (or all) of them can be specified in the settings file and adjusted to the user's preference:
+
+```shell
+MTR_TRACING=true
+DETAILED_TRACE=false
+MTR_ROUNDS=5
+MAX_CONCURRENT_SHODAN_REQUESTS=20
+SHODAN_SHOW_TOP_N=5
+MONOCHROME_MODE=false
+ASN_DEBUG=false
+JSON_OUTPUT=false
+JSON_PRETTY=false
+DEFAULT_SERVER_BINDADDR="127.0.0.1"
+DEFAULT_SERVER_BINDPORT="49200"
+```
+
+
+
+##### *Detailed mode (`-d` | `DETAILED_TRACE=true`)*
+
+* Detailed hop info reporting and RPKI validation can be turned on by passing the `[-d|--detailed]` command line switch. This will enable querying the public [pWhois server](https://pwhois.org/server.who) and the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation) for every hop in the mtr trace. Relevant info will be displayed as a "tree" below the hop data, in addition to Team Cymru's server output (which only reports the AS name that the organization originating the prefix gave to its autonomous system number). This can be useful to figure out more details regarding the organization's name, the prefix' intended designation, and even (to a certain extent) its geographical scope.
+Furthermore, this will enable a warning whenever RPKI validation fails for one of the hops in the trace, indicating which AS in the path is wrongly announcing (as per current pWhois data) the hop prefix, indicating a potential route leak or BGP hijacking incident.
 
 ##### *Organization search (`-o`)*
 
-- The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
-  In order to force an organization search (for example for Orgs containing `.` in their name), pass the `[-o|--organization]` command line switch.
+* The script will try to figure out if the input is an Organization name (i.e. if it doesn't look like an IP address, an AS number or a hostname).
+In order to force an organization search (for example for Orgs containing `.` in their name), pass the `[-o|--organization]` command line switch.
 
-##### *ASN suggest (`-s`)*
+##### *ASN suggest (`-a`)*
 
-- The script will try to find ASNs matching the given search string, using the RIPEStat API. This mode can be used to map all the autonomous systems related to a given company.
+* The script will try to find ASNs matching the given search string, using the RIPEStat API. This mode can be used to map all the autonomous systems related to a given company.
 
 ##### *Server mode (`-l`)*
 
-- The script will start up a webserver allowing the user to run remote lookups and traceroutes directly from the browser.
-  The web server is actually an [ncat](https://nmap.org/ncat/) listener waiting for requests, responding to browsers querying through the HTTP protocol. This interface makes for a straightforward integration into user workflow and no need to download any client-side tools.
-  By simply using a Javascript [bookmarklet](https://en.wikipedia.org/wiki/Bookmarklet) or custom [search engine](https://www.howtogeek.com/114176/how-to-easily-create-search-plugins-add-any-search-engine-to-your-browser/), it will be possible to launch remote traces and lookups without ever leaving the browser.
-  Refer to the [this section](#running-lookups-from-the-browser) for more information.
+* The script will start up a webserver allowing the user to run remote lookups and traceroutes directly from the browser.
+The web server is actually an [ncat](https://nmap.org/ncat/) listener waiting for requests, responding to browsers querying through the HTTP protocol. This interface makes for a straightforward integration into user workflow and no need to download any client-side tools.
+By simply using a Javascript [bookmarklet](https://en.wikipedia.org/wiki/Bookmarklet) or custom [search engine](https://www.howtogeek.com/114176/how-to-easily-create-search-plugins-add-any-search-engine-to-your-browser/), it will be possible to launch remote traces and lookups without ever leaving the browser.
+Refer to the [this section](#running-lookups-from-the-browser) for more information.
 
-##### 
+
 
 ## Notes
 
 ##### *Organization data, IP Reputation, noise classification and IP fingerprinting*
 
-- Organization data is taken from pWhois
-- IP reputation data is taken from StopForumSpam and IpQualityScore
-  - Reputation is also enriched with IP *noise* classification (addresses that have been observed scanning the Internet, and very likely to appear in your logs), taken from [GreyNoise](https://greynoise.io). This will also help identify known-good IPs (e.g. Google networks, CDNs, etc.) from aggressive, known-malicious scanners.
-- IP fingerprinting data is retrieved from Shodan's [InternetDB API](https://internetdb.shodan.io/). Data includes open ports, [software/hardware information](https://en.wikipedia.org/wiki/Common_Platform_Enumeration) and [known vulnerabilities](https://en.wikipedia.org/wiki/Common_Vulnerabilities_and_Exposures) pertaining to the IP address.
+* Organization data is taken from pWhois
+* IP reputation data is taken from StopForumSpam and IpQualityScore
+    * Reputation is also enriched with IP *noise* classification (addresses that have been observed scanning the Internet, and very likely to appear in your logs), taken from [GreyNoise](https://greynoise.io). This will also help identify known-good IPs (e.g. Google networks, CDNs, etc.) from aggressive, known-malicious scanners.
+* IP fingerprinting data is retrieved from Shodan's [InternetDB API](https://internetdb.shodan.io/). Data includes open ports, [software/hardware information](https://en.wikipedia.org/wiki/Common_Platform_Enumeration) and [known vulnerabilities](https://en.wikipedia.org/wiki/Common_Vulnerabilities_and_Exposures) pertaining to the IP address.
 
 ##### *Geolocation*
 
@@ -397,16 +466,16 @@ The script will perform IP and trace hop geolocation with this logic:
 
 The script will use the ip-api, incolumitas.com, RIPE IPmap and PeeringDB services to classify target IPs and trace hops into these categories:
 
-- [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
-- Mobile network
-- Proxy host (TOR exit node/VPN/etc)
-- Hosting network (datacenter/hosting provider/etc) along with detailed DC and region identification where available
-- IXP network
+* [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
+* Mobile network
+* Proxy host (TOR exit node/VPN/etc)
+* Hosting network (datacenter/hosting provider/etc) along with detailed DC and region identification where available
+* IXP network
 
 ##### *IXP detection and unannounced prefixes*
 
-- The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
-- The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with some [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
+* The script will detect [IXPs](https://en.wikipedia.org/wiki/Internet_exchange_point) traversed during path traces by matching them with [PeeringDB](https://www.peeringdb.com/)'s comprehensive dataset of IXP prefixes.
+* The script will also attempt a best-effort, fallback generic `whois` lookup when Team Cymru, pWhois and PeeringDB have no info about the IP address or prefix. This is usually the case with some [PNI](https://en.wikipedia.org/wiki/Peering#Private_peering) prefixes, and will give better insight into the path taken by packets.
 
 ## Running lookups from the browser
 
@@ -452,7 +521,7 @@ The bookmarklet is actually a small piece of Javascript code which will grab the
 
 The link you drag to the bookmarks bar is actually a *minified* (i.e.: compacted) version of the source javascript code, but for reference, here's the full source:
 
-```javascript
+``` javascript
 javascript:(function () {
     var asnserver = "localhost:49200";
     var target = window.location.hostname;
@@ -474,7 +543,7 @@ Once the trace is finished, an option to share the output on [termbin](https://t
 
 #### Search engine setup
 
-In order to take full advantage of having `asn` inside the browser, it is possible to configure it as a custom search engine for the browser search bar. This allows to leverage the server to  search for **ASNs**, **URLs**, **IPs**, **Hostnames**, and so on, depending on the search string.
+In order to take full advantage of having `asn` inside the browser, it is possible to configure it as a custom search engine for the browser search bar. This allows to leverage the server to search for **ASNs**, **URLs**, **IPs**, **Hostnames**, and so on, depending on the search string.
 
 Generally speaking, this implies instructing the browser that when a certain **keyword** is prepended to a search, the following characters (the actual **search string**, identified by `%s`) have to be passed to a certain URL. The URL is then composed according to this logic, and opened just like a normal webpage.
 
@@ -485,27 +554,20 @@ For quick reference, the location URL string to enter (for both Firefox and Chro
 
 Here's how to add a search engine in Firefox and Chrome:
 
-***Firefox***:
+<i>**Firefox**</i>:
 
 * Simply create a new bookmark and fill its details like this:
-  
-  ![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
-  
-  Afterwards, you will be able to run queries and traceroutes by simply entering, for example, `@asn 8.8.8.8` in the browser's location bar.
+![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
+Afterwards, you will be able to run queries and traceroutes by simply entering, for example, `@asn 8.8.8.8` in the browser's location bar.
 
 ***Chrome:***
 
-1. Right click the location bar and select ***Manage search engines...***
-   
-   ![searchsetup_chrome_1](https://user-images.githubusercontent.com/24555810/102161929-87d09400-3e88-11eb-9e42-70087e3fab87.png)
-   
-   2.Click **Add**:
-   
-   ![searchsetup_chrome_2](https://user-images.githubusercontent.com/24555810/102162100-dc740f00-3e88-11eb-8037-528fbcc636e9.png)
-   
-   3.Fill in the details as shown below:
-   
-   ![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
+1. Right click the location bar and select <i>**Manage search engines...**</i>
+![searchsetup_chrome_1](https://user-images.githubusercontent.com/24555810/102161929-87d09400-3e88-11eb-9e42-70087e3fab87.png)
+2.Click **Add**:
+![searchsetup_chrome_2](https://user-images.githubusercontent.com/24555810/102162100-dc740f00-3e88-11eb-8037-528fbcc636e9.png)
+3.Fill in the details as shown below:
+![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
 
 As usual, the keyword is entierly customizable to your preference.
 
@@ -517,14 +579,14 @@ As usual, the keyword is entierly customizable to your preference.
 
 ##### *Port forwarding*
 
-In order to access the server remotely, beside binding to `0.0.0.0` (or any other relevant IP address for your scenario),  if the host is behind a NAT router, you'll need to forward the listening port (`BIND_PORT`) from the host/router outside IP to the actual machine where the ASN server is running on.
+In order to access the server remotely, beside binding to `0.0.0.0` (or any other relevant IP address for your scenario), if the host is behind a NAT router, you'll need to forward the listening port (`BIND_PORT`) from the host/router outside IP to the actual machine where the ASN server is running on.
 It is a single TCP port (by default `TCP/49200`), and you can change it via the command line parameters (see [Usage](#usage)).
 
 ##### *Textual browser client*
 
 It is possible to launch remote traces from another command line, and view the results directly in the terminal. All it takes is a compatible text browser, for example `elinks` (but you can download results for later reviewing even using `curl` or really anything else).
 
-The script makes use of 8-bit ANSI colors for its output, so the command to launch a remote trace using elinks would be something like this: 
+The script makes use of 8-bit ANSI colors for its output, so the command to launch a remote trace using elinks would be something like this:
 
 `elinks -dump -dump-color-mode 3 http://<ASN_SRV_IP>:49200/asn_lookup&8.8.8.8`
 
@@ -544,6 +606,35 @@ The available options, and some usage examples, can be viewed by running `asn -h
 
 *For the bookmarklet, you'll need to change this value at the very beginning:* `var asnserver="localhost:49200"` *and make it point to the new address:port pair. No further change is required in the remaining JS code.*
 
+
+
+## Shodan scanning (Recon Mode)
+
+The tool can query Shodan's InternetDB API to look up informations regarding any type of targets. Currently supported targets are:
+
+- **IP addresses**
+- **CIDR blocks** *(will scan all of the IPs in the range)*
+- **URLs**
+- **Hostnames** *(will resolve to an IP (or list of IPs) and query all of them)*
+
+Target types can be mixed and queried in a single run. Targets can be piped to the tool via standard input as well.
+
+*Usage Examples:*
+
+`asn -s 1.1.1.1 8.8.8.8 9.9.9.9`
+
+`asn -s https://www.google.com 8.8.8.0/24`
+
+`asn -s < iplist`
+
+`curl -s https://raw.githubusercontent.com/firehol/blocklist-ipsets/master/blocklist_de_bots.ipset | asn -s`
+
+Shodan scan results can be output in JSON mode by passing the `-j` or `-J` options.
+
+*Note: the Nmap tool is needed to use this feature, but note that **no packets whatsoever** are sent to the targets. Nmap is only required to break down CIDR blocks into single IPs (as a calculator tool).*
+
+
+
 ## JSON output and API mode
 
 #### Locally (shell mode)
@@ -552,7 +643,7 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
 
 *Example 1 - IPv4 lookup:*
 
-```jsonp
+``` jsonp
 root@KRUSTY:~# asn -J 8.8.8.8
 {
   "target": "8.8.8.8",
@@ -617,7 +708,7 @@ root@KRUSTY:~# asn -J 8.8.8.8
 
 *Example 2 - ASN lookup:*
 
-```jsonp
+``` jsonp
 root@KRUSTY:~# asn -J 5505
 {
   "target": "5505",
@@ -705,10 +796,6 @@ root@KRUSTY:~# asn -J 5505
       "inetnums": {
         "v4": [
           "185.123.204.0/22",
-          "185.123.204.0/24",
-          "185.123.205.0/24",
-          "185.123.206.0/24",
-          "185.123.207.0/24",
           "185.210.225.0/24",
           "185.210.226.0/24",
           "185.210.227.0/24",
@@ -725,13 +812,11 @@ root@KRUSTY:~# asn -J 5505
     }
   ]
 }
-
-
 ```
 
 *Example 3 - enumerating abuse contacts for every IP to which a hostname resolves:*
 
-```shell
+``` shell
 root@KRUSTY:~# asn -j www.google.com | jq '[.results[].abuse_contacts[]] | unique[]'
 "network-abuse@google.com"
 "ripe-contact@google.com"
@@ -739,7 +824,7 @@ root@KRUSTY:~# asn -j www.google.com | jq '[.results[].abuse_contacts[]] | uniqu
 
 *Example 4 - enumerating known vulnerabilities for a target:*
 
-```shell
+``` shell
 root@KRUSTY:~# asn -j 45.67.34.100 | jq '.results[].fingerprinting.vulns[]'
 "CVE-2017-15906"
 "CVE-2018-15919"
@@ -751,14 +836,14 @@ By running the script in [server mode](#running-lookups-from-the-browser), it is
 
 *Example 1: querying the server remotely using `curl` (compact output):*
 
-```shell
+``` shell
 root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_json&1.1.1.1"
 {"target":"1.1.1.1","target_type":"ipv4","result":"ok","reason":"success","version":"0.72.1","request_time":"2022-03-29T00:13:11","request_duration":5,"result_count":1,"results":[{"ip":"1.1.1.1","ip_version":"4","reverse":"one.one.one.one","org_name":"APNIC and Cloudflare DNS Resolver project","abuse_contacts":["helpdesk@apnic.net"],"routing":{"is_announced":true,"as_number":"13335","as_name":"CLOUDFLARENET, US","net_range":"1.1.1.0/24","net_name":"APNIC-LABS","roa_count":"1","roa_validity":"valid"},"type":{"is_bogon":false,"is_anycast":true,"is_mobile":false,"is_proxy":false,"is_dc":true,"dc_details":{"dc_name":"Cloudflare"},"is_ixp":false},"geolocation":{"city":"Magomeni","region":"Dar es Salaam","country":"Tanzania","cc":"TZ"},"reputation":{"status":"good","is_known_good":true,"known_as":"Cloudflare Public DNS"},"fingerprinting":{"ports":[53,80,443]}}]}
 ```
 
-*Example 2: querying the server remotely using `curl` (pretty printed output):* 
+*Example 2: querying the server remotely using `curl` (pretty printed output):*
 
-```shell
+``` shell
 root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_jsonp&10.0.0.1"
 {
   "target": "10.0.0.1",
@@ -787,15 +872,11 @@ root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_jsonp&10.0.0.1"
     }
   ]
 }
-
-
 ```
-
-
 
 ## Thanks
 
-An initial version of this script was featured in the **Security Trails** blog post "[_ASN Lookup Tools, Strategies and Techniques_](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
+An initial version of this script was featured in the **Security Trails** blog post "[*ASN Lookup Tools, Strategies and Techniques*](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
 
 Thanks [Massimo Candela](https://github.com/massimocandela/) for your support and excellent work on [IPmap](https://ipmap.ripe.net/), [BGPlay](https://github.com/massimocandela/BGPlay) and [TraceMON](https://github.com/RIPE-NCC/tracemon)!
 
