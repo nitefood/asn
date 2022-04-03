@@ -16,7 +16,7 @@ ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP r
 This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
 It can be used as a **recon tool** by querying Shodan for data about any type of target (CIDR blocks/URLs/single IPs/hostnames). This will quickly give the user a complete breakdown about open ports, known vulnerabilities, known software and hardware running on the target, and more - without ever sending a single packet to the target.
-JSON output of the results, multiple simultaneous targets and IP list file inputs and are also supported. Click [here](https://github.com/nitefood/asn#shodan-scanning) for more information about Shodan scanning mode.
+JSON output of the results, multiple simultaneous targets and IP list file inputs and are also supported. Click [here](https://github.com/nitefood/asn#shodan-scanning-recon-mode) for more information about Shodan scanning mode.
 
 It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](#running-lookups-from-the-browser) for more information about server mode functionality.
 
@@ -39,7 +39,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 * It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
 * It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 * It will perform **IP fingerprinting** using Shodan's [InternetDB API](%5Bhttps://internetdb.shodan.io/%5D(https://internetdb.shodan.io/)) and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops (detailed traces only).
-    * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More informations [here](https://github.com/nitefood/asn#shodan-scanning) about how to use the script as a recon tool.
+    * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More informations [here](https://github.com/nitefood/asn#shodan-scanning-recon-mode) about how to use the script as a recon tool.
 
 * It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
     * It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
@@ -189,9 +189,9 @@ dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
 `env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
 * **MacOS** (using [Homebrew](https://brew.sh)):
   `brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr`
-  
+
   *Notes for MacOS users:*
-  
+
     * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
     * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
 * **Windows**:
@@ -297,42 +297,42 @@ where `TARGET` can be one of the following:
       _.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)_
 
 * `[-d]`
-  
+
     * enables detailed trace mode (more info below)
-    
+
       _.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)_
-    
+
 * `[-n]`
-  
+
     * disables path tracing and only outputs lookup info for targets
-    
+
       _.asnrc option equivalent: `MTR_TRACING=false` (default: `true`)_
-    
+
 * `[-s]`
-  
+
     * Launch a Shodan InternetDB scan for the target(s). Supports multiple targets,
       mixed target types (IP/hostname/CIDR/URL) and piping from stdin.
-    
+
 * `[-o]`
-  
+
     * forces a Search-By-Organization lookup and skip all target identification checks
-    
+
 * `[-a]`
-  
+
     * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
-    
+
 * `[-j]`
-  
+
     * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
-    
+
       _.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)_
-    
+
 * `[-J]`
-  
+
     * enables pretty-printed JSON output.
-    
+
       _.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)_
-    
+
 * `[-m]`
 
     * enables monochrome mode (disables all colors).
@@ -340,55 +340,55 @@ where `TARGET` can be one of the following:
       _.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)_
 
 * `[-h]`
-  
+
     * Show usage information.
-    
+
 * `[-l]`
-  
+
     * Launch the script in *server mode*. See **Server Options** below
 
 <u>Server Options</u>:
 
 * `BIND_ADDRESS`
-  
+
     * IP address (v4/v6) to bind the listening server to (e.g. `asn -l 0.0.0.0`)
-    
+
       _.asnrc option equivalent: `DEFAULT_SERVER_BINDADDR="<ipaddress>"` (default: `"127.0.0.1"`)_
-    
+
 * `BIND_PORT`
-  
+
     * TCP Port to bind the listening server to (e.g. `asn -l 12345`)
-    
+
       _.asnrc option equivalent: `DEFAULT_SERVER_BINDPORT="<port>"` (default: `"49200"`)_
-    
+
 * `BIND_ADDRESS BIND_PORT`
-  
+
     * IP address and port to bind the listening server to (e.g. `asn -l ::1 12345`)
-    
+
 * `-v`
-  
+
     * Enable verbose output and debug messages in server mode
-    
+
       _.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)_
-    
+
 * `--allow host[,host,...]`
-  
+
     * Allow only given hosts to connect to the server
-    
+
 * `--allowfile file`
-  
+
     * A file of hosts allowed to connect to the server
-    
+
 * `--deny host[,host,...]`
-  
+
     * Deny given hosts from connecting to the server
-    
+
 * `--denyfile file`
-  
+
     * A file of hosts denied from connecting to the server
-    
+
 * `--max-conns <n>`
-  
+
     * The maximum number of simultaneous connections accepted by the server. 100 is the default.
 
 *Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
