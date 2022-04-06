@@ -1381,15 +1381,17 @@ ShodanRecon(){
 	curloutput=""
 	urllist=""
 
+	# trim leading whitespace from userinput
+	userinput="${1#' '}"
+
 	# identify target(s) type
-	targetlist=$(echo -e "$1" | tr ' ' '\n') # skip comments and blanks
+	targetlist=$(echo -e "$userinput" | tr ' ' '\n')
 	target_count=$(echo -e "$targetlist" | wc -l)
 	if [ "$target_count" -gt 1 ]; then
 		# user passed multiple targets "e.g. asn -s 1.1.1.1 8.8.8.8"
 		userinput="multiple targets"
 	fi
-	# sanitize input (\n from stdin would mangle BoxHeader)
-	userinput=$(echo -e "$userinput")
+
 	BoxHeader "Shodan scan for $userinput"
 
 	for target in $targetlist; do
@@ -3342,8 +3344,8 @@ while getopts "$optspec" optchar; do {
 }
 done
 
-if [ -t 0 ]; then
-	# input is from the terminal
+if [ -t 0 ] || [ "$IS_HEADLESS" = true ]; then
+	# input is from the terminal (or this is a headless instance)
 	if [ "$OPTIONS_PRESENT" = false ]; then
 		# shellcheck disable=SC2124
 		userinput="$@"
