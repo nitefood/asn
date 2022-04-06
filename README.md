@@ -321,31 +321,37 @@ where `TARGET` can be one of the following:
 
     * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
 
-* `[-j]`
+* `[-l]`
+
+    * Launch the script in *server mode*. See **Server Options** below
+
+* `-j`
 
     * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
 
       _.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)_
 
-* `[-J]`
+* `-J`
 
     * enables pretty-printed JSON output.
 
       _.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)_
 
-* `[-m]`
+* `-m`
 
     * enables monochrome mode (disables all colors).
 
       _.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)_
 
-* `[-h]`
+* `-v`
+
+    * Enable debug messages (will display all URLs being queried to help identify external API slowdowns)
+
+      _.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)_
+
+* `-h`
 
     * Show usage information.
-
-* `[-l]`
-
-    * Launch the script in *server mode*. See **Server Options** below
 
 <u>Server Options</u>:
 
