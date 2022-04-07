@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.3-rc2"
+ASN_VERSION="0.72.3-rc3"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -168,18 +168,38 @@ QueryRipestat(){
 	json_ipv4_other_inetnums=""
 	json_ipv6_other_inetnums=""
 	DebugPrint "${yellow}curl${default} -> [ripe_prefixes] https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1"
-	ripe_prefixes=$(timeout 5 curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
+	ripe_prefixes=$(timeout 10 curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
 	json_ripe_prefixes=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | {v4:map(select(contains(":")|not)), v6:map(select(contains(":")))}' <<<"$ripe_prefixes")
 	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
 	ipv4_ripe_prefixes_count=$(wc -l <<<"$ipv4_ripe_prefixes")
 	ipv6_ripe_prefixes=$(grep ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
 	ipv6_ripe_prefixes_count=$(wc -l <<<"$ipv6_ripe_prefixes")
+
+	# open persistent tcp connection to RIPE whois server
+	exec 3<>/dev/tcp/whois.ripe.net/43
+
 	prefixcounter=0
 	for prefix in $ipv6_ripe_prefixes; do
 		((prefixcounter++))
 		StatusbarMessage "Retrieving information for IPv6 prefix $prefixcounter/$ipv6_ripe_prefixes_count"
-		inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
-						grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
+		# old way (one whois lookup per prefix)
+		# inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
+		#				grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
+		# new way (direct tcp connection to whois server with persistent whois connection)
+		echo -e "-k -T inet6num -K -L --resource $prefix" >&3
+		whoisoutput=""
+		# read whois output from the tcp stream line by line
+		while IFS= read -r -u 3 whoisoutputline; do
+			if [ -n "$whoisoutputline" ]; then
+				whoisoutput+="$whoisoutputline\n"
+				continue
+			fi
+			# last line was empty, check if next line is empty too
+			# if we get two empty lines in a row, the whois output is finished
+			IFS= read -r -u 3 whoisoutputline
+			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
+		done
+		inet6nums=$(echo -e "$whoisoutput" | grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
 		for inet6num in $inet6nums; do
 			# exclude RIR supernets
 			prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
@@ -187,8 +207,6 @@ QueryRipestat(){
 		done
 	done
 
-	# open persistent tcp connection to RIPE whois server
-	exec 3<>/dev/tcp/whois.ripe.net/43
 	prefixcounter=0
 	for prefix in $ipv4_ripe_prefixes; do
 		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
@@ -201,14 +219,14 @@ QueryRipestat(){
 		whoisoutput=""
 		# read whois output from the tcp stream line by line
 		while IFS= read -r -u 3 whoisoutputline; do
-				if [ -n "$whoisoutputline" ]; then
-					whoisoutput+="$whoisoutputline\n"
-					continue
-				fi
-				# last line was empty, check if next line is empty too
-				# if we get two empty lines in a row, the whois output is finished
-				IFS= read -r -u 3 whoisoutputline
-				[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
+			if [ -n "$whoisoutputline" ]; then
+				whoisoutput+="$whoisoutputline\n"
+				continue
+			fi
+			# last line was empty, check if next line is empty too
+			# if we get two empty lines in a row, the whois output is finished
+			IFS= read -r -u 3 whoisoutputline
+			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
 		done
 		parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
 		if [ -n "$parent_inetnum" ]; then
