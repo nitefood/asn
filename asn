@@ -12,11 +12,20 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.3-rc3"
+ASN_VERSION="0.72.3-rc4"
 
 # ╭──────────────────╮
 # │ Helper functions │
 # ╰──────────────────╯
+
+docurl(){
+	# shellcheck disable=SC2124
+	if [ "$ASN_DEBUG" = true ]; then
+		parm="$@"
+		DebugPrint "${yellow}curl $parm${default}"
+	fi
+	curl "$@"
+}
 
 WhoisASN(){
 	found_asname=$(host -t TXT "AS${1}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
@@ -27,14 +36,12 @@ WhoisASN(){
 		pwhois_asn_info=$(tac <<<"$pwhois_full_asn_info" | grep -m1 -E "^Org-Name")
 		pwhois_asn_info+="\n"
 		pwhois_asn_info+=$(tac <<<"$pwhois_full_asn_info" | grep -m1 -E "^Create-Date")
-		DebugPrint "${yellow}curl${default} -> [found_holder] https://stat.ripe.net/data/as-overview/data.json?resource=AS$1"
-		found_holder=$(timeout 5 curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -r 'select (.data.holder != null) | .data.holder')
+		found_holder=$(timeout 5 docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -r 'select (.data.holder != null) | .data.holder')
 		# RIPE usually outputs holder as "ASNAME - actual company name", trim it to just the company name in such cases
 		found_holder=$(awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' <<<"$found_holder")
 		found_org=$(echo -e "$pwhois_asn_info" | grep -E "^Org-Name:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
 		[[ -z "$found_org" ]] && found_org="N/A"
-		DebugPrint "${yellow}curl${default} -> [found_abuse_contact] https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$asn"
-		found_abuse_contact=$(timeout 5 curl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$asn&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts[0] != null) | .data.abuse_contacts[0]')
+		found_abuse_contact=$(timeout 5 docurl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$asn&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts[0] != null) | .data.abuse_contacts[0]')
 		[[ -z "$found_abuse_contact" ]] && found_abuse_contact="-"
 		pwhois_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
 		if [ "$JSON_OUTPUT" = true ]; then
@@ -48,8 +55,7 @@ WhoisASN(){
 QueryRipestat(){
 	StatusbarMessage "Retrieving BGP data for AS$1 ($found_asname)"
 	# BGP routing stats
-	DebugPrint "${yellow}curl${default} -> [ripestat_routing_data] -> https://stat.ripe.net/data/routing-status/data.json?resource=AS$1"
-	ripestat_routing_data=$(timeout 5 curl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_routing_data=$(timeout 5 docurl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	if [ -n "$ripestat_routing_data" ]; then
 		ripestat_ipv4=$(jq -r '.data.announced_space.v4.prefixes' <<<"$ripestat_routing_data")
 		ripestat_ipv6=$(jq -r '.data.announced_space.v6.prefixes' <<<"$ripestat_routing_data")
@@ -57,14 +63,12 @@ QueryRipestat(){
 	fi
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
-	DebugPrint "${yellow}curl${default} -> [ripestat_neighbours_data] https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1"
-	ripestat_neighbours_data=$(timeout 5 curl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_neighbours_data=$(timeout 5 docurl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
 	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
 	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
 	if [ "$JSON_OUTPUT" = true ]; then
-		DebugPrint "${yellow}curl${default} -> [json_abuse_contacts] https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$1"
-		json_abuse_contacts=$(timeout 5 curl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -cM 'select (.data.abuse_contacts != null) | .data.abuse_contacts')
+		json_abuse_contacts=$(timeout 5 docurl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -cM 'select (.data.abuse_contacts != null) | .data.abuse_contacts')
 		[[ -z "$json_abuse_contacts" ]] && json_abuse_contacts="[]"
 		json_upstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$upstream_peers")
 		json_downstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$downstream_peers")
@@ -79,8 +83,7 @@ QueryRipestat(){
 		count=0
 		for peer in $(echo -e "$upstream_peers" | head -n $RESOLVE_COUNT); do
 			(( count++ ))
-			DebugPrint "${yellow}curl${default} -> [peername] https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer"
-			peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+			peername=$(docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 			if [ "$IS_ASN_CHILD" = true ]; then
 				resolved_upstream_peers+="${greenbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlgreen; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 			else
@@ -108,8 +111,7 @@ QueryRipestat(){
 		count=0
 		for peer in $(echo -e "$downstream_peers" | head -n $RESOLVE_COUNT); do
 			(( count++ ))
-			DebugPrint "${yellow}curl${default} -> [peername] https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer"
-			peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+			peername=$(docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 			if [ "$IS_ASN_CHILD" = true ]; then
 				resolved_downstream_peers+="${yellowbg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmlyellow; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 			else
@@ -137,8 +139,7 @@ QueryRipestat(){
 		count=0
 		for peer in $(echo -e "$uncertain_peers" | head -n $RESOLVE_COUNT); do
 			(( count++ ))
-			DebugPrint "${yellow}curl${default} -> [peername] https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer"
-			peername=$(curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
+			peername=$(docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$peer&sourceapp=nitefood-asn" | jq -r '.data.holder' | sed 's/ - .*//' )
 			if [ "$IS_ASN_CHILD" = true ]; then
 				resolved_uncertain_peers+="${lightgreybg} <a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"background-color: $htmllightgray; color: $htmlblack;\">$peername ($peer)</a> ${default} "
 			else
@@ -167,8 +168,7 @@ QueryRipestat(){
 	ipv6_inetnums=""
 	json_ipv4_other_inetnums=""
 	json_ipv6_other_inetnums=""
-	DebugPrint "${yellow}curl${default} -> [ripe_prefixes] https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1"
-	ripe_prefixes=$(timeout 10 curl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
+	ripe_prefixes=$(timeout 10 docurl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
 	json_ripe_prefixes=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | {v4:map(select(contains(":")|not)), v6:map(select(contains(":")))}' <<<"$ripe_prefixes")
 	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
 	ipv4_ripe_prefixes_count=$(wc -l <<<"$ipv4_ripe_prefixes")
@@ -268,8 +268,7 @@ QueryRipestat(){
 			ipv4_inetnums+="$prefix\n"
 		else
 			# this prefix is allocated to target AS, but is being announced by a different AS
-			DebugPrint "${yellow}curl${default} -> [prefix_originator_org] https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}"
-			prefix_originator_org=$(timeout 5 curl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
+			prefix_originator_org=$(timeout 5 docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
 				jq -r 'select (.data.holder != null) | .data.holder' | \
 				awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
 			)
@@ -329,8 +328,7 @@ RIPESuggestASN(){
 		for input_variation in "${input}" "AS_${input}" "AS-${input}" "${input}_AS" "${input}-AS"; do
 			StatusbarMessage "Retrieving suggested ASNs for ${bluebg}${input_variation}${lightgreybg}"
 			# lookup input variation (AS_<input>, AS-<input>, <input>_AS, <input>-AS)
-			DebugPrint "${yellow}curl${default} -> [ripe_suggest_output] https://stat.ripe.net/data/searchcomplete/data.json?resource=${input_variation}"
-			ripe_suggest_output+=$(curl -s "https://stat.ripe.net/data/searchcomplete/data.json?resource=${input_variation}&sourceapp=nitefood-asn" | \
+			ripe_suggest_output+=$(docurl -s "https://stat.ripe.net/data/searchcomplete/data.json?resource=${input_variation}&sourceapp=nitefood-asn" | \
 									jq -r '.data.categories[] | select ( .category == "ASNs" ) | .suggestions[]')
 		done
 		StatusbarMessage
@@ -625,7 +623,7 @@ PrintErrorAndExit(){
 	if [ "$JSON_OUTPUT" = true ]; then
 		# json output
 		status_json_output="fail"
-		reason_json_output="$1"
+		reason_json_output="${1//\"/\\\"}"
 		json_resultcount=0
 		PrintJsonOutput
 	elif [ "$IS_ASN_CHILD" = true ]; then
@@ -653,6 +651,7 @@ PrintUsage(){
 			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
 			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
+			"\n\n  ${green}-c    (Country CIDR)\n\t${default}Lookup all IPv4/v6 CIDR blocks allocated to the ${blue}TARGET${default} country" \
 			"\n\n  ${green}-s    (Shodan scan)\n\t${default}Query Shodan's InternetDB for CVE/CPE/Tags/Ports/Hostnames data about ${blue}TARGET${default}" \
 			"\n\tThis mode supports multiple targets and stdin input, e.g." \
 			"\n\t'asn -s < iplist' or 'echo 1.1.1.0/24 google.com | asn -s'" \
@@ -763,8 +762,7 @@ AbuseLookupForPrefix(){
 	abuselist=""
 	for abusecontact in $(echo -e "$whoisdata" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
 		if ! grep -q '@' <<<"$abusecontact"; then
-			DebugPrint "${yellow}curl${default} -> [resolvedabuse] https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2"
-			resolvedabuse=$(timeout 5 curl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
+			resolvedabuse=$(timeout 5 docurl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
 			[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
 
 		fi
@@ -844,7 +842,7 @@ TraceASPath(){
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
 
 	# start the mtr trace
-	DebugPrint "${yellow}mtr${default} -> $host_to_trace ($MTR_ROUNDS rounds)"
+	DebugPrint "${yellow}mtr -> $host_to_trace ($MTR_ROUNDS rounds)${default}"
 	mtr_output=$(mtr -C -n -c"$MTR_ROUNDS" "$host_to_trace" | tail -n +2)
 	declare -a tracehops_array
 	declare -a aspath_array
@@ -1419,6 +1417,8 @@ ShodanRecon(){
 
 	# trim leading whitespace from userinput
 	userinput="${1#' '}"
+	# trim trailing newline from userinput
+	userinput=$(echo -en "$userinput")
 
 	# identify target(s) type
 	targetlist=$(echo -e "$userinput" | tr ' ' '\n')
@@ -1475,12 +1475,11 @@ ShodanRecon(){
 		fi
 		urlbatch=$(echo -e "$urllist" | awk "NR==$firsturl,NR==$lasturl")
 		StatusbarMessage "Collecting data for IPs ${bluebg}${firsturl}-${lasturl}${lightgreybg} of ${bluebg}$numtargets${lightgreybg} total ($MAX_CONCURRENT_SHODAN_REQUESTS threads)"
-		DebugPrint "${yellow}curl${default} -> [batchoutput] $(echo -e "$urlbatch" | tr '\n' ',')"
+		DebugPrint "${yellow}curl {$(echo -e "$urlbatch" | tr '\n' ',')}${default}"
 		batchoutput=$( xargs -P "$MAX_CONCURRENT_SHODAN_REQUESTS" -n 1 curl -s < <(echo -e "$urlbatch") )
 		if grep -q "Rate limit exceeded" <<<"$batchoutput"; then
 			# rate limit exceeded during current batch of queries, loop while waiting to continue
-			DebugPrint "${yellow}curl${default} -> [retryafter] https://internetdb.shodan.io/127.0.0.1"
-			retryafter=$(curl -s -i "https://internetdb.shodan.io/127.0.0.1" | awk '/^retry-after:/ {print $2}' | tr -d '\r\n')
+			retryafter=$(docurl -s -i "https://internetdb.shodan.io/127.0.0.1" | awk '/^retry-after:/ {print $2}' | tr -d '\r\n')
 			while [[ ${retryafter} -gt 1 ]]; do
 				StatusbarMessage "Shodan rate limit hit during batch ${bluebg}${firsturl}-${lasturl}${lightgreybg}, resuming in ${redbg}${retryafter}${lightgreybg}s"
 				sleep 1
@@ -1563,6 +1562,7 @@ ShodanRecon(){
 				-e 's,cpe:/o:microsoft:windows,[O/S]-Microsoft-Windows,g' \
 				-e 's,cpe:/o:debian:debian_linux,[O/S]-Debian-Linux,g' \
 				-e 's,cpe:/a:microsoft:internet_information_services,Microsoft-IIS,g' \
+				-e 's,cpe:/a:microsoft:exchange_server,Microsoft-Exchange,g' \
 				-e 's,cpe:/a:openbsd:openssh,OpenSSH,g' \
 				-e 's,cpe:/a:igor_sysoev:nginx,Nginx,g' \
 				-e 's,cpe:/a:php:php,PHP,g' \
@@ -1715,8 +1715,7 @@ ShodanRecon(){
 		for cve in $(echo -e "$vulnlist" | sort | grep -Ev '^$' | uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
 			vulnhits=$(awk '{print $1}' <<<"$cve")
 			cvenum=$(awk '{print $2}' <<<"$cve")
-			DebugPrint "${yellow}curl${default} -> [cvejsondata] https://services.nvd.nist.gov/rest/json/cve/1.0/$cvenum"
-			cvejsondata=$(curl -s "https://services.nvd.nist.gov/rest/json/cve/1.0/$cvenum")
+			cvejsondata=$(docurl -s "https://services.nvd.nist.gov/rest/json/cve/1.0/$cvenum")
 			v3score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseScore | select(length>0)' <<<"$cvejsondata")
 			v3severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseSeverity | select(length>0)' <<<"$cvejsondata")
 			v2score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.cvssV2.baseScore' <<<"$cvejsondata")
@@ -1795,8 +1794,7 @@ RPKILookup(){
 	# $1=asn, $2=prefix
 	found_rpkivalidity=""
 	INVALID_ROA=false
-	DebugPrint "${yellow}curl${default} -> [rpki_apioutput] https://stat.ripe.net/data/rpki-validation/data.json?resource=$1&prefix=$2"
-	rpki_apioutput=$(curl -s "https://stat.ripe.net/data/rpki-validation/data.json?resource=$1&prefix=$2&sourceapp=nitefood-asn")
+	rpki_apioutput=$(docurl -s "https://stat.ripe.net/data/rpki-validation/data.json?resource=$1&prefix=$2&sourceapp=nitefood-asn")
 	is_valid_json=$(jq type <<<"$rpki_apioutput" 2>/dev/null)
 	if [ -n "$is_valid_json" ]; then
 		found_rpkivalidity=$(jq -r '.data.status' <<<"$rpki_apioutput" | tr '[:lower:]' '[:upper:]')
@@ -1862,14 +1860,12 @@ IsIXP() {
 			# if input is an IPv4, speedup lookups further by grabbing only IXP prefixes starting with the same two octets
 			# we can afford filtering based on the first two octets since the largest individual IXP prefix is around /20
 			first_octets=$(echo "${1}." | cut -d '.' -f 1,2)
-			DebugPrint "${yellow}curl${default} -> [peeringdb_ipv4_dataset] https://www.peeringdb.com/api/ixpfx?prefix__startswith=$first_octets&protocol__in=IPv4"
-			peeringdb_ipv4_dataset=$(curl -s "https://www.peeringdb.com/api/ixpfx?prefix__startswith=$first_octets&protocol__in=IPv4")
+			peeringdb_ipv4_dataset=$(docurl -s "https://www.peeringdb.com/api/ixpfx?prefix__startswith=$first_octets&protocol__in=IPv4")
 			peeringdb_dataset="$peeringdb_ipv4_dataset"
 		else
 			# only fetch IPv6 dataset once, since we don't filter it for prefixes
 			if [ -z "$peeringdb_ipv6_dataset" ]; then
-				DebugPrint "${yellow}curl${default} -> [peeringdb_ipv6_dataset] https://www.peeringdb.com/api/ixpfx?protocol__in=IPv6"
-				peeringdb_ipv6_dataset=$(curl -s "https://www.peeringdb.com/api/ixpfx?protocol__in=IPv6")
+				peeringdb_ipv6_dataset=$(docurl -s "https://www.peeringdb.com/api/ixpfx?protocol__in=IPv6")
 			fi
 			peeringdb_dataset="$peeringdb_ipv6_dataset"
 		fi
@@ -1880,8 +1876,7 @@ IsIXP() {
 				# the IP is part of an IXP prefix
 				# Query PeeringDB to match an IXP for that prefix.
 				ixlan_id=$(jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id' <<<"$peeringdb_dataset")
-				DebugPrint "${yellow}curl${default} -> [ixp_full_ix_data] https://www.peeringdb.com/api/ix/$ixlan_id"
-				ixp_full_ix_data=$(curl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
+				ixp_full_ix_data=$(docurl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
 				ixp_data=$(jq -r '.data[0].name, .data[0].name_long' <<<"$ixp_full_ix_data" | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
 				ixp_geo=$(jq -r '.data[0].org.city' <<<"$ixp_full_ix_data")
 				ixp_state=$(jq -r '.data[0].org.state' <<<"$ixp_full_ix_data")
@@ -1899,15 +1894,13 @@ GetIXPresence(){
 	ixps=""
 	outputix=""
 	json_ixps=""
-	DebugPrint "${yellow}curl${default} -> [netlist] https://www.peeringdb.com/api/net?asn__in=$asn"
-	netlist=$(curl -s "https://www.peeringdb.com/api/net?asn__in=$asn" | jq -r '.data[].id')
+	netlist=$(docurl -s "https://www.peeringdb.com/api/net?asn__in=$asn" | jq -r '.data[].id')
 	if [ -n "$netlist" ]; then
 		for net in $netlist; do
-			DebugPrint "${yellow}curl${default} -> [ixps] https://www.peeringdb.com/api/net/$net"
 			if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
-				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[] | "<a href=\"https://www.peeringdb.com/ix/\(.ix_id)\" target=\"_blank\" class=\"hidden_underline\" style=\"color: '"$htmlblue"';\">\(.name)</a>"')
+				ixps+=$(docurl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[] | "<a href=\"https://www.peeringdb.com/ix/\(.ix_id)\" target=\"_blank\" class=\"hidden_underline\" style=\"color: '"$htmlblue"';\">\(.name)</a>"')
 			else
-				ixps+=$(curl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
+				ixps+=$(docurl -s "https://www.peeringdb.com/api/net/$net" | jq -r '.data[].netixlan_set[].name')
 			fi
 		done
 		if [ -n "$ixps" ]; then
@@ -1937,12 +1930,10 @@ IPGeoRepLookup(){
 	fi
 	StatusbarMessage "Collecting geolocation and classification data"
 	# fetch preferred geolocation and anycast data from RIPE IPmap
-	DebugPrint "${yellow}curl${default} -> [ipmap_output] https://ipmap.ripe.net/api/v1/locate/$1/best"
-	ipmap_output=$(curl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
+	ipmap_output=$(docurl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
-	DebugPrint "${yellow}curl${default} -> [ipapi_output] http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting"
-	ipapi_output=$(curl -m4 -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
+	ipapi_output=$(docurl -m4 -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
 	ipapi_status=$(jq -r '.status' <<<"$ipapi_output")
 	if [ "$ipapi_status" = "fail" ]; then
 		ipapi_errmsg=$(jq -r '.message' <<<"$ipapi_output")
@@ -2029,8 +2020,7 @@ IPGeoRepLookup(){
 		ip_type_json_output+=",\"is_proxy\":false"
 	fi
 	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
-	DebugPrint "${yellow}curl${default} -> [incolumitas_dcdata] https://api.incolumitas.com/datacenter?ip=$1"
-	incolumitas_dcdata=$(curl -s -m2  https://api.incolumitas.com/datacenter?ip=$1)
+	incolumitas_dcdata=$(docurl -m2 -s https://api.incolumitas.com/datacenter?ip=$1)
 	dcname=$(jq -r 'select (.datacenter != null) | .datacenter' <<<"$incolumitas_dcdata")
 	dcregion=$(jq -r 'select (.region != null) | .region' <<<"$incolumitas_dcdata")
 	if [ -n "$dcname" ]; then
@@ -2056,15 +2046,13 @@ IPGeoRepLookup(){
 	json_rep="none"
 	json_iqs_threat_score=""
 	json_iqs_threat_tags=""
-	DebugPrint "${yellow}curl${default} -> [is_blacklisted] http://api.stopforumspam.org/api?json&ip=$1"
-	is_blacklisted=$(curl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
+	is_blacklisted=$(docurl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
 	if [ "$is_blacklisted" = "1" ]; then
 		json_rep="bad"
 		# IP is blacklisted by StopForumSpam. Lookup detailed reputation data on IPQualityScore
 		ip_rep_data="${red}❌ BAD (on stopforumspam.org)${default}"
 		if [ -n "$IQS_TOKEN" ]; then
-			DebugPrint "${yellow}curl${default} -> [iqs_output] https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1"
-			iqs_output=$(curl -m4 -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
+			iqs_output=$(docurl -m4 -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
 			iqs_success=$(jq -r '.success' <<<"$iqs_output")
 			if [ "$iqs_success" = true ]; then
 				iqs_score=$(jq -r '.fraud_score' <<<"$iqs_output")
@@ -2106,8 +2094,7 @@ IPGeoRepLookup(){
 		fi
 	fi
 	# GreyNoise lookup
-	DebugPrint "${yellow}curl${default} -> [greynoise_data] https://api.greynoise.io/v3/community/$1"
-	greynoise_data=$(curl -m5 -s "https://api.greynoise.io/v3/community/$1")
+	greynoise_data=$(docurl -m5 -s "https://api.greynoise.io/v3/community/$1")
 	gn_noisy=false
 	gn_riot=""
 	gn_classification=""
@@ -2162,8 +2149,7 @@ IPShodanLookup(){
 	shodan_tags_json_output=""
 	shodan_vulns_json_output=""
 	StatusbarMessage "Collecting open ports, CPE and CVE data"
-	DebugPrint "${yellow}curl${default} -> [shodan_data] https://internetdb.shodan.io/$1"
-	shodan_data=$(curl -m5 -s "https://internetdb.shodan.io/$1" | grep -v "No information available")
+	shodan_data=$(docurl -m5 -s "https://internetdb.shodan.io/$1" | grep -v "No information available")
 	if [ -n "$shodan_data" ]; then
 		shodan_cpes=$(jq -r '.cpes[]' <<<"$shodan_data" 2>/dev/null)
 		shodan_cpes_json_output=$(jq -cM 'select (.cpes | length > 0) | .cpes' <<<"$shodan_data" 2>/dev/null)
@@ -2367,8 +2353,7 @@ WhatIsMyIP() {
 	# only lookup local WAN IP once
 	[[ -n "$local_wanip" ]] && return
 	# retrieve local WAN IP (v6 takes precedence) from ipify
-	DebugPrint "${yellow}curl${default} -> [local_wanip] api64.ipify.org"
-	local_wanip=$(curl -s "api64.ipify.org")
+	local_wanip=$(docurl -s "api64.ipify.org")
 	# check if we default to an IPv6 internet connection
 	if echo "$local_wanip" | grep -q ':'; then
 		HAVE_IPV6=true
@@ -2931,8 +2916,7 @@ HandleNcatClientConnection() {
 				# send HTTP 200 OK response and display HTML headers
 				echo -e "${http_ok}${html_header}"
 			fi
-			DebugPrint "${yellow}curl${default} -> [countryname] https://restcountries.com/v3.1/alpha/$server_country"
-			countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$server_country" | jq -r '.[].name.common')
+			countryname=$(timeout 1.5 docurl -s "https://restcountries.com/v3.1/alpha/$server_country" | jq -r '.[].name.common')
 			if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 				title_tag="title='$countryname'"
 			else
@@ -3014,8 +2998,7 @@ HandleNcatClientConnection() {
 							# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
 							cc=$(echo -e "$outputline" | awk '{print $NF}')
 							# lookup full country name
-							DebugPrint "${yellow}curl${default} -> [countryname] https://restcountries.com/v3.1/alpha/$cc"
-							countryname=$(timeout 1.5 curl -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
+							countryname=$(timeout 1.5 docurl -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
 							if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 								title_tag="title='$countryname'"
 							else
@@ -3280,12 +3263,13 @@ json_resultcount=0
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvmljJsn:t:d:o:a:"
+optspec=":hvmljJsn:t:d:o:a:c:"
 
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
 SERVER_MODE=false
 RECON_MODE=false
+COUNTRY_BLOCK_MODE=false
 OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
 while getopts "$optspec" optchar; do {
 
@@ -3338,6 +3322,10 @@ while getopts "$optspec" optchar; do {
 		"s")
 			MTR_TRACING=false
 			RECON_MODE=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"c")
+			COUNTRY_BLOCK_MODE=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"m")
@@ -3489,6 +3477,74 @@ if [ "$RECON_MODE" = true ]; then
 		final_json_output="$shodan_json_output"
 		PrintJsonOutput
 	else
+		tput sgr0
+	fi
+	exit 0
+fi
+
+if [ "$COUNTRY_BLOCK_MODE" = true ]; then
+	# user passed the "-c" switch
+	# check if user passed a country code (.xx)
+	if [ "${userinput::1}" == "." ]; then
+		cc=$(echo "$userinput" | cut -d '.' -f 2-)
+		restcountries_output=$(docurl -s "https://restcountries.com/v3.1/alpha/$cc")
+	else
+		# Urlencode the spaces in user's input
+		countrystring=${userinput// /%20}
+		# Look up the country code
+		restcountries_output=$(docurl -s "https://restcountries.com/v3.1/name/${countrystring}")
+	fi
+	have_results=$(jq 'if type=="array" then true else false end' <<<"$restcountries_output")
+	[[ "$have_results" = false ]] && PrintErrorAndExit "No countries matching '$userinput'"
+	matches=$(jq -r '. | length' <<<"$restcountries_output")
+	if [ "$matches" -gt 1 ]; then
+		[[ "$JSON_OUTPUT" = true ]] && PrintErrorAndExit "Multiple countries found, please specify a valid country code"
+		echo -e "\n${yellow}Multiple countries found, please specify a valid country code:${default}\n"
+		for (( i=0; i<"$matches"; i++ )); do
+			formalname=$(jq -r ".[$i] | (.name.official)" <<<"$restcountries_output")
+			commonname=$(jq -r ".[$i] | (.name.common)" <<<"$restcountries_output")
+			cc=$(jq -r ".[$i] | (.cca2)" <<<"$restcountries_output")
+			printf "%-55s : ${green}%s${default} (aka: %s)\n" "$formalname" "$cc" "$commonname"
+		done
+		echo ""
+		tput sgr0
+		exit 0
+	fi
+	cc=$(jq -r 'select(.[].cca2 != null) | .[].cca2' <<<"$restcountries_output" | tr '[:upper:]' '[:lower:]')
+	[[ -z "$cc" ]] && PrintErrorAndExit "No country matching '$userinput' found"
+	countryname=$(jq -r '.[].name.common' <<<"$restcountries_output")
+	country_ipv4_blocks=$(docurl -s "https://raw.githubusercontent.com/herrbischoff/country-ip-blocks/master/ipv4/$cc.cidr")
+	country_ipv6_blocks=$(docurl -s "https://raw.githubusercontent.com/herrbischoff/country-ip-blocks/master/ipv6/$cc.cidr")
+	country_ipv4_blocks_count=$(wc -l <<<"$country_ipv4_blocks")
+	country_ipv6_blocks_count=$(wc -l <<<"$country_ipv6_blocks")
+	if [ "$country_ipv4_blocks" = "404: Not Found" ]; then
+		country_ipv4_blocks=""
+		country_ipv4_blocks_count=0
+	fi
+	if [ "$country_ipv6_blocks" = "404: Not Found" ]; then
+		country_ipv6_blocks=""
+		country_ipv6_blocks_count=0
+	fi
+	if [ "$JSON_OUTPUT" = true ]; then
+		json_country_ipv4_blocks=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$country_ipv4_blocks")
+		json_country_ipv6_blocks=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$country_ipv6_blocks")
+		json_resultcount="1"
+		json_target_type="country"
+		final_json_output="{\"country_name\":\"$countryname\""
+		final_json_output+=",\"country_code\":\"$cc\""
+		final_json_output+=",\"ipv4_count\":$country_ipv4_blocks_count"
+		final_json_output+=",\"ipv4\":${json_country_ipv4_blocks}"
+		final_json_output+=",\"ipv6_count\":$country_ipv6_blocks_count"
+		final_json_output+=",\"ipv6\":${json_country_ipv6_blocks}"
+		final_json_output+="}"
+		PrintJsonOutput
+	else
+		BoxHeader "CIDR blocks allocated to $countryname"
+		BoxHeader "IPv4"
+		echo -e "$country_ipv4_blocks" | pr -4 -T -W$((terminal_width/2))
+		BoxHeader "IPv6"
+		echo -e "$country_ipv6_blocks" | pr -4 -T -W$((terminal_width/2))
+		echo -e "\n${green}$country_ipv4_blocks_count${default} IPv4 blocks, ${yellow}$country_ipv6_blocks_count${default} IPv6 blocks found for $countryname (.$cc).\n"
 		tput sgr0
 	fi
 	exit 0

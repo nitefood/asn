@@ -16,7 +16,7 @@ ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP r
 This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
 
 It can be used as a **recon tool** by querying Shodan for data about any type of target (CIDR blocks/URLs/single IPs/hostnames). This will quickly give the user a complete breakdown about open ports, known vulnerabilities, known software and hardware running on the target, and more - without ever sending a single packet to the target.
-JSON output of the results, multiple simultaneous targets and IP list file inputs and are also supported. Click [here](https://github.com/nitefood/asn#shodan-scanning-recon-mode) for more information about Shodan scanning mode.
+JSON output of the results, multiple simultaneous targets and IP list file inputs and are also supported. Click [here](#shodan-scanning-recon-mode) for more information about Shodan scanning mode.
 
 It can also be used as a **web-based traceroute server**, by running it in listening mode and launching lookups and traces from a local or remote browser (via a bookmarklet or custom search engine) or terminal (via `curl`, `elinks` or similar tools). Click [here](#running-lookups-from-the-browser) for more information about server mode functionality.
 
@@ -37,10 +37,11 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
     * *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
     * *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
 * It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
+    * the script can also **map all IPv4/IPv6 CIDR blocks** allocated to any given country, by querying data from Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo. See [below](#mapping-the-ipv4v6-address-space-of-specific-countries) for more info.
+
 * It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 * It will perform **IP fingerprinting** using Shodan's [InternetDB API](%5Bhttps://internetdb.shodan.io/%5D(https://internetdb.shodan.io/)) and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops (detailed traces only).
-    * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More informations [here](https://github.com/nitefood/asn#shodan-scanning-recon-mode) about how to use the script as a recon tool.
-
+    * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More informations [here](#shodan-scanning-recon-mode) about how to use the script as a recon tool.
 * It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
     * It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
 * It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
@@ -63,6 +64,8 @@ The script uses the following services for data retrieval:
 * [GreyNoise](https://greynoise.io)
 * [Shodan](https://www.shodan.io/)
 * [Incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
+* [RestCountries](https://restcountries.com/)
+* Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo
 
 It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode) to the following external services when appropriate:
 
@@ -133,6 +136,12 @@ Requires Bash v4.2+. Tested on:
 * *Scanning for Shodan informations for a list of IPs*
 
   ![shodanscan](https://user-images.githubusercontent.com/24555810/161406477-a9aa5446-554d-43a7-a371-1a044e919dfa.png)
+
+### Country IPv4/IPv6 CIDR mapping
+
+* *Displaying a list of  CIDR blocks allocated to Jamaica*
+
+  ![country_cidr](https://user-images.githubusercontent.com/24555810/162335736-38a5df99-1506-41ad-a8fd-ddae5b73a031.png)
 
 ### Suggested ASNs search
 
@@ -320,6 +329,10 @@ where `TARGET` can be one of the following:
 * `[-a]`
 
     * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
+
+* `[-c]`
+
+    * enable *Country CIDR mode*. This will output all IPv4/v6 CIDR blocks allocated to the specified country.
 
 * `[-l]`
 
@@ -616,7 +629,8 @@ The available options, and some usage examples, can be viewed by running `asn -h
 
 ## Shodan scanning (Recon Mode)
 
-The tool can query Shodan's InternetDB API to look up informations regarding any type of targets. Currently supported targets are:
+The tool can query Shodan's InternetDB API to look up informations regarding any type of targets when launched with the `-s` command line switch.
+Currently supported targets are:
 
 - **IP addresses**
 - **CIDR blocks** *(will scan all of the IPs in the range)*
@@ -638,6 +652,23 @@ Target types can be mixed and queried in a single run. Targets can be piped to t
 Shodan scan results can be output in JSON mode by passing the `-j` or `-J` options.
 
 *Note: the Nmap tool is needed to use this feature, but note that **no packets whatsoever** are sent to the targets. Nmap is only required to break down CIDR blocks into single IPs (as a calculator tool).*
+
+
+
+## Mapping the IP(v4/v6) address space of specific countries
+
+The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a specific country when launched with the `-c` command line switch. Searching for a specific country code with a leading dot (e.g. `.fr`) will yield direct results for France, while full text search will display country codes matching the search string, or proceed to display the results if only one match is found. JSON mode is supported.
+
+*Usage Examples:*
+
+`asn -c germany`
+
+`asn -c .de`
+
+```shell
+# scan a random norwegian subnet for CVE/CPE/open ports/hostnames:
+asn -jc .no | jq -r ".results[] | .ipv4[$RANDOM % .ipv4_count]" | asn -s
+```
 
 
 
