@@ -36,12 +36,12 @@ WhoisASN(){
 		pwhois_asn_info=$(tac <<<"$pwhois_full_asn_info" | grep -m1 -E "^Org-Name")
 		pwhois_asn_info+="\n"
 		pwhois_asn_info+=$(tac <<<"$pwhois_full_asn_info" | grep -m1 -E "^Create-Date")
-		found_holder=$(timeout 5 docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -r 'select (.data.holder != null) | .data.holder')
+		found_holder=$(docurl -m5 -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -r 'select (.data.holder != null) | .data.holder')
 		# RIPE usually outputs holder as "ASNAME - actual company name", trim it to just the company name in such cases
 		found_holder=$(awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' <<<"$found_holder")
 		found_org=$(echo -e "$pwhois_asn_info" | grep -E "^Org-Name:" | cut -d ':' -f 2 | sed 's/^[ \t]*//')
 		[[ -z "$found_org" ]] && found_org="N/A"
-		found_abuse_contact=$(timeout 5 docurl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$asn&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts[0] != null) | .data.abuse_contacts[0]')
+		found_abuse_contact=$(docurl -m5 -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$asn&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts[0] != null) | .data.abuse_contacts[0]')
 		[[ -z "$found_abuse_contact" ]] && found_abuse_contact="-"
 		pwhois_createdate=$(echo -e "$pwhois_asn_info" | grep -E "^Create-Date:" | cut -d ':' -f 2- | sed 's/^[ \t]*//')
 		if [ "$JSON_OUTPUT" = true ]; then
@@ -55,7 +55,7 @@ WhoisASN(){
 QueryRipestat(){
 	StatusbarMessage "Retrieving BGP data for AS$1 ($found_asname)"
 	# BGP routing stats
-	ripestat_routing_data=$(timeout 5 docurl -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_routing_data=$(docurl -m5 -s "https://stat.ripe.net/data/routing-status/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	if [ -n "$ripestat_routing_data" ]; then
 		ripestat_ipv4=$(jq -r '.data.announced_space.v4.prefixes' <<<"$ripestat_routing_data")
 		ripestat_ipv6=$(jq -r '.data.announced_space.v6.prefixes' <<<"$ripestat_routing_data")
@@ -63,12 +63,12 @@ QueryRipestat(){
 	fi
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
-	ripestat_neighbours_data=$(timeout 5 docurl -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_neighbours_data=$(docurl -m5 -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
 	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
 	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
 	if [ "$JSON_OUTPUT" = true ]; then
-		json_abuse_contacts=$(timeout 5 docurl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -cM 'select (.data.abuse_contacts != null) | .data.abuse_contacts')
+		json_abuse_contacts=$(docurl -m5 -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=AS$1&sourceapp=nitefood-asn" | jq -cM 'select (.data.abuse_contacts != null) | .data.abuse_contacts')
 		[[ -z "$json_abuse_contacts" ]] && json_abuse_contacts="[]"
 		json_upstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$upstream_peers")
 		json_downstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$downstream_peers")
@@ -168,7 +168,7 @@ QueryRipestat(){
 	ipv6_inetnums=""
 	json_ipv4_other_inetnums=""
 	json_ipv6_other_inetnums=""
-	ripe_prefixes=$(timeout 10 docurl -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
+	ripe_prefixes=$(docurl -m10 -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
 	json_ripe_prefixes=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | {v4:map(select(contains(":")|not)), v6:map(select(contains(":")))}' <<<"$ripe_prefixes")
 	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
 	ipv4_ripe_prefixes_count=$(wc -l <<<"$ipv4_ripe_prefixes")
@@ -268,7 +268,7 @@ QueryRipestat(){
 			ipv4_inetnums+="$prefix\n"
 		else
 			# this prefix is allocated to target AS, but is being announced by a different AS
-			prefix_originator_org=$(timeout 5 docurl -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
+			prefix_originator_org=$(docurl -m5 -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
 				jq -r 'select (.data.holder != null) | .data.holder' | \
 				awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
 			)
@@ -762,7 +762,7 @@ AbuseLookupForPrefix(){
 	abuselist=""
 	for abusecontact in $(echo -e "$whoisdata" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
 		if ! grep -q '@' <<<"$abusecontact"; then
-			resolvedabuse=$(timeout 5 docurl -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
+			resolvedabuse=$(docurl -m5 -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
 			[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
 
 		fi
@@ -2916,7 +2916,7 @@ HandleNcatClientConnection() {
 				# send HTTP 200 OK response and display HTML headers
 				echo -e "${http_ok}${html_header}"
 			fi
-			countryname=$(timeout 1.5 docurl -s "https://restcountries.com/v3.1/alpha/$server_country" | jq -r '.[].name.common')
+			countryname=$(docurl -m2 -s "https://restcountries.com/v3.1/alpha/$server_country" | jq -r '.[].name.common')
 			if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 				title_tag="title='$countryname'"
 			else
@@ -2998,7 +2998,7 @@ HandleNcatClientConnection() {
 							# CloudflareJS: https://cdnjs.cloudflare.com/ajax/libs/flag-icon-css/3.5.0/flags/4x3/$cc.svg
 							cc=$(echo -e "$outputline" | awk '{print $NF}')
 							# lookup full country name
-							countryname=$(timeout 1.5 docurl -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
+							countryname=$(docurl -m2 -s "https://restcountries.com/v3.1/alpha/$cc" | jq -r '.[].name.common')
 							if [ -n "$countryname" ] && [ "$countryname" != "null" ]; then
 								title_tag="title='$countryname'"
 							else
