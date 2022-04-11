@@ -13,7 +13,7 @@
 
 ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation / IP geolocation / IP fingerprinting / Network recon / lookup tool / Web traceroute server.
 
-This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well.
+This script serves the purpose of having a quick OSINT **command line tool** at disposal when investigating network data, which can come in handy in incident response scenarios as well (with features such as [bulk geolocation](#bulk-geolocation-mode) and threat scoring).
 
 It can be used as a **recon tool** by querying Shodan for data about any type of target (CIDR blocks/URLs/single IPs/hostnames). This will quickly give the user a complete breakdown about open ports, known vulnerabilities, known software and hardware running on the target, and more - without ever sending a single packet to the target.
 JSON output of the results, multiple simultaneous targets and IP list file inputs and are also supported. Click [here](#shodan-scanning-recon-mode) for more information about Shodan scanning mode.
@@ -37,6 +37,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
     * *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
     * *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
 * It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
+    * geolocation can be performed in **bulk mode**. See [here](#bulk-geolocation-mode) for more info.
     * the script can also **map all IPv4/IPv6 CIDR blocks** allocated to any given country, by querying data from Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo. See [below](#mapping-the-ipv4v6-address-space-of-specific-countries) for more info.
 
 * It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
@@ -142,6 +143,12 @@ Requires Bash v4.2+. Tested on:
 * *Displaying a list of  CIDR blocks allocated to Jamaica*
 
   ![country_cidr](https://user-images.githubusercontent.com/24555810/162335736-38a5df99-1506-41ad-a8fd-ddae5b73a031.png)
+
+### Bulk Geolocation / country stats
+
+* *Performing bulk extraction, geolocation and stats for IPs from a logfile*
+
+  ![bulk_geolocation](https://user-images.githubusercontent.com/24555810/162650615-e586e5a1-2a27-4b93-9a4c-0e89cb232468.png)
 
 ### Suggested ASNs search
 
@@ -333,6 +340,10 @@ where `TARGET` can be one of the following:
 * `[-c]`
 
     * enable *Country CIDR mode*. This will output all IPv4/v6 CIDR blocks allocated to the specified country.
+
+* `[-g]`
+
+    * enable *Bulk Geolocation mode*. This will extract all IPv4/v6 addresses from the input, geolocate them and draw some stats.
 
 * `[-l]`
 
@@ -657,7 +668,7 @@ Shodan scan results can be output in JSON mode by passing the `-j` or `-J` optio
 
 ## Mapping the IP(v4/v6) address space of specific countries
 
-The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a specific country when launched with the `-c` command line switch. Searching for a specific country code with a leading dot (e.g. `.fr`) will yield direct results for France, while full text search will display country codes matching the search string, or proceed to display the results if only one match is found. JSON mode is supported.
+The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a specific country when launched with the `-c` command line switch. Searching for a specific country code with a leading dot (e.g. `.fr`) will yield direct results for France, while full text search will display country codes matching the search string, or proceed to display the results if only one match is found. JSON output is supported.
 
 *Usage Examples:*
 
@@ -668,6 +679,24 @@ The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a sp
 ```shell
 # scan a random norwegian subnet for CVE/CPE/open ports/hostnames:
 asn -jc .no | jq -r ".results[] | .ipv4[$RANDOM % .ipv4_count]" | asn -s
+```
+
+## Bulk geolocation mode
+
+In this mode the tool will extract all IPv4 and IPv6 addresses from the input data and geolocate them. Anycast detection and general stats (top IPv4/IPv6 addresses with number of occurrences, number of IPs per country etc.) are included in the output. Bulk geolocation is quicker than normal `asn` lookups (300 IP addresses can be parsed in ~5s), and its main use case is to extract, geolocate and calculate country/occurrence stats for any number of IPs from arbitrarily formatted data streams (e.g. server logs). JSON output and stdin input are supported.
+
+*Usage Examples:*
+
+`asn -g 1.1.1.1 8.8.8.8`
+
+```shell
+# geolocate webserver clients
+asn -g < /var/log/apache2/access.log
+```
+
+```shell
+# geolocate IPs that have logged in to the system
+last | asn -g
 ```
 
 

@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.3-rc4"
+ASN_VERSION="0.72.3-rc5"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -652,6 +652,9 @@ PrintUsage(){
 			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
 			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
 			"\n\n  ${green}-c    (Country CIDR)\n\t${default}Lookup all IPv4/v6 CIDR blocks allocated to the ${blue}TARGET${default} country" \
+			"\n\n  ${green}-g    (Bulk Geolocate)\n\t${default}Geolocate all IPv4/v6 addresses passed as ${blue}TARGET${default}" \
+			"\n\tThis mode supports multiple targets, stdin input and IP extraction from input, e.g." \
+			"\n\t'asn -g < /var/log/apache2/error.log' or 'echo 1.1.1.1 2.2.2.2 | asn -g'" \
 			"\n\n  ${green}-s    (Shodan scan)\n\t${default}Query Shodan's InternetDB for CVE/CPE/Tags/Ports/Hostnames data about ${blue}TARGET${default}" \
 			"\n\tThis mode supports multiple targets and stdin input, e.g." \
 			"\n\t'asn -s < iplist' or 'echo 1.1.1.0/24 google.com | asn -s'" \
@@ -1415,11 +1418,6 @@ ShodanRecon(){
 	curloutput=""
 	urllist=""
 
-	# trim leading whitespace from userinput
-	userinput="${1#' '}"
-	# trim trailing newline from userinput
-	userinput=$(echo -en "$userinput")
-
 	# identify target(s) type
 	targetlist=$(echo -e "$userinput" | tr ' ' '\n')
 	target_count=$(echo -e "$targetlist" | wc -l)
@@ -1456,7 +1454,7 @@ ShodanRecon(){
 				continue
 			fi
 			[[ -n "$urllist" ]] && urllist+="\n"
-			urllist+=$(nmap -sL -n "$ip" | awk '/Nmap scan report/{print "https://internetdb.shodan.io/"$NF}') # cheers https://stackoverflow.com/a/31412705
+			urllist+=$(nmap -sL -n "$ip" 2>/dev/null | awk '/Nmap scan report/{print "https://internetdb.shodan.io/"$NF}') # cheers https://stackoverflow.com/a/31412705
 		done
 	done
 	[[ -z "$urllist" ]] && PrintErrorAndExit "no valid targets found"
@@ -1763,6 +1761,171 @@ ShodanRecon(){
 	echo -e "$final_stats"
 }
 
+BulkGeolocate(){
+	# identify target(s) type
+	targetlist_allips=$(echo -e "$userinput" | grep -Eo "$ipv4v6regex" | sort)
+	top10_ipv4=$(grep -v ":" <<<"$targetlist_allips" | uniq -c | sort -rn | head -n 10)
+	top10_ipv6=$(grep ":" <<<"$targetlist_allips" | uniq -c | sort -rn | head -n 10)
+	targetlist=$(uniq <<<"$targetlist_allips")
+	if [ -n "$targetlist" ]; then
+		target_count=$(echo -e "$targetlist" | wc -l)
+	else
+		PrintErrorAndExit "no valid targets found"
+	fi
+	if [ "$target_count" -gt 1 ]; then
+		# user passed multiple targets "e.g. asn -g 1.1.1.1 8.8.8.8"
+		userinput="multiple targets"
+	fi
+
+	BoxHeader "Geolocation lookup for $userinput"
+
+	geolocation_json_output=""
+	countrylist=""
+	firstip=1
+	while true; do
+		lastip=$(( firstip + 99 ))
+		if [ "$lastip" -ge "$target_count" ]; then
+			lastip="$target_count"
+			LAST_BATCH=true
+		fi
+		ipbatch=$(echo -en "$targetlist" | awk "NR==$firstip,NR==$lastip")
+		StatusbarMessage "Collecting geolocation data for IPs ${bluebg}${firstip}-${lastip}${lightgreybg} of ${bluebg}$target_count${lightgreybg} total"
+		ipmap_targets=$(echo -en "$ipbatch" | tr '\n' ',')
+		ipapi_targets=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipbatch")
+		ipmap_output=$(docurl -m15 -s "https://ipmap.ripe.net/api/v1/locate/all?resources=$ipmap_targets")
+		if [[ -n $(jq 'select (.error != null) | .error' <<<"$ipmap_output") ]]; then
+			ipmap_output=""
+		fi
+		ipapi_output=$(docurl -m4 -s "http://ip-api.com/batch?fields=query,status,message,country,countryCode,regionName,city" --data ''"$ipapi_targets"'')
+
+		for target in $ipbatch; do
+			ip_geo_countryname=""
+			json_geo_city=""
+			json_geo_region=""
+			json_geo_cc=""
+
+			if [ -n "$ipmap_output" ]; then
+				IS_ANYCAST=$(jq '.metadata.service.contributions."'"$target"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast' <<<"$ipmap_output")
+				[[ "$IS_ANYCAST" = true ]] && anycast_tag="${yellowbg} ANYCAST ${default}" || anycast_tag=""
+				ip_geo_countryname=$(jq -r '.data."'"$target"'" | select( .countryName != null ) | .countryName' <<<"$ipmap_output")
+				json_geo_city="$(jq -r '.data."'"$target"'" | select( .cityName != null ) | .cityName' <<<"$ipmap_output")"
+				json_geo_region="$(jq -r '.data."'"$target"'" | select( .stateName != null ) | .stateName' <<<"$ipmap_output")"
+				json_geo_cc="$(jq -r '.data."'"$target"'" | select( .countryCodeAlpha2 != null ) | .countryCodeAlpha2' <<<"$ipmap_output")"
+			fi
+
+			if [ -n "$ip_geo_countryname" ] && [ -n "$json_geo_city" ] && [ -n "$json_geo_region" ] && [ -n "$json_geo_cc" ]; then
+				ip_geo_data="$json_geo_city, $json_geo_region, $json_geo_cc"
+			else
+				# incomplete/no data on RIPE IPMap, fallback to IP-API
+				ipapi_status=$(jq -r '.[] | select(.query == "'"$target"'") | .status' <<<"$ipapi_output")
+				if [ "$ipapi_status" = "fail" ] && [ "$JSON_OUTPUT" = false ]; then
+					ip_geo_countryname="Unknown"
+					ip_geo_data="N/A"
+				else
+					ip_geo_countryname=$(jq -r '.[] | select(.query == "'"$target"'") | .country' <<<"$ipapi_output")
+					if [ -z "$ip_geo_countryname" ] && [ "$JSON_OUTPUT" = false ]; then
+						ip_geo_countryname="Unknown"
+						ip_geo_data="N/A"
+					else
+						json_geo_city="$(jq -r '.[] | select(.query == "'"$target"'") | .city' <<<"$ipapi_output")"
+						json_geo_region="$(jq -r '.[] | select(.query == "'"$target"'") | .regionName' <<<"$ipapi_output")"
+						json_geo_cc="$(jq -r '.[] | select(.query == "'"$target"'") | .countryCode' <<<"$ipapi_output")"
+						if [ -n "$json_geo_city" ] && [ -n "$json_geo_region" ] && [ -n "$json_geo_cc" ]; then
+							ip_geo_data="$json_geo_city, $json_geo_region, $json_geo_cc"
+						else
+							ip_geo_data="Unknown"
+						fi
+					fi
+				fi
+			fi
+			if [ "$ip_geo_countryname" = "Unknown" ]; then
+				namecolor="${red}"
+				countrycolor="${red}"
+			else
+				namecolor="${white}"
+				countrycolor="${green}"
+			fi
+			if [ "$JSON_OUTPUT" = true ]; then
+				[[ -n "$geolocation_json_output" ]] && geolocation_json_output+=","
+				geolocation_json_output+="{\"ip\":\"$target\""
+				geolocation_json_output+=",\"city\":\"$json_geo_city\""
+				geolocation_json_output+=",\"region\":\"$json_geo_region\""
+				geolocation_json_output+=",\"country\":\"$ip_geo_countryname\""
+				geolocation_json_output+=",\"cc\":\"$json_geo_cc\""
+				geolocation_json_output+=",\"hits\":$(grep -c "$target" <<<"$targetlist_allips")"
+				[[ "$IS_ANYCAST" = true ]] && geolocation_json_output+=",\"is_anycast\": true"
+				geolocation_json_output+="}"
+			else
+				final_output+=$(printf "${white}%-16s${default}: ${namecolor}%s${default} (${countrycolor}%s${default}) %s" "$target" "$ip_geo_data" "$ip_geo_countryname" "$anycast_tag\n")
+				countrylist+="\n$ip_geo_countryname"
+			fi
+		done
+
+		[[ "$LAST_BATCH" = true ]] && break
+		firstip=$(( lastip++ ))
+	done
+
+	StatusbarMessage
+
+	[[ "$JSON_OUTPUT" = true ]] && return
+
+	echo -en "${final_output}"
+
+	# top 10 IPs
+	if [ -n "$top10_ipv4" ]; then
+		BoxHeader "Top 10 IPv4 by number of hits"
+		for entry in $top10_ipv4; do
+			iphits=$(awk '{print $1}' <<<"$entry")
+			ipaddr=$(awk '{ print substr($0, index($0,$2)) }' <<<"$entry")
+			printf "${white}%16s appears ${magenta}%s${default} time%s\n" "$ipaddr" "$iphits" "$([[ "$iphits" != "1" ]] && echo -n "s")"
+		done
+	fi
+	if [ -n "$top10_ipv6" ]; then
+		BoxHeader "Top 10 IPv6 by number of hits"
+		for entry in $top10_ipv6; do
+			iphits=$(awk '{print $1}' <<<"$entry")
+			ipaddr=$(awk '{ print substr($0, index($0,$2)) }' <<<"$entry")
+			printf "${white}%16s appears ${magenta}%s${default} time%s\n" "$ipaddr" "$iphits" "$([[ "$iphits" != "1" ]] && echo -n "s")"
+		done
+	fi
+
+	# country list
+	# BoxHeader "All countries"
+	sorted_countrylist=""
+	declare -A country_array # associative array
+	declare -a sorted_countrylist # simple array, to be used as an index into country_array
+	for country in $(echo -e "$countrylist" | sort | grep -Ev '^$' | uniq -c | sort -rn); do
+		countryhits=$(awk '{print $1}' <<<"$country")
+		countryname=$(awk '{ print substr($0, index($0,$2)) }' <<<"$country")
+		country_array["$countryname"]="$countryhits"
+		sorted_countrylist+=("$countryname")
+		# printf "${magenta}%10s${default} IP(s) —> ${green}%s${default}\n" "$countryhits" "$countryname"
+	done
+
+	# draw countries bar chart
+	total_countries="${#sorted_countrylist[@]}"
+	longest_countryname=$(echo -e "$countrylist" | wc -L)
+	BoxHeader "Country stats ($total_countries countries)"
+	count=0
+	while true; do
+		country=${sorted_countrylist[$count]}
+		# incrementally choose color for the bar and index for the top country array - skip 0 (black)
+		[[ "$MONOCHROME_MODE" = false ]] && tput setaf $(( count + 1 ))
+		hits="${country_array[$country]}"
+		spacing="$hits"
+		[[ "$hits" = "108" ]] && hits="40000" # cancellami
+		[[ "$hits" -gt "$terminal_width" ]] && spacing=$(( terminal_width-(14+longest_countryname) ))
+		printf " %${longest_countryname}s " "$country"
+		printf "█%.0s" $(seq "$spacing")
+		printf " %s IP%s\n" "$hits" "$([[ "$hits" != "1" ]] && echo -n "s")"
+		(( count++ ))
+		if [ "$count" -ge "$total_countries" ]; then
+			break
+		fi
+	done
+	echo ""
+}
+
 PrintJsonOutput(){
 	DisableColors
 	endtime=$(date +%s)
@@ -1928,7 +2091,28 @@ IPGeoRepLookup(){
 		# skip geolocation and reputation lookups for individual trace hops in non-detailed mode
 		return
 	fi
+
+	ip_geo_data=""
+	ip_geo_countryname=""
+	geo_city_json_output=""
+	geo_region_json_output=""
+	geo_country_json_output=""
+	geo_cc_json_output=""
+	local ipmap_city
+	local ipmap_region
+	local ipmap_cc
+	local ipmap_country_name
+	local ipapi_city
+	local ipapi_region
+	local ipapi_cc
+	local ipapi_countryname
+	local ipmap_location_data
+	local ipapi_output
+	local ipapi_status
+	local ipapi_errmsg
+
 	StatusbarMessage "Collecting geolocation and classification data"
+
 	# fetch preferred geolocation and anycast data from RIPE IPmap
 	ipmap_output=$(docurl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
 
@@ -1949,11 +2133,6 @@ IPGeoRepLookup(){
 		IS_ANYCAST=$(jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast' <<<"$ipmap_output")
 	fi
 
-	ip_geo_data=""
-	geo_city_json_output=""
-	geo_region_json_output=""
-	geo_country_json_output=""
-	geo_cc_json_output=""
 	ipmap_location_data=$(jq 'select (.location != null) | .location' <<<"$ipmap_output")
 	if [ -n "$ipmap_location_data" ]; then
 		# RIPE IPmap has (at least some) geo data about this address, check city/region
@@ -1973,10 +2152,13 @@ IPGeoRepLookup(){
 		if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ] && [ -n "$ipmap_cc" ]; then
 			ip_geo_data="$ipmap_city, $ipmap_region ($ipmap_cc)"
 			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipmap_cc")
+			ip_geo_countryname="$ipmap_country_name"
 		elif [ -n "$ipmap_region" ] && [ -n "$ipmap_country_name" ]; then
 			ip_geo_data="$ipmap_region ($ipmap_country_name)"
+			ip_geo_countryname="$ipmap_country_name"
 		elif [ -n "$ipmap_country_name" ]; then
 			ip_geo_data="$ipmap_country_name"
+			ip_geo_countryname="$ipmap_country_name"
 		fi
 	elif [ "$ipapi_status" = "success" ]; then
 		# IPmap has incomplete/no data about this address, fallback to ip-api.com
@@ -1991,11 +2173,14 @@ IPGeoRepLookup(){
 		geo_cc_json_output="$ipapi_cc"
 		if [ -n "$ipapi_city" ] && [ -n "$ipapi_region" ] && [ -n "$ipapi_cc" ]; then
 			ip_geo_data="$ipapi_city, $ipapi_region ($ipapi_cc)"
+			ip_geo_countryname="$ipapi_countryname"
 			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipapi_cc")
 		elif [ -n "$ipapi_region" ] && [ -n "$ipapi_countryname" ]; then
 			ip_geo_data="$ipapi_region ($ipapi_countryname)"
+			ip_geo_countryname="$ipapi_countryname"
 		elif [ -n "$ipapi_countryname" ]; then
 			ip_geo_data="$ipapi_countryname"
+			ip_geo_countryname="$ipapi_countryname"
 		fi
 	fi
 
@@ -2415,6 +2600,10 @@ CoreutilsFixup() {
 	if [ -x "$(command -v gbase64)" ]; then
 		base64() { gbase64 "$@"; }
 		export -f base64
+	fi
+	if [ -x "$(command -v gwc)" ]; then
+		wc() { gwc "$@"; }
+		export -f wc
 	fi
 	if [ "$IS_ASN_CHILD" = true ] || [ "$IS_ASN_CONNHANDLER" = true ]; then
 		# suppress the tput command during headless runs
@@ -3263,13 +3452,14 @@ json_resultcount=0
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvmljJsn:t:d:o:a:c:"
+optspec=":hvmljJsgn:t:d:o:a:c:"
 
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
 SERVER_MODE=false
 RECON_MODE=false
 COUNTRY_BLOCK_MODE=false
+GEOLOCATE_ONLY_MODE=false
 OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
 while getopts "$optspec" optchar; do {
 
@@ -3326,6 +3516,10 @@ while getopts "$optspec" optchar; do {
 			;;
 		"c")
 			COUNTRY_BLOCK_MODE=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"g")
+			GEOLOCATE_ONLY_MODE=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"m")
@@ -3418,17 +3612,20 @@ if [ -t 0 ] || [ "$IS_HEADLESS" = true ]; then
 		# an option was passed, but it was not one that requires a param (e.g. -m for monochrome mode)
 		# fetch the actual target
 		GetFullParamsFromCurrentPosition "$@"
-		# trim the leading whitespace from the argument
-		userinput="${userinput#' '}"
-		[[ -z "$userinput" ]] && PrintUsage "Error: no target specified"
 	fi
 else
 	# script was invoked with input from stdin (e.g. "asn -s < iplist")
-	# read IP list from stdin
-	while read -r inputline; do
-		inputline=$(echo -e "$inputline" | grep -Ev '^$|^[ \t]*#') # trim blanks and comments
-		[[ -n "$inputline" ]] && userinput+="$inputline\n"
-	done < /dev/stdin
+	# read IP list from stdin and trim blanks and comments
+	userinput=$(cat | grep -Ev '^$|^[ \t]*#')
+fi
+
+# trim leading whitespace from userinput
+userinput=$(awk '{ sub(/^[ \t]+/, ""); print }' <<<"$userinput")
+# trim trailing newline from userinput
+userinput=$(echo -en "$userinput")
+# check if we still don't have a target
+if [ -z "$userinput" ] && [ "$SERVER_MODE" = false ]; then
+	PrintUsage "Error: no target specified"
 fi
 
 [[ "$MONOCHROME_MODE" = true ]] && DisableColors
@@ -3471,10 +3668,25 @@ if [ "$RECON_MODE" = true ]; then
 	final_json_output="[]"
 	[[ "$HAVE_NMAP" = false ]] && PrintErrorAndExit "Nmap is required to use -s, but not available on this system"
 	# launch Shodan scan
-	ShodanRecon "$userinput"
+	ShodanRecon
 	if [ "$JSON_OUTPUT" = true ]; then
 		json_resultcount=$(jq '. | length' <<<"$shodan_json_output")
 		final_json_output="$shodan_json_output"
+		PrintJsonOutput
+	else
+		tput sgr0
+	fi
+	exit 0
+fi
+
+if [ "$GEOLOCATE_ONLY_MODE" = true ]; then
+	# user passed the "-g" switch
+	final_json_output="[]"
+	# launch bulk geolocation lookup
+	BulkGeolocate
+	if [ "$JSON_OUTPUT" = true ]; then
+		json_resultcount=$(jq '. | length' <<<"[$geolocation_json_output]")
+		final_json_output="$geolocation_json_output"
 		PrintJsonOutput
 	else
 		tput sgr0
