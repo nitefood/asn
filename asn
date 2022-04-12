@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.3-rc5"
+ASN_VERSION="0.72.3-rc6"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1889,41 +1889,50 @@ BulkGeolocate(){
 		done
 	fi
 
-	# country list
-	# BoxHeader "All countries"
-	sorted_countrylist=""
-	declare -A country_array # associative array
-	declare -a sorted_countrylist # simple array, to be used as an index into country_array
-	for country in $(echo -e "$countrylist" | sort | grep -Ev '^$' | uniq -c | sort -rn); do
-		countryhits=$(awk '{print $1}' <<<"$country")
-		countryname=$(awk '{ print substr($0, index($0,$2)) }' <<<"$country")
-		country_array["$countryname"]="$countryhits"
-		sorted_countrylist+=("$countryname")
-		# printf "${magenta}%10s${default} IP(s) —> ${green}%s${default}\n" "$countryhits" "$countryname"
+	# draw countries bar chart
+	BoxHeader "Country stats"
+	DrawChart "$countrylist" "IP"
+}
+
+DrawChart(){
+	# draws a bar chart for the occurrences of values from a list.
+	# $1 must be a list of values (not necessarily sorted)
+	# $2 must be the unit name of the bars (singular. A final 's' is added for bars whose value is > 1)
+	# [optional] $3 can be the number of items to display (i.e. TOP n)
+	inputlist="$1"
+	unitname="$2"
+	[[ -n "$3" ]] && topn="$3" || topn="0"
+	sorted_input=""
+	declare -A valuearray # associative array
+	declare -a sorted_input # simple array, to be used as an index into valuearray
+	for item in $(echo -e "$inputlist" | sort | grep -Ev '^$' | uniq -c | sort -rn); do
+		itemhits=$(awk '{print $1}' <<<"$item")
+		itemname=$(awk '{ print substr($0, index($0,$2)) }' <<<"$item")
+		valuearray["$itemname"]="$itemhits"
+		sorted_input+=("$itemname")
 	done
 
-	# draw countries bar chart
-	total_countries="${#sorted_countrylist[@]}"
-	longest_countryname=$(echo -e "$countrylist" | wc -L)
-	BoxHeader "Country stats ($total_countries countries)"
+	total_unique_names="${#sorted_input[@]}"
+	longest_itemname=$(echo -e "$inputlist" | wc -L)
 	count=0
 	while true; do
-		country=${sorted_countrylist[$count]}
-		# incrementally choose color for the bar and index for the top country array - skip 0 (black)
+		item=${sorted_input[$count]}
+		# incrementally choose color for the bar and index for the item array entry - skip 0 (black)
 		[[ "$MONOCHROME_MODE" = false ]] && tput setaf $(( count + 1 ))
-		hits="${country_array[$country]}"
-		spacing="$hits"
-		[[ "$hits" = "108" ]] && hits="40000" # cancellami
-		[[ "$hits" -gt "$terminal_width" ]] && spacing=$(( terminal_width-(14+longest_countryname) ))
-		printf " %${longest_countryname}s " "$country"
+		itemhits="${valuearray[$item]}"
+		spacing="$itemhits"
+		[[ "$itemhits" -gt "$terminal_width" ]] && spacing=$(( terminal_width-(14+longest_itemname) ))
+		printf " %${longest_itemname}s " "$item"
 		printf "█%.0s" $(seq "$spacing")
-		printf " %s IP%s\n" "$hits" "$([[ "$hits" != "1" ]] && echo -n "s")"
+		printf " %s ${unitname}%s\n" "$itemhits" "$([[ "$itemhits" != "1" ]] && echo -n "s")"
 		(( count++ ))
-		if [ "$count" -ge "$total_countries" ]; then
+		if [ "$topn" != "0" ] && [ "$count" -ge "$topn" ]; then
+			break
+		elif [ "$count" -ge "$total_unique_names" ]; then
 			break
 		fi
 	done
-	echo ""
+	echo -e "${default}"
 }
 
 PrintJsonOutput(){
@@ -3725,6 +3734,7 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 	cc=$(jq -r 'select(.[].cca2 != null) | .[].cca2' <<<"$restcountries_output" | tr '[:upper:]' '[:lower:]')
 	[[ -z "$cc" ]] && PrintErrorAndExit "No country matching '$userinput' found"
 	countryname=$(jq -r '.[].name.common' <<<"$restcountries_output")
+	population=$(jq -r '.[].population' <<<"$restcountries_output")
 	country_ipv4_blocks=$(docurl -s "https://raw.githubusercontent.com/herrbischoff/country-ip-blocks/master/ipv4/$cc.cidr")
 	country_ipv6_blocks=$(docurl -s "https://raw.githubusercontent.com/herrbischoff/country-ip-blocks/master/ipv6/$cc.cidr")
 	country_ipv4_blocks_count=$(wc -l <<<"$country_ipv4_blocks")
@@ -3737,6 +3747,16 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 		country_ipv6_blocks=""
 		country_ipv6_blocks_count=0
 	fi
+	# calculate total number of IPs allocated to the country
+	json_country_ipv4_ip_count=0
+	cidrlist=$(echo -e "$country_ipv4_blocks" | sed -e 's/^.*\///g' | sort | uniq -c | sort -nr)
+	for cidr in $cidrlist; do
+		cidr_total_ips=$(awk '{printf "%d", (2**(32-$2) * $1)}' <<<"$cidr")
+		json_country_ipv4_ip_count=$(( json_country_ipv4_ip_count + cidr_total_ips ))
+	done
+	ips_per_capita=$(awk "BEGIN {printf \"%.2g\", $json_country_ipv4_ip_count/$population}")
+	country_ipv4_ip_count=$(printf "%'d" "$json_country_ipv4_ip_count")
+	population=$(printf "%'d" "$population")
 	if [ "$JSON_OUTPUT" = true ]; then
 		json_country_ipv4_blocks=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$country_ipv4_blocks")
 		json_country_ipv6_blocks=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$country_ipv6_blocks")
@@ -3744,9 +3764,11 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 		json_target_type="country"
 		final_json_output="{\"country_name\":\"$countryname\""
 		final_json_output+=",\"country_code\":\"$cc\""
-		final_json_output+=",\"ipv4_count\":$country_ipv4_blocks_count"
+		final_json_output+=",\"ipv4_blocks\":$country_ipv4_blocks_count"
+		final_json_output+=",\"ipv4_total_ips\":$json_country_ipv4_ip_count"
+		final_json_output+=",\"ipv4_per_capita\":$ips_per_capita"
 		final_json_output+=",\"ipv4\":${json_country_ipv4_blocks}"
-		final_json_output+=",\"ipv6_count\":$country_ipv6_blocks_count"
+		final_json_output+=",\"ipv6_blocks\":$country_ipv6_blocks_count"
 		final_json_output+=",\"ipv6\":${json_country_ipv6_blocks}"
 		final_json_output+="}"
 		PrintJsonOutput
@@ -3756,8 +3778,17 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 		echo -e "$country_ipv4_blocks" | pr -4 -T -W$((terminal_width/2))
 		BoxHeader "IPv6"
 		echo -e "$country_ipv6_blocks" | pr -4 -T -W$((terminal_width/2))
-		echo -e "\n${green}$country_ipv4_blocks_count${default} IPv4 blocks, ${yellow}$country_ipv6_blocks_count${default} IPv6 blocks found for $countryname (.$cc).\n"
-		tput sgr0
+		BoxHeader "IP Statistics for $countryname (.$cc)"
+		echo -e "\n- ${green}$country_ipv4_blocks_count${default} IPv4 blocks found\n- ${yellow}$country_ipv6_blocks_count${default} IPv6 blocks found"
+		echo -e "- Population: ${population}\n- Total IPv4 addresses: ${blue}$country_ipv4_ip_count${default}${default} (~${blue}$ips_per_capita${default} IPs per person)"
+		BoxHeader "CIDR distribution (IPv4)"
+		for cidr in $cidrlist; do
+			cidrcount=$(awk '{print $1}' <<<"$cidr")
+			cidrsize=$(awk '{print $2}' <<<"$cidr")
+			[[ "$cidrcount" = "1" ]] && s="" || s="s"
+			printf "%10s x ${magenta}/%s${default} %s\n" "$cidrcount" "$cidrsize" "block$s"
+		done
+		echo ""
 	fi
 	exit 0
 fi

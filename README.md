@@ -142,13 +142,13 @@ Requires Bash v4.2+. Tested on:
 
 * *Displaying a list of  CIDR blocks allocated to Jamaica*
 
-  ![country_cidr](https://user-images.githubusercontent.com/24555810/162335736-38a5df99-1506-41ad-a8fd-ddae5b73a031.png)
+  ![country_cidr](https://user-images.githubusercontent.com/24555810/163061676-bae440c6-ff0d-478e-8799-98a927600964.png)
 
 ### Bulk Geolocation / country stats
 
 * *Performing bulk extraction, geolocation and stats for IPs from a logfile*
 
-  ![bulk_geolocation](https://user-images.githubusercontent.com/24555810/162650615-e586e5a1-2a27-4b93-9a4c-0e89cb232468.png)
+  ![bulk_geolocation](https://user-images.githubusercontent.com/24555810/162656545-11db3759-6741-44e0-bcfb-f3542482415f.png)
 
 ### Suggested ASNs search
 
@@ -170,46 +170,54 @@ Some additional packages are also required for full functionality:
 
 * **Debian 10 / Ubuntu 20.04 (or newer):**
 
-```
-apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap ncat aha
-```
+  ```
+  apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap ncat aha
+  ```
 
 * **Debian 9 / Ubuntu 18.04 (or older):**
 
-```
-apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc make && \
-git clone https://github.com/theZiz/aha.git && \
-make install -C aha/
-```
+  ```
+  apt -y install curl whois bind9-host mtr-tiny jq ipcalc grepcidr nmap git gcc make && \
+  git clone https://github.com/theZiz/aha.git && \
+  make install -C aha/
+  ```
 
 * **CentOS / RHEL / Rocky Linux 8:**
 
-```
-dnf -y install epel-release && \
-dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
-```
+  ```
+  dnf -y install epel-release && \
+  dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha   grepcidr
+  ```
 
 * **Fedora:**
 
-```
-dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
-```
+  ```
+  dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
+  ```
 
 * **Manjaro/Arch Linux:**
 
-```
- yay -S asn-git
-```
+  ```
+  yay -S asn-git
+  ```
 
 * **FreeBSD**:
-`env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha`
+
+  ```
+  env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha
+  ```
+
 * **MacOS** (using [Homebrew](https://brew.sh)):
-  `brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr`
+
+  ```
+  brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr
+  ```
 
   *Notes for MacOS users:*
 
-    * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
-    * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
+  * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
+  * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
+  
 * **Windows**:
     * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
       Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
@@ -584,20 +592,32 @@ For quick reference, the location URL string to enter (for both Firefox and Chro
 
 Here's how to add a search engine in Firefox and Chrome:
 
-<i>**Firefox**</i>:
+***Firefox:***
 
 * Simply create a new bookmark and fill its details like this:
-![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
+  
+  ![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
+
+
 Afterwards, you will be able to run queries and traceroutes by simply entering, for example, `@asn 8.8.8.8` in the browser's location bar.
 
 ***Chrome:***
 
 1. Right click the location bar and select <i>**Manage search engines...**</i>
-![searchsetup_chrome_1](https://user-images.githubusercontent.com/24555810/102161929-87d09400-3e88-11eb-9e42-70087e3fab87.png)
-2.Click **Add**:
-![searchsetup_chrome_2](https://user-images.githubusercontent.com/24555810/102162100-dc740f00-3e88-11eb-8037-528fbcc636e9.png)
-3.Fill in the details as shown below:
-![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
+
+  ![searchsetup_chrome_1](https://user-images.githubusercontent.com/24555810/102161929-87d09400-3e88-11eb-9e42-70087e3fab87.png)
+
+
+2. Click **Add**:
+
+  ![searchsetup_chrome_2](https://user-images.githubusercontent.com/24555810/102162100-dc740f00-3e88-11eb-8037-528fbcc636e9.png)
+
+
+
+3. Fill in the details as shown below:
+
+  ![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
+
 
 As usual, the keyword is entierly customizable to your preference.
 
@@ -668,7 +688,11 @@ Shodan scan results can be output in JSON mode by passing the `-j` or `-J` optio
 
 ## Mapping the IP(v4/v6) address space of specific countries
 
-The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a specific country when launched with the `-c` command line switch. Searching for a specific country code with a leading dot (e.g. `.fr`) will yield direct results for France, while full text search will display country codes matching the search string, or proceed to display the results if only one match is found. JSON output is supported.
+The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a specific country when launched with the `-c` command line switch, plus some statistics.
+
+* Searching for a specific country code with a leading dot (e.g. `.fr`) will yield direct results for France, while full text search will display country codes matching the search string, or proceed to display the results if only one match is found.
+* Statistics such as v4 prefix length distribution, total IPv4 addresses available to the country, IPv4 addresses per capita, etc. are included.
+* JSON output is supported.
 
 *Usage Examples:*
 
