@@ -217,7 +217,7 @@ Some additional packages are also required for full functionality:
 
   * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
   * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
-  
+
 * **Windows**:
     * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
       Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
@@ -595,7 +595,7 @@ Here's how to add a search engine in Firefox and Chrome:
 ***Firefox:***
 
 * Simply create a new bookmark and fill its details like this:
-  
+
   ![searchsetup_firefox](https://user-images.githubusercontent.com/24555810/102160982-c6fde580-3e86-11eb-9885-c23eb60d622b.png)
 
 
@@ -702,7 +702,7 @@ The tool will search and display all IPv4 and IPv6 CIDR blocks allocated to a sp
 
 ```shell
 # scan a random norwegian subnet for CVE/CPE/open ports/hostnames:
-asn -jc .no | jq -r ".results[] | .ipv4[$RANDOM % .ipv4_count]" | asn -s
+asn -jc .no | jq -r ".results[] | .ipv4[$RANDOM % .ipv4_blocks]" | asn -s
 ```
 
 ## Bulk geolocation mode

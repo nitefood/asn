@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.3-rc6"
+ASN_VERSION="0.72.3"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1805,7 +1805,7 @@ BulkGeolocate(){
 			json_geo_cc=""
 
 			if [ -n "$ipmap_output" ]; then
-				IS_ANYCAST=$(jq '.metadata.service.contributions."'"$target"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast' <<<"$ipmap_output")
+				IS_ANYCAST=$(jq '.metadata.service.contributions."'"$target"'".latency.metadata.anycast' <<<"$ipmap_output")
 				[[ "$IS_ANYCAST" = true ]] && anycast_tag="${yellowbg} ANYCAST ${default}" || anycast_tag=""
 				ip_geo_countryname=$(jq -r '.data."'"$target"'" | select( .countryName != null ) | .countryName' <<<"$ipmap_output")
 				json_geo_city="$(jq -r '.data."'"$target"'" | select( .cityName != null ) | .cityName' <<<"$ipmap_output")"
@@ -2139,7 +2139,7 @@ IPGeoRepLookup(){
 
 	IS_ANYCAST=""
 	if [[ -z $(jq 'select (.error != null) | .error' <<<"$ipmap_output") ]]; then
-		IS_ANYCAST=$(jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="simple-anycast") | .metadata.anycast' <<<"$ipmap_output")
+		IS_ANYCAST=$(jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="latency") | .metadata.anycast' <<<"$ipmap_output")
 	fi
 
 	ipmap_location_data=$(jq 'select (.location != null) | .location' <<<"$ipmap_output")
