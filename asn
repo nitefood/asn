@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.3"
+ASN_VERSION="0.72.4"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2215,8 +2215,8 @@ IPGeoRepLookup(){
 	fi
 	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
 	incolumitas_dcdata=$(docurl -m2 -s https://api.incolumitas.com/datacenter?ip=$1)
-	dcname=$(jq -r 'select (.datacenter != null) | .datacenter' <<<"$incolumitas_dcdata")
-	dcregion=$(jq -r 'select (.region != null) | .region' <<<"$incolumitas_dcdata")
+	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$incolumitas_dcdata")
+	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$incolumitas_dcdata")
 	if [ -n "$dcname" ]; then
 		# incolumitas.com has details regarding this DC
 		ip_type_data+=" ${yellowbg} DC ${default}${yellow} $dcname"
