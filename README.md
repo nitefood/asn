@@ -182,11 +182,11 @@ Some additional packages are also required for full functionality:
   make install -C aha/
   ```
 
-* **CentOS / RHEL / Rocky Linux 8:**
+* **CentOS / RHEL / Rocky Linux 9:**
 
   ```
   dnf -y install epel-release && \
-  dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha   grepcidr
+  dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
   ```
 
 * **Fedora:**

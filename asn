@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.4"
+ASN_VERSION="0.72.5"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -230,7 +230,8 @@ QueryRipestat(){
 		done
 		parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
 		if [ -n "$parent_inetnum" ]; then
-			parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum" | xargs ipcalc -r 2>/dev/null | tail -n 1)
+			parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum")
+			parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
 			# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
 			# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
 			LookupASNAndRouteFromIP "$parent_inetnum"
@@ -1210,7 +1211,7 @@ SearchByOrg(){
 								# deaggregate IPv4 netblocks into CIDR prefixes for readability
 								prefix_spacing=19
 								trimmed_prefix=$(echo "$prefix" | tr -d ' ')
-								prefix=$(ipcalc -r "$trimmed_prefix" | grep -A1 "deaggregate" | tail -n 1)
+								prefix=$(IpcalcDeaggregate "$trimmed_prefix")
 							else
 								# no ipcalc, use direct pWhois output
 								prefix_spacing=41
@@ -2215,8 +2216,8 @@ IPGeoRepLookup(){
 	fi
 	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
 	incolumitas_dcdata=$(docurl -m2 -s https://api.incolumitas.com/datacenter?ip=$1)
-	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$incolumitas_dcdata")
-	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$incolumitas_dcdata")
+	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$incolumitas_dcdata" 2>/dev/null)
+	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$incolumitas_dcdata" 2>/dev/null)
 	if [ -n "$dcname" ]; then
 		# incolumitas.com has details regarding this DC
 		ip_type_data+=" ${yellowbg} DC ${default}${yellow} $dcname"
@@ -2411,7 +2412,8 @@ PwhoisListPrefixesForOrg(){
 	orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
 	for orgid in $orgids; do
 		for prefix in $(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>"); do
-			echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ' | xargs ipcalc -r 2>/dev/null | grep -A1 "deaggregate" | tail -n 1
+			iprange=$(echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ')
+			IpcalcDeaggregate "$iprange"
 		done
 	done
 }
@@ -2621,11 +2623,41 @@ CoreutilsFixup() {
 	fi
 }
 
+IpcalcVersionCheck() {
+	# check for ipcalc version to accomodate both v1.0.0+ (CentOS/RHEL/Rocky 9) and v0.41+ (Debian derivatives)
+	IPCALC_FLAG=""
+	if [ "$HAVE_IPCALC" = true ]; then
+		ipcalc_version=$(ipcalc -v | sed 's/ipcalc //')
+		ipcalc_major=$(echo "$ipcalc_version" | cut -d '.' -f 1)
+		case "${ipcalc_major}" in
+			"0")
+				ipcalc_minor=$(echo "$ipcalc_version" | cut -d '.' -f 2)
+				if [ "$ipcalc_minor" -ge 41 ]; then
+					IPCALC_FLAG="-r"
+				else
+					HAVE_IPCALC=false
+					missing_tools+="\n - ipcalc"
+					disabled_features+="\n - CIDR deaggregation (due to incompatible ipcalc version - v0.41+ for Debian-based or v1.0.0+ for RHEL-based required, but you have v$ipcalc_version)"
+				fi
+				;;
+			"1")
+				IPCALC_FLAG="-d"
+				;;
+		esac
+
+	fi
+}
+
+IpcalcDeaggregate() {
+	ipcalc_parm=$(tr -d ' ' <<<"$1")
+	ipcalc ${IPCALC_FLAG} "$ipcalc_parm" 2>/dev/null | grep -iv "deaggregate" | awk '{print $NF}' | tail -n1
+}
+
 CheckPrerequisites() {
 	saveIFS="$IFS"
 	IFS=' '
 	prerequisite_tools="jq whois host curl" # mandatory tools
-	optionals_tools="nmap mtr ipcalc grepcidr ncat aha"	# optional tools
+	optional_tools="nmap mtr ipcalc grepcidr ncat aha"	# optional tools
 	missing_tools=""
 	disabled_features=""
 	HARD_FAIL=false
@@ -2655,7 +2687,7 @@ CheckPrerequisites() {
 	done
 
 	# Optional tools checking (no hard fail if not found, but some features disabled)
-	for tool in $optionals_tools; do
+	for tool in $optional_tools; do
 		if [ -z "$(command -v "$tool")" ]; then
 			missing_tools+="\n - $tool"
 			case "$tool" in
@@ -2684,6 +2716,8 @@ CheckPrerequisites() {
 			disabled_features+="\n - ${disabled_feat}"
 		fi
 	done
+
+	IpcalcVersionCheck
 
 	if [ -n "$missing_tools" ]; then
 		if [ "$JSON_OUTPUT" = false ]; then
