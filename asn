@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.5"
+ASN_VERSION="0.72.6"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1715,10 +1715,10 @@ ShodanRecon(){
 			vulnhits=$(awk '{print $1}' <<<"$cve")
 			cvenum=$(awk '{print $2}' <<<"$cve")
 			cvejsondata=$(docurl -s "https://services.nvd.nist.gov/rest/json/cve/1.0/$cvenum")
-			v3score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseScore | select(length>0)' <<<"$cvejsondata")
-			v3severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseSeverity | select(length>0)' <<<"$cvejsondata")
-			v2score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.cvssV2.baseScore' <<<"$cvejsondata")
-			v2severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.severity' <<<"$cvejsondata")
+			v3score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseScore | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
+			v3severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseSeverity | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
+			v2score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.cvssV2.baseScore' <<<"$cvejsondata" 2>/dev/null)
+			v2severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.severity' <<<"$cvejsondata" 2>/dev/null)
 			cvescore=""
 			cveseverity=""
 			if [ -n "$v3score" ] && [ -n "$v3severity" ]; then
@@ -3451,19 +3451,11 @@ peeringdb_ipv6_dataset=""
 # Well known ports list
 [[ -r "/etc/services" ]] && WELL_KNOWN_PORTS=$(cat /etc/services) || WELL_KNOWN_PORTS=""
 
-#*
-#* Parse command line options
-#*
-if [[ $# -lt 1 ]]; then
-	PrintUsage
-	exit 1
-fi
-
 # default options (configurable via $HOME/.asnrc)
 MTR_TRACING=true
 DETAILED_TRACE=false
 MTR_ROUNDS=5
-MAX_CONCURRENT_SHODAN_REQUESTS=20
+MAX_CONCURRENT_SHODAN_REQUESTS=10
 SHODAN_SHOW_TOP_N=5
 MONOCHROME_MODE=false
 ASN_DEBUG=false
@@ -3471,6 +3463,14 @@ JSON_OUTPUT=false
 JSON_PRETTY=false
 DEFAULT_SERVER_BINDADDR="127.0.0.1"
 DEFAULT_SERVER_BINDPORT="49200"
+
+#*
+#* Parse command line options
+#*
+if [[ $# -lt 1 ]]; then
+	PrintUsage
+	exit 1
+fi
 
 # read optional preferences from "$HOME/.asnrc" (only for non-headless runs)
 if [ "$IS_HEADLESS" = false ]; then
