@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.7"
+ASN_VERSION="0.72.8"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -203,7 +203,7 @@ QueryRipestat(){
 		for inet6num in $inet6nums; do
 			# exclude RIR supernets
 			prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
-			[[ "$prefix_size" -lt 29 ]] && continue || ipv6_inetnums+="${inet6num}\n"
+			[[ "$prefix_size" -le 12 ]] && continue || ipv6_inetnums+="${inet6num}\n"
 		done
 	done
 
