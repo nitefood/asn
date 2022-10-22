@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.8"
+ASN_VERSION="0.72.9"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -369,6 +369,10 @@ WhoisIP(){
 	[[ "$#" -gt 1 ]] && GENERIC_WHOIS_LOOKUP_ONLY=true
 	full_whois_data=$(timeout 5 whois "$1" 2>/dev/null)
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
+	# fetch whois inetnum and later compare to cymru prefix, in order to find smallest match (sometimes whois and cymru/pwhois prefix data diverge)
+	whois_inetnum=$(IpcalcDeaggregate "$(grep -E -m1 "inet[6]?num|NetRange"<<<"$full_whois_data" | awk '{print $2 $3 $4}')")
+	# handle problematic IPs where whois gives out wrong info
+	[[ "$whois_inetnum" = "192.168.1.1/32" ]] && whois_inetnum="$found_route"
 	ixp_data=""
 	ixp_geo=""
 	ip_type_json_output=""
@@ -457,6 +461,21 @@ WhoisIP(){
 		rpki_output="-"
 	fi
 
+	found_subprefix="$found_route"
+	whois_routename=""
+	# compare cymru net with whois net and pick longer (smaller), while retaining larger for route information.
+	# we want to identify subnets to which target IPs belong, even when they aren't
+	# announced directly but within a larger route.
+	if [ "$found_route" != "N/A" ] && [ "$found_route" != "$whois_inetnum" ]; then
+		foundroute_prefixlen=$(cut -d '/' -f 2 <<<"$found_route")
+		whois_prefixlen=$(cut -d '/' -f 2 <<<"$whois_inetnum")
+		if (( whois_prefixlen > foundroute_prefixlen )) 2>/dev/null; then
+			found_subprefix="$whois_inetnum"
+			# lookup route name (RIPE)
+			whois_routename=$(timeout 5 whois "$found_route" | grep -m1 -E "^descr:" | cut -d ':' -f 2 | sed 's/^ *//g')
+		fi
+	fi
+
 	if [ "$JSON_OUTPUT" = true ]; then
 		# JSON output
 		final_json_output+="{"
@@ -465,6 +484,9 @@ WhoisIP(){
 		final_json_output+="\"ip_version\":\"$ipversion\","
 		[[ "$hostname" != "-" ]] && final_json_output+="\"reverse\":\"$hostname\","
 		final_json_output+="\"org_name\":\"$pwhois_org\","
+		# next field can be == $found_route or can be different (smaller) in case the IP belongs to a subnet (of $found_route) that's not routed directly
+		final_json_output+="\"net_range\":\"$found_subprefix\","
+		final_json_output+="\"net_name\":\"$pwhois_net\","
 		if [ -n "$abusecontacts" ] && [ "$abusecontacts" != "-" ]; then
 			final_json_output+="\"abuse_contacts\":$abusecontacts,"
 		fi
@@ -473,8 +495,8 @@ WhoisIP(){
 			final_json_output+="\"is_announced\":true,"
 			final_json_output+="\"as_number\":\"$found_asn\","
 			final_json_output+="\"as_name\":\"${found_asname//\"/\\\"}\","
-			final_json_output+="\"net_range\":\"$found_route\","
-			final_json_output+="\"net_name\":\"$pwhois_net\","
+			final_json_output+="\"route\":\"$found_route\","
+			final_json_output+="\"route_name\":\"$whois_routename\","
 			final_json_output+="\"roa_count\":\"$roacount_json_output\","
 			final_json_output+="\"roa_validity\":\"$roavalidity_json_output\""
 		else
@@ -507,7 +529,15 @@ WhoisIP(){
 		fi
 		printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
 		printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
-		printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)%s${default}\n" "├" "$found_route" "$pwhois_net" "$summary_ipinfo"
+		if [ "$found_subprefix" != "$found_route" ]; then
+			# target IP belongs to a subnet announced within a larger route
+			printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)${default}\n" "├" "$found_subprefix" "$pwhois_net"
+			[[ -n "$whois_routename" ]] && whois_routename=" ($whois_routename)"
+			printf "${white}%${indent}s${bluebg}ROU${default} ${yellow}%s%s%s${default}\n" "├" "$found_route" "$whois_routename" "$summary_ipinfo"
+		else
+			# target IP belongs to a subnet announced directly
+			printf "${white}%${indent}s${bluebg}NET${default} ${yellow}%s (%s)%s${default}\n" "├" "$found_subprefix" "$pwhois_net" "$summary_ipinfo"
+		fi
 		printf "${white}%${indent}s${bluebg}ABU${default} ${blue}%s${default}\n" "├" "$abusecontacts"
 		printf "${white}%${indent}s${bluebg}ROA${default} %s\n" "├" "$rpki_output"
 		[[ -n "$ip_type_data" ]] && printf "${white}%${indent}s${bluebg}TYP${default}%s\n" "├" "${ip_type_data}"
@@ -2649,7 +2679,12 @@ IpcalcVersionCheck() {
 
 IpcalcDeaggregate() {
 	ipcalc_parm=$(tr -d ' ' <<<"$1")
-	ipcalc ${IPCALC_FLAG} "$ipcalc_parm" 2>/dev/null | grep -iv "deaggregate" | awk '{print $NF}' | tail -n1
+	if grep -q "/" <<<"$1"; then
+		# consider input to be already a CIDR block, return it unchanged
+		echo "$1"
+	else
+		ipcalc ${IPCALC_FLAG} "$ipcalc_parm" 2>/dev/null | grep -iv "deaggregate" | awk '{print $NF}' | tail -n1
+	fi
 }
 
 CheckPrerequisites() {
