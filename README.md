@@ -189,6 +189,23 @@ Some additional packages are also required for full functionality:
   dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
   ```
 
+* **CentOS / RHEL / Rocky Linux 8:**
+
+  ```
+  dnf -y install epel-release 'dnf-command(copr)' && \
+  dnf -y copr enable robert/ipcalc && \
+  dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
+  ```
+
+* **CentOS / RHEL 7:**
+
+  ```
+  yum -y install epel-release yum-plugin-copr && \
+  yum -y copr enable robert/ipcalc && \
+  yum -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr && \
+  hash -d ipcalc
+  ```
+
 * **Fedora:**
 
   ```
