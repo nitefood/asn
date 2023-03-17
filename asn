@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.72.9"
+ASN_VERSION="0.73"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2273,11 +2273,16 @@ IPGeoRepLookup(){
 	json_iqs_threat_tags=""
 	is_blacklisted=$(docurl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
 	if [ "$is_blacklisted" = "1" ]; then
+		# IP is blacklisted by StopForumSpam
 		json_rep="bad"
-		# IP is blacklisted by StopForumSpam. Lookup detailed reputation data on IPQualityScore
 		ip_rep_data="${red}❌ BAD (on stopforumspam.org)${default}"
-		if [ -n "$IQS_TOKEN" ]; then
-			iqs_output=$(docurl -m4 -s "https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1")
+	fi
+	if [ -n "$IQS_TOKEN" ]; then
+		if [ "$is_blacklisted" = "1" ] || [ "$IQS_ALWAYS_QUERY" = true ]; then
+			# Lookup detailed reputation data on IPQualityScore
+			iqs_query_url="https://ipqualityscore.com/api/json/ip/$IQS_TOKEN/$1"
+			[[ -n "$IQS_CUSTOM_SETTINGS" ]] && iqs_query_url+="?$IQS_CUSTOM_SETTINGS"
+			iqs_output=$(docurl -m4 -s "$iqs_query_url")
 			iqs_success=$(jq -r '.success' <<<"$iqs_output")
 			if [ "$iqs_success" = true ]; then
 				iqs_score=$(jq -r '.fraud_score' <<<"$iqs_output")
@@ -3497,6 +3502,8 @@ JSON_OUTPUT=false
 JSON_PRETTY=false
 DEFAULT_SERVER_BINDADDR="127.0.0.1"
 DEFAULT_SERVER_BINDPORT="49200"
+IQS_ALWAYS_QUERY=false
+IQS_CUSTOM_SETTINGS="" # e.g. "strictness=1&allow_public_access_points=false" - see https://www.ipqualityscore.com/documentation/proxy-detection/overview -> "Note About Front End IP Lookups"
 
 #*
 #* Parse command line options
