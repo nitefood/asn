@@ -681,6 +681,7 @@ PrintUsage(){
 			"\n\n  ${green}-n    (no trace)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
 			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
+			"\n\n  ${green}-6    (force IPv6)\n\t${default}Always assume this host supports IPv6" \
 			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
 			"\n\n  ${green}-c    (Country CIDR)\n\t${default}Lookup all IPv4/v6 CIDR blocks allocated to the ${blue}TARGET${default} country" \
 			"\n\n  ${green}-g    (Bulk Geolocate)\n\t${default}Geolocate all IPv4/v6 addresses passed as ${blue}TARGET${default}" \
@@ -3536,7 +3537,7 @@ json_resultcount=0
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvmljJsgn:t:d:o:a:c:"
+optspec=":6hvmljJsgn:t:d:o:a:c:"
 
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
@@ -3544,6 +3545,7 @@ SERVER_MODE=false
 RECON_MODE=false
 COUNTRY_BLOCK_MODE=false
 GEOLOCATE_ONLY_MODE=false
+HAVE_IPV6=false
 OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
 while getopts "$optspec" optchar; do {
 
@@ -3572,6 +3574,10 @@ while getopts "$optspec" optchar; do {
 	userinput=""
 	OPTIONS_PRESENT=true
     case "${optchar}" in
+		"6")
+			HAVE_IPV6=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
 		"n")
 			MTR_TRACING=false
 			GetFullParamsFromCurrentPosition "$@"
@@ -3724,7 +3730,6 @@ fi
 CheckPrerequisites
 
 local_wanip=""
-HAVE_IPV6=false
 
 if [ "$SERVER_MODE" = true ]; then
 	# user passed the "-l" switch
