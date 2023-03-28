@@ -71,7 +71,7 @@ The script uses the following services for data retrieval:
 * [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/)
 * [The Prefix WhoIs Project](https://pwhois.org/)
 * [PeeringDB](https://www.peeringdb.com/)
-* [ipify](https://www.ipify.org/)
+* [ifconfig.co](https://ifconfig.co/)
 * [RIPEStat](https://stat.ripe.net/)
 * [RIPE IPmap](https://ipmap.ripe.net/)
 * [ip-api](https://ip-api.com/)
@@ -354,19 +354,19 @@ where `TARGET` can be one of the following:
   
   * enables lookup and path tracing for targets **(this is the default behavior)**
     
-    _.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)_
+    *.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)*
 
 * `[-d]`
   
   * enables detailed trace mode (more info below)
     
-    _.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)_
+    *.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)*
 
 * `[-n]`
   
   * disables path tracing and only outputs lookup info for targets
     
-    _.asnrc option equivalent: `MTR_TRACING=false` (default: `true`)_
+    *.asnrc option equivalent: `MTR_TRACING=false` (default: `true`)*
 
 * `[-s]`
   
@@ -397,25 +397,25 @@ where `TARGET` can be one of the following:
   
   * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
     
-    _.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)_
+    *.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)*
 
 * `-J`
   
   * enables pretty-printed JSON output.
     
-    _.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)_
+    *.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)*
 
 * `-m`
   
   * enables monochrome mode (disables all colors).
     
-    _.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)_
+    *.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)*
 
 * `-v`
   
   * Enable debug messages (will display all URLs being queried to help identify external API slowdowns)
     
-    _.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)_
+    *.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
 
 * `-h`
   
@@ -427,13 +427,13 @@ where `TARGET` can be one of the following:
   
   * IP address (v4/v6) to bind the listening server to (e.g. `asn -l 0.0.0.0`)
     
-    _.asnrc option equivalent: `DEFAULT_SERVER_BINDADDR="<ipaddress>"` (default: `"127.0.0.1"`)_
+    *.asnrc option equivalent: `DEFAULT_SERVER_BINDADDR_v4="<IPv4address>"` (default: `"127.0.0.1"`) and `DEFAULT_SERVER_BINDADDR_v6="<IPv6address>"` (default: `"::1"`)*
 
 * `BIND_PORT`
   
   * TCP Port to bind the listening server to (e.g. `asn -l 12345`)
     
-    _.asnrc option equivalent: `DEFAULT_SERVER_BINDPORT="<port>"` (default: `"49200"`)_
+    *.asnrc option equivalent: `DEFAULT_SERVER_BINDPORT="<port>"` (default: `"49200"`)*
 
 * `BIND_ADDRESS BIND_PORT`
   
@@ -443,7 +443,7 @@ where `TARGET` can be one of the following:
   
   * Enable verbose output and debug messages in server mode
     
-    _.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)_
+    *.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
 
 * `--allow host[,host,...]`
   
@@ -466,7 +466,7 @@ where `TARGET` can be one of the following:
   * The maximum number of simultaneous connections accepted by the server. 100 is the default.
 
 *Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
-*Unless specified, the default IP:PORT values of **127.0.0.1:49200** will be used (e.g.* `asn -l`*)*
+*Unless specified, the default IP:PORT values of **127.0.0.1:49200** (for IPv4) or **[::1]:49200** (for IPv6) will be used (e.g.* `asn -l`*)*
 
 ##### *Default behavior:*
 
@@ -482,13 +482,14 @@ The following values are the defaults. Any (or all) of them can be specified in 
 MTR_TRACING=true
 DETAILED_TRACE=false
 MTR_ROUNDS=5
-MAX_CONCURRENT_SHODAN_REQUESTS=20
+MAX_CONCURRENT_SHODAN_REQUESTS=10
 SHODAN_SHOW_TOP_N=5
 MONOCHROME_MODE=false
 ASN_DEBUG=false
 JSON_OUTPUT=false
 JSON_PRETTY=false
-DEFAULT_SERVER_BINDADDR="127.0.0.1"
+DEFAULT_SERVER_BINDADDR_v4="127.0.0.1"
+DEFAULT_SERVER_BINDADDR_v6="::1"
 DEFAULT_SERVER_BINDPORT="49200"
 IQS_ALWAYS_QUERY=false
 IQS_CUSTOM_SETTINGS=""

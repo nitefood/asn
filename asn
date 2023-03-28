@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.73"
+ASN_VERSION="0.73.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -705,7 +705,7 @@ PrintUsage(){
 			"\n\n  ${blue}<URL>${default}\n\tExtract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports and prepended credentials" \
 			"\n\n  ${blue}<Organization Name>${default}\n\tSearch by company name and lookup network ranges exported by (or related to) the company" \
 			"\n\nSERVER OPTIONS:" \
-			"\n\n  ${red}BIND_ADDRESS${default}\n\tIP address (v4/v6) to bind the listening server to (e.g. '$script_name -l 0.0.0.0')\n\tDefault value: ${red}${DEFAULT_SERVER_BINDADDR}${default}" \
+			"\n\n  ${red}BIND_ADDRESS${default}\n\tIP address (v4/v6) to bind the listening server to (e.g. '$script_name -l 0.0.0.0')\n\tDefault value: ${red}${DEFAULT_SERVER_BINDADDR_v4} (IPv4) or ${DEFAULT_SERVER_BINDADDR_v6} (IPv6)${default}" \
 			"\n\n  ${red}BIND_PORT${default}\n\tTCP Port to bind the listening server to (e.g. '$script_name -l 12345')\n\tDefault value: ${red}${DEFAULT_SERVER_BINDPORT}${default}" \
 			"\n\n  ${red}BIND_ADDRESS${default} ${red}BIND_PORT${default}\n\tIP address and port to bind the listening server to (e.g. '$script_name -l ::1 12345')" \
 			"\n\n  ${red}-v    (verbose)\n\t${default}Enable verbose output and debug messages in server mode${default}" \
@@ -716,10 +716,10 @@ PrintUsage(){
 			"\n\n  ${red}-m, --max-conns <n>\n\t${default}The maximum number of simultaneous connections accepted by the server. 100 is the default.${default}" \
 			"\n\n\n  Note: Every option in server mode (after -l) is passed directly to the ncat listener." \
 			"\n        Refer to ${blue}man ncat${default} for more details on the available commands." \
-			"\n        Unless specified, the default IP:PORT values of ${DEFAULT_SERVER_BINDADDR}:${DEFAULT_SERVER_BINDPORT} will be used (e.g. 'asn -l')" \
+			"\n        Unless specified, the default IP:PORT values of ${DEFAULT_SERVER_BINDADDR_v4}:${DEFAULT_SERVER_BINDPORT} (for IPv4) or [${DEFAULT_SERVER_BINDADDR_v6}]:${DEFAULT_SERVER_BINDPORT} (for IPv6) will be used (e.g. 'asn -l')" \
 			"\n\n  Example server usage:" \
 			"\n\t${blue}asn -l${default}" \
-			"\n\t  (starts server on default IP:PORT)\n" \
+			"\n\t  (starts server on default IP(v4/v6):PORT)\n" \
 			"\n\t${blue}asn -l 0.0.0.0 --allow 192.168.0.0/24,192.168.1.0/24,192.168.2.245${default}" \
 			"\n\t  (binds to all availables IPv4 interfaces on the default port, allowing only connections from the three specified subnets)\n" \
 			"\n\t${blue}asn -l :: 2222 --allow 2001:DB8::/32${default}" \
@@ -881,8 +881,12 @@ TraceASPath(){
 	declare -a tracehops_array
 	declare -a aspath_array
 	# initialize the aspath array with our source AS
-	# TODO: improve local WAN IPv6 ASN lookup (Cymru and pWhois sometimes fail to correctly retrieve matching prefix. Consider RIPEstat/direct whois?)
-	LookupASNAndRouteFromIP "$local_wanip"
+	if [ "$HAVE_IPV6" = true ]; then
+		found_asn=$(docurl -s "https://stat.ripe.net/data/whois/data.json?resource=$local_wanip&sourceapp=nitefood-asn" | jq -r '.data.irr_records[0] | map(select(.key | match ("origin"))) | .[].value')
+		WhoisASN "$found_asn"
+	else
+		LookupASNAndRouteFromIP "$local_wanip"
+	fi
 	if [ -z "$found_asn" ]; then
 		found_asn="XXX"
 		found_asname="(Unknown)"
@@ -2460,17 +2464,24 @@ AsnServerListener(){
 	BoxHeader "ASN Lookup Server v$ASN_VERSION on $HOSTNAME"
 
 	if [ "$ASN_DEBUG" = true ]; then
-		echo -en "\n- ${yellow}[DBG]${default} Server BIND_ADDR : $ASN_SRV_BINDADDR"
-		[[ "$ASN_SRV_BINDADDR" = "$DEFAULT_SERVER_BINDADDR" ]] && echo -en "\t${green}(default)${default}"
+		echo -en "\n- ${yellow}[DBG]${default} Server BIND_ADDR :"
+		[[ -z "$ASN_SRV_BINDADDR" ]] && echo -en " ${green}(default v4/v6)${default}" || echo -en " $ASN_SRV_BINDADDR"
 		echo -en "\n- ${yellow}[DBG]${default} Server BIND_PORT : $ASN_SRV_BINDPORT"
-		[[ "$ASN_SRV_BINDPORT" = "$DEFAULT_SERVER_BINDPORT" ]] && echo -en "\t${green}(default)${default}"
+		[[ "$ASN_SRV_BINDPORT" = "$DEFAULT_SERVER_BINDPORT" ]] && echo -en " ${green}(default)${default}"
 		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'" >&2
 	fi
 
 	# fetch external IP and ASN to include in the HTML reports
 	StatusbarMessage "Detecting host external IP and ASN"
 	WhatIsMyIP
-	LookupASNAndRouteFromIP "$local_wanip"
+	if [ "$HAVE_IPV6" = true ]; then
+		found_asn=$(docurl -s "https://stat.ripe.net/data/whois/data.json?resource=$local_wanip&sourceapp=nitefood-asn" | jq -r '.data.irr_records[0] | map(select(.key | match ("origin"))) | .[].value')
+		WhoisASN "$found_asn"
+		[[ -z "$ASN_SRV_BINDADDR" ]] && ASN_SRV_BINDADDR="$DEFAULT_SERVER_BINDADDR_v6"
+	else
+		LookupASNAndRouteFromIP "$local_wanip"
+		[[ -z "$ASN_SRV_BINDADDR" ]] && ASN_SRV_BINDADDR="$DEFAULT_SERVER_BINDADDR_v4"
+	fi
 	if [ -z "$found_asn" ]; then
 		found_asn="N/A"
 		found_asname="(Unknown)"
@@ -2485,11 +2496,17 @@ AsnServerListener(){
 	else
 		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="NO" || ipv6_mark="${red}❌ NO${default}"
 	fi
+	# properly show [IP]:PORT notation in case of IPv6 binding
+	if grep -q ':' <<<"$ASN_SRV_BINDADDR"; then
+		DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
+	else
+		DISPLAY_ASN_SRV_BINDADDR="${ASN_SRV_BINDADDR}"
+	fi
 	echo -e "\n- Server ext. IP  : ${blue}${local_wanip}${default}" \
 			"\n- Server Country  : ${blue}${server_country}${default}" \
 			"\n- Server ASN      : ${red}[AS${found_asn}]${default} ${green}$found_asname${default}" \
 			"\n- Server has IPv6 : $ipv6_mark" \
-			"\n\n[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server listening on ${ASN_SRV_BINDADDR}:${ASN_SRV_BINDPORT}"
+			"\n\n[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server listening on ${white}${DISPLAY_ASN_SRV_BINDADDR}:${ASN_SRV_BINDPORT}${default}"
 
 	server_country="$(echo -e "$server_country" | tr '[:upper:]' '[:lower:]')"
 
@@ -2583,8 +2600,8 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 WhatIsMyIP() {
 	# only lookup local WAN IP once
 	[[ -n "$local_wanip" ]] && return
-	# retrieve local WAN IP (v6 takes precedence) from ipify
-	local_wanip=$(docurl -s "api64.ipify.org")
+	# retrieve local WAN IP (v6 takes precedence) from ifconfig.co
+	local_wanip=$(docurl -s "https://ifconfig.co")
 	# check if we default to an IPv6 internet connection
 	if echo "$local_wanip" | grep -q ':'; then
 		HAVE_IPV6=true
@@ -3500,7 +3517,8 @@ MONOCHROME_MODE=false
 ASN_DEBUG=false
 JSON_OUTPUT=false
 JSON_PRETTY=false
-DEFAULT_SERVER_BINDADDR="127.0.0.1"
+DEFAULT_SERVER_BINDADDR_v4="127.0.0.1"
+DEFAULT_SERVER_BINDADDR_v6="::1"
 DEFAULT_SERVER_BINDPORT="49200"
 IQS_ALWAYS_QUERY=false
 IQS_CUSTOM_SETTINGS="" # e.g. "strictness=1&allow_public_access_points=false" - see https://www.ipqualityscore.com/documentation/proxy-detection/overview -> "Note About Front End IP Lookups"
@@ -3660,9 +3678,8 @@ while getopts "$optspec" optchar; do {
 					ASN_SRV_BINDPORT="$passedarg"
 				fi
 			done
-			# fallback to default ports if none was passed.
+			# fallback to default port if none was passed.
 			# The rest is already in $userinput, ncat will use it for its own args
-			[[ -z "$ASN_SRV_BINDADDR" ]] && ASN_SRV_BINDADDR="$DEFAULT_SERVER_BINDADDR"
 			[[ -z "$ASN_SRV_BINDPORT" ]] && ASN_SRV_BINDPORT="$DEFAULT_SERVER_BINDPORT"
 			# trim the leading whitespace from ncat options
 			userinput="${userinput#' '}"
