@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.73.1"
+ASN_VERSION="0.73.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -176,7 +176,7 @@ QueryRipestat(){
 	ipv6_ripe_prefixes_count=$(wc -l <<<"$ipv6_ripe_prefixes")
 
 	# open persistent tcp connection to RIPE whois server
-	exec 3<>/dev/tcp/whois.ripe.net/43
+	exec 6<>/dev/tcp/whois.ripe.net/43
 
 	prefixcounter=0
 	for prefix in $ipv6_ripe_prefixes; do
@@ -186,17 +186,17 @@ QueryRipestat(){
 		# inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
 		#				grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
 		# new way (direct tcp connection to whois server with persistent whois connection)
-		echo -e "-k -T inet6num -K -L --resource $prefix" >&3
+		echo -e "-k -T inet6num -K -L --resource $prefix" >&6
 		whoisoutput=""
 		# read whois output from the tcp stream line by line
-		while IFS= read -r -u 3 whoisoutputline; do
+		while IFS= read -r -u 6 whoisoutputline; do
 			if [ -n "$whoisoutputline" ]; then
 				whoisoutput+="$whoisoutputline\n"
 				continue
 			fi
 			# last line was empty, check if next line is empty too
 			# if we get two empty lines in a row, the whois output is finished
-			IFS= read -r -u 3 whoisoutputline
+			IFS= read -r -u 6 whoisoutputline
 			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
 		done
 		inet6nums=$(echo -e "$whoisoutput" | grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
@@ -215,17 +215,17 @@ QueryRipestat(){
 		# parent_inetnum=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
 		# 				grep -E -m1 "^inetnum" | awk '{print $2"-"$4}' | xargs ipcalc -r 2>/dev/null | grep -v "deaggregate")
 		# new way (direct tcp connection to whois server with persistent whois connection)
-		echo -e "-k -T inetnum -K -L --resource $prefix" >&3
+		echo -e "-k -T inetnum -K -L --resource $prefix" >&6
 		whoisoutput=""
 		# read whois output from the tcp stream line by line
-		while IFS= read -r -u 3 whoisoutputline; do
+		while IFS= read -r -u 6 whoisoutputline; do
 			if [ -n "$whoisoutputline" ]; then
 				whoisoutput+="$whoisoutputline\n"
 				continue
 			fi
 			# last line was empty, check if next line is empty too
 			# if we get two empty lines in a row, the whois output is finished
-			IFS= read -r -u 3 whoisoutputline
+			IFS= read -r -u 6 whoisoutputline
 			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
 		done
 		parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
@@ -247,8 +247,8 @@ QueryRipestat(){
 		fi
 	done
 	# close persistent tcp connection to RIPE whois server
-	if { true >&3; } 2<> /dev/null; then
-		echo -e "-k" >&3
+	if { true >&6; } 2<> /dev/null; then
+		echo -e "-k" >&6
 	fi
 
 	# fetch further inetnums allocated to this AS from pWhois
