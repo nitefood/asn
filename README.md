@@ -1,5 +1,7 @@
 # ASN Lookup Tool and Traceroute Server
 
+[![Packaging status](https://repology.org/badge/vertical-allrepos/asn.svg)](https://repology.org/project/asn/versions)
+
 *Quick jump:*
 
 * [Description](#description)

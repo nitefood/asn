@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.73.2"
+ASN_VERSION="0.73.3"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2067,8 +2067,16 @@ IsIXP() {
 			# if input is an IPv4, speedup lookups further by grabbing only IXP prefixes starting with the same two octets
 			# we can afford filtering based on the first two octets since the largest individual IXP prefix is around /20
 			first_octets=$(echo "${1}." | cut -d '.' -f 1,2)
-			peeringdb_ipv4_dataset=$(docurl -s "https://www.peeringdb.com/api/ixpfx?prefix__startswith=$first_octets&protocol__in=IPv4")
-			peeringdb_dataset="$peeringdb_ipv4_dataset"
+			# see if the PEERINGDB_CACHED_DATASETS array already an entry for this prefix's first two octets.
+			# If not, fetch the relevant IXP prefix dataset from PeeringDB and store it in the PEERINGDB_CACHED_DATASETS
+			if [ -n "${PEERINGDB_CACHED_DATASETS[$first_octets]}" ]; then
+				peeringdb_dataset="${PEERINGDB_CACHED_DATASETS[$first_octets]}"
+			else
+				peeringdb_ipv4_dataset=$(docurl -s "https://www.peeringdb.com/api/ixpfx?prefix__startswith=$first_octets&protocol__in=IPv4")
+				peeringdb_dataset="$peeringdb_ipv4_dataset"
+				# store the IXP dataset in the PEERINGDB_CACHED_DATASETS array
+				PEERINGDB_CACHED_DATASETS[$first_octets]="$peeringdb_dataset"
+			fi
 		else
 			# only fetch IPv6 dataset once, since we don't filter it for prefixes
 			if [ -z "$peeringdb_ipv6_dataset" ]; then
@@ -2081,9 +2089,17 @@ IsIXP() {
 		for prefix in $ixp_prefixes; do
 			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
 				# the IP is part of an IXP prefix
-				# Query PeeringDB to match an IXP for that prefix.
 				ixlan_id=$(jq -r '.data[] | select(.prefix == "'"$prefix"'") | .ixlan_id' <<<"$peeringdb_dataset")
-				ixp_full_ix_data=$(docurl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
+				# see if the PEERINGDB_CACHED_IXP_DATA array already has an entry with the IXP details for this ixlan_id.
+				# If not, fetch the full IXP data from PeeringDB and store it in the PEERINGDB_CACHED_IXP_DATA
+				if [ -n "${PEERINGDB_CACHED_IXP_DATA[$ixlan_id]}" ]; then
+					ixp_full_ix_data="${PEERINGDB_CACHED_IXP_DATA[$ixlan_id]}"
+				else
+					# Query PeeringDB to match an IXP for that prefix.
+					ixp_full_ix_data=$(docurl -s "https://www.peeringdb.com/api/ix/$ixlan_id")
+					# store the IXP data in the PEERINGDB_CACHED_IXP_DATA array
+					PEERINGDB_CACHED_IXP_DATA[$ixlan_id]="$ixp_full_ix_data"
+				fi
 				ixp_data=$(jq -r '.data[0].name, .data[0].name_long' <<<"$ixp_full_ix_data" | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
 				ixp_geo=$(jq -r '.data[0].org.city' <<<"$ixp_full_ix_data")
 				ixp_state=$(jq -r '.data[0].org.state' <<<"$ixp_full_ix_data")
@@ -2249,7 +2265,7 @@ IPGeoRepLookup(){
 		ip_type_json_output+=",\"is_proxy\":false"
 	fi
 	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
-	incolumitas_dcdata=$(docurl -m2 -s https://api.incolumitas.com/datacenter?ip=$1)
+	incolumitas_dcdata=$(docurl -m2 -s "https://api.incolumitas.com/datacenter?ip=$1")
 	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$incolumitas_dcdata" 2>/dev/null)
 	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$incolumitas_dcdata" 2>/dev/null)
 	if [ -n "$dcname" ]; then
@@ -3522,6 +3538,8 @@ DEFAULT_SERVER_BINDADDR_v6="::1"
 DEFAULT_SERVER_BINDPORT="49200"
 IQS_ALWAYS_QUERY=false
 IQS_CUSTOM_SETTINGS="" # e.g. "strictness=1&allow_public_access_points=false" - see https://www.ipqualityscore.com/documentation/proxy-detection/overview -> "Note About Front End IP Lookups"
+declare -A PEERINGDB_CACHED_DATASETS
+declare -A PEERINGDB_CACHED_IXP_DATA
 
 #*
 #* Parse command line options
