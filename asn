@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.73.3"
+ASN_VERSION="0.74"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -682,6 +682,7 @@ PrintUsage(){
 			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
 			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
+			"\n\n  ${green}-u    (Transit/Upstream lookup)\n\t${default}Inspect BGP updates and ASPATHs for the ${blue}TARGET${default} address/prefix and identify possible transit/upstream autonomous systems" \
 			"\n\n  ${green}-c    (Country CIDR)\n\t${default}Lookup all IPv4/v6 CIDR blocks allocated to the ${blue}TARGET${default} country" \
 			"\n\n  ${green}-g    (Bulk Geolocate)\n\t${default}Geolocate all IPv4/v6 addresses passed as ${blue}TARGET${default}" \
 			"\n\tThis mode supports multiple targets, stdin input and IP extraction from input, e.g." \
@@ -1982,13 +1983,13 @@ PrintJsonOutput(){
 	json_to_print+="\"request_time\":\"$json_request_time\","
 	json_to_print+="\"request_duration\":$runtime,"
 	json_to_print+="\"result_count\":$json_resultcount,"
-	if [ "$RECON_MODE" = true ]; then
+	if [ "$RECON_MODE" = true ] || [ "$BGP_UPSTREAM_MODE" = true ]; then
 		# we already have an array as a final json output, append it as-is
 		json_to_print+="\"results\":${final_json_output}}"
 	else
 		json_to_print+="\"results\":[${final_json_output}]}"
 	fi
-	[[ "$JSON_PRETTY" = true ]] && json_to_print=$(jq -M '.' <<<"$json_to_print")
+	[[ "$JSON_PRETTY" = true ]] && json_to_print=$(jq -M '.' <<<"$json_to_print") || json_to_print=$(jq -c '.' <<<"$json_to_print")
 	echo -e "$json_to_print"
 }
 
@@ -2473,6 +2474,110 @@ PwhoisListPrefixesForOrg(){
 	done
 }
 
+BGPUpstreamLookup(){
+	# retrieve likely upstream/transit autonomous system(s) for this IP address
+	final_json_output="[]"
+	if [ "$IS_BOGON" = true ]; then
+		PrintErrorAndExit "Error: IP $1 is a bogon address, cannot continue"
+	elif [ -z "$found_asname" ]; then
+		PrintErrorAndExit "Error: IP $1 is not part of an announced prefix, cannot continue"
+	fi
+	legend="\t${green}██ very likely transit\t( >66% BGP updates from this AS )${default}"
+	legend+="\n\t${yellow}██ likely transit\t( >33% BGP updates from this AS )${default}"
+	legend+="\n\t██ potentially transit\t( >25% BGP updates from this AS )"
+	legend+="\n\t${dim}██ unlikely transit\t( <25% BGP updates from this AS )${default}"
+
+	BoxHeader "Recently observed upstream/transit AS for $1"
+	if [ "$JSON_OUTPUT" = false ]; then
+		echo -e "\nLegend:\n$legend\n"
+		echo -e "${bluebg} Target IP: ${default} ${blue}$1${default}"
+		echo -e "${bluebg} Origin AS: ${default} ${red}[AS$found_asn] ${green}$found_asname${default}\n"
+	else
+		final_json_output=$(jq '. += [{ "origin_as": "'"$found_asn"'", "origin_as_name": "'"$found_asname"'" }]' <<<"$final_json_output")
+		final_json_output=$(jq '.[0] += {"upstreams":[]}' <<<"$final_json_output")
+	fi
+	# fetch all observed ASPATHs involving this IP address
+	updates=$(docurl -s "https://stat.ripe.net/data/bgp-updates/data.json?resource=$1&sourceapp=nitefood-asn" | jq '.data.updates[].attrs.path' )
+
+	# skip prepending announcements by walking through the ASPATH (from the second position) until we find the first non-origin traversed AS.
+	# That will be the path length at which we then consider the ASNs to be transits for this prefix
+	UPSTREAM_FOUND=false
+	pathlen="2"
+	while [ "$UPSTREAM_FOUND" = false ]; do
+		asnlist=$(	jq '.[-'"$pathlen"'] | select(. != null)' <<<"$updates" | \
+					jq -rn '[inputs] | group_by(.) | map({key: .[0], count: length}) | sort_by(-.count) | .[] | (.count | tostring) + " " + (.key | tostring)'
+		)
+		if [ -z "$asnlist" ]; then
+			PrintErrorAndExit "Error: this IP address may have low visibility / low global reachability (no observable upstreams found)"
+		fi
+		upstreams=$(cut -d ' ' -f 2 <<<"$asnlist" | grep -v "$found_asn") # exclude origin AS
+		# echo -e "--DBG upstreams at level $pathlen:\n$upstreams\n--"
+		if [ -n "$upstreams" ]; then
+			UPSTREAM_FOUND=true
+		else
+			(( pathlen++ )) # no upstreams found (excluding origin AS). Increase ASPATH level and check again"
+		fi
+	done
+	tot=0
+	for line in $asnlist; do
+		count=$(cut -d ' ' -f1 <<<"$line")
+		tot=$(( tot+count ))
+	done
+	green_upstreams_count=0
+	yellow_upstreams_count=0
+	white_upstreams_count=0
+	dim_upstreams_count=0
+	for line in $asnlist; do
+		count=$(cut -d ' ' -f1 <<<"$line")
+		asn=$(cut -d ' ' -f2 <<<"$line")
+		[[ "$asn" = "$found_asn" ]] && continue # skip origin AS
+		asname=$(host -t TXT "AS${asn}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
+		integer_probability=$(( count*100/tot ))
+		probability=$(jq -n "$count*100/$tot")
+		if (( integer_probability > 66 )); then
+			probability_color="${green}"
+			(( green_upstreams_count++ ))
+		elif (( integer_probability > 33 )); then
+			probability_color="${yellow}"
+			(( yellow_upstreams_count++ ))
+		elif (( integer_probability > 25 )); then
+			probability_color="${default}"
+			(( white_upstreams_count++ ))
+		else
+			probability_color="${dim}"
+			(( dim_upstreams_count++ ))
+		fi
+
+		if [ "$JSON_OUTPUT" = true ]; then
+			final_json_output=$(jq '.[0].upstreams += [{"asn":"'"$asn"'", "asname":"'"$asname"'", "probability":'"$(printf "%.2f" "$probability")"'}]' <<<"$final_json_output")
+		else
+			printf "${probability_color}██\tAS%-6s (%6.2f%%) - %s${default}\n" "$asn" "$probability" "$asname"
+		fi
+	done
+
+	# count each type of upstreams and try to determine if this prefix is multihomed
+	# echo "dbg green: $green_upstreams_count, yellow: $yellow_upstreams_count, white: $white_upstreams_count, dim: $dim_upstreams_count"
+	MULTIPLE_TRANSITS=false
+	if (( green_upstreams_count >= 2 )); then
+		MULTIPLE_TRANSITS=true
+	elif (( green_upstreams_count == 0 )) && (( yellow_upstreams_count >= 2 )); then
+		MULTIPLE_TRANSITS=true
+	elif (( green_upstreams_count == 0 )) && (( yellow_upstreams_count == 0 )) && (( white_upstreams_count >= 2 )); then
+		MULTIPLE_TRANSITS=true
+	elif (( green_upstreams_count == 0 )) && (( yellow_upstreams_count == 0 )) && (( white_upstreams_count == 0 )) && (( dim_upstreams_count >= 2 )); then
+		MULTIPLE_TRANSITS=true
+	fi
+
+	if [ "$JSON_OUTPUT" = false ]; then
+		if [ "$MULTIPLE_TRANSITS" = true ]; then
+			echo -e "\n${bluebg} INFO ${default}${blue} This prefix seems to be announced by ${underline}multiple upstream ASNs${default}${blue}. Possible reasons include:\n\t- ${underline}BGP multihoming${default}${blue} (if few upstreams announce this prefix)\n\t- ${underline}Tier 1 origin AS${default}${blue} or highly reachable prefix${default}${blue} (if many upstreams announce this prefix)\n\t- ${underline}Anycast prefix${default}\n"
+		fi
+	else
+		json_resultcount="1"
+		final_json_output=$(jq '.[0] += {"multiple_transits": '"$MULTIPLE_TRANSITS"'}' <<<"$final_json_output")
+	fi
+}
+
 AsnServerListener(){
 
 	DisableColors
@@ -2644,9 +2749,10 @@ DisableColors() {
 		redbg=""
 		greenbg=""
 		yellowbg=""
+		dim=""
 		default=""
 	elif [ "$MONOCHROME_MODE" = true ]; then
-		# set all colors to white, leave black/white/default intact
+		# set all colors to white, leave black/white/dim/default intact
 		green="$white"
 		magenta="$white"
 		yellow="$white"
@@ -3463,6 +3569,8 @@ bluebg=$'\e[48;5;038m'${black}
 redbg=$'\e[48;5;210m'${black}
 greenbg=$'\e[48;5;035m'${black}
 yellowbg=$'\e[48;5;142m'${black}
+dim=$'\e[2m'
+underline=$'\e[4m'
 default=$'\e[0m'
 
 # HTML color codes matching ANSI colors used by the script
@@ -3572,7 +3680,7 @@ json_resultcount=0
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvmljJsgn:t:d:o:a:c:"
+optspec=":hvmljJsgn:t:d:o:a:c:u:"
 
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
@@ -3580,6 +3688,7 @@ SERVER_MODE=false
 RECON_MODE=false
 COUNTRY_BLOCK_MODE=false
 GEOLOCATE_ONLY_MODE=false
+BGP_UPSTREAM_MODE=false
 OPTIONS_PRESENT=false # will be set to true if getopts enters the loop (detects an option being passed)
 while getopts "$optspec" optchar; do {
 
@@ -3640,6 +3749,10 @@ while getopts "$optspec" optchar; do {
 			;;
 		"g")
 			GEOLOCATE_ONLY_MODE=true
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"u")
+			BGP_UPSTREAM_MODE=true
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"m")
@@ -3923,7 +4036,12 @@ fi
 input=$(echo "$userinput" | sed 's/\/.*//g' | grep -Eo "$ipv4v6regex")
 
 if [ -z "$input" ]; then
-	# Input is not an IP Address. Check if it is a number (ASN)
+	# Input is not an IP Address
+	if [ "$BGP_UPSTREAM_MODE" = true ]; then
+		echo -e "\n${red} Error: the ${blue}'-u'${red} option requires an IPv4 or IPv6 address as input${default}\n"
+		exit 1
+	fi
+	# Check if it is a number (ASN)
 	asn=$(echo "$userinput" | sed 's/[a|A][s|S]//g' | grep -E "^[0-9]*$")
 	if [ -z "$asn" ]; then
 		# Input is not an ASN either. See if it's a hostname (includes at least one dot)
@@ -4131,6 +4249,11 @@ else
 	# Perform IP lookup
 	LookupASNAndRouteFromIP "$input"
 	(( longest=${#input}+1 ))
+	if [ "$BGP_UPSTREAM_MODE" = true ]; then
+		BGPUpstreamLookup "$input"
+		[[ "$JSON_OUTPUT" = true ]] && PrintJsonOutput
+		exit 0
+	fi
 	WhoisIP "$input"
 	PrintReputationAndShodanData "$input"
 	[[ "$JSON_OUTPUT" = true ]] && PrintJsonOutput

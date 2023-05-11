@@ -64,6 +64,9 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
 * It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
 
+* It is possible to quickly identify the **transit/upstream AS network(s)** for a given prefix, through analysis of observed BGP updates and ASPATHs.
+  * the tool will also inform the user when a prefix is likely coming from a large tier-1 or multihomed network.
+
 * Lookup data can be integrated by third party tools by choosing **JSON output** and parsing the results externally, turning the script into a lookup API endpoint.
 
 Screenshots for every lookup option are below.
@@ -171,7 +174,22 @@ Requires Bash v4.2+. Tested on:
 
 * *Suggested ASNs for "google"*
 
-![asnsuggest](https://user-images.githubusercontent.com/24555810/98309344-7e6f2480-1fca-11eb-9ec6-df2cb63a62ce.png)
+  ![asnsuggest](https://github.com/nitefood/asn/assets/24555810/80a465a8-afb4-47f9-94f8-8f72551041e6)
+
+### Transit/Upstream lookup
+
+* *Transit identification for a multihomed AS (**AS30036** announces this prefix to **Hurricane** and **GTT** in a balanced way):*
+
+  ![upstreamfinder_multihoming](https://github.com/nitefood/asn/assets/24555810/6c036a97-83f8-4c37-9ebd-2717c2d53507)
+
+* *Preferred transit identification - **Chinese UNICOM AS** is a large network, but likely prefers Russian **TRANSTELECOM** (AS20485) transit over **TELIA** (AS1299), **HURRICANE** (AS6939), **GTT** (AS3257) and others:*
+
+  ![upstreamfinder_preferred_transit](https://github.com/nitefood/asn/assets/24555810/dbb64ecc-394a-4fbd-8607-5b7f6955b340)
+
+* *A large tier-1 network (**COMCAST**, AS7922) prefix is reachable through multiple other tier-1 networks like **COGENT** (AS174), **LEVEL3** (AS3356) etc. - likely through settlement-free peering rather than BGP transit:*
+
+  ![upstreamfinder_tier1_network](https://github.com/nitefood/asn/assets/24555810/77a04768-9064-4c79-9383-cea831e6efcd)
+
 
 - - -
 
@@ -387,6 +405,10 @@ where `TARGET` can be one of the following:
 
   * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
 
+* `[-u]`
+
+  * enable *Transit/Upstream lookup mode*. This will inspect BGP updates and ASPATHs for the TARGET address/prefix and identify possible transit/upstream autonomous systems.
+
 * `[-c]`
 
   * enable *Country CIDR mode*. This will output all IPv4/v6 CIDR blocks allocated to the specified country.
@@ -514,6 +536,10 @@ IQS_CUSTOM_SETTINGS=""
 ##### *ASN suggest (`-a`)*
 
 * The script will try to find ASNs matching the given search string, using the RIPEStat API. This mode can be used to map all the autonomous systems related to a given company.
+
+##### *Upstream/transit identification (`-u`)*
+
+* The script will inspect BGP updates for the given IP (v4/v6) and identify the likelyhood of the upstream autonomous system(s) being transit(s) for the origin AS. A probability of the upstreams being transits will be inferred by the amount of times the upstream AS appears in the observed ASPATHs towards the target IP, in comparison to other BGP peers. The script will also inform the user if the prefix is being simultaneously announced to multiple upstreams (e.g. in case of BGP multihoming, tier-1 prefixes, anycast addresses, etc.). JSON mode is supported.
 
 ##### *Server mode (`-l`)*
 
@@ -946,6 +972,36 @@ root@KRUSTY:~# asn -j www.google.com | jq '[.results[].abuse_contacts[]] | uniqu
 root@KRUSTY:~# asn -j 45.67.34.100 | jq '.results[].fingerprinting.vulns[]'
 "CVE-2017-15906"
 "CVE-2018-15919"
+```
+
+*Example 5 - upstream/transit AS lookup for a given IP:*
+
+```shell
+root@KRUSTY:~#: asn -Ju 72.17.119.201
+{
+  "target": "72.17.119.201",
+  "target_type": "ipv4",
+  "result": "ok",
+  "reason": "success",
+  "version": "0.74",
+  "request_time": "2023-05-11T23:46:12",
+  "request_duration": 1,
+  "result_count": 1,
+  "results": [
+    {
+      "origin_as": "33363",
+      "origin_as_name": "BHN-33363, US",
+      "upstreams": [
+        {
+          "asn": "7843",
+          "asname": "TWC-7843-BB, US",
+          "probability": 100
+        }
+      ],
+      "multiple_transits": false
+    }
+  ]
+}
 ```
 
 #### Remotely (API endpoint)
