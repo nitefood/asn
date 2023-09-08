@@ -263,10 +263,10 @@ Some additional packages are also required for full functionality:
 
   * Package [here](https://github.com/NixOS/nixpkgs/tree/master/pkgs/applications/networking/asn)
 
-* **MacOS** (using [Homebrew](https://brew.sh)):
+* **MacOS** (using [Homebrew](https://formulae.brew.sh/formula/asn)):
 
   ```
-  brew install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha && brew link mtr
+  brew install asn
   ```
 
   *Notes for MacOS users:*
