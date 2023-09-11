@@ -65,6 +65,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 * It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
 
 * It is possible to quickly identify the **transit/upstream AS network(s)** for a given prefix, through analysis of observed BGP updates and ASPATHs.
+
   * the tool will also inform the user when a prefix is likely coming from a large tier-1 or multihomed network.
 
 * Lookup data can be integrated by third party tools by choosing **JSON output** and parsing the results externally, turning the script into a lookup API endpoint.
@@ -190,7 +191,6 @@ Requires Bash v4.2+. Tested on:
 
   ![upstreamfinder_tier1_network](https://github.com/nitefood/asn/assets/24555810/77a04768-9064-4c79-9383-cea831e6efcd)
 
-
 - - -
 
 ## Installation
@@ -259,11 +259,11 @@ Some additional packages are also required for full functionality:
   env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha
   ```
 
-* **NixOS** *(thanks [devhell](https://github.com/devhell))*:
+* **NixOS** *(thanks [devhell](https://github.com/devhell))*
 
   * Package [here](https://github.com/NixOS/nixpkgs/tree/master/pkgs/applications/networking/asn)
 
-* **MacOS** (using [Homebrew](https://formulae.brew.sh/formula/asn)):
+* **MacOS** *(using [Homebrew](https://formulae.brew.sh/formula/asn), thanks [filippovitale](https://github.com/filippovitale))*
 
   ```
   brew install asn
