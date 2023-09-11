@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.74"
+ASN_VERSION="0.74.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2482,10 +2482,10 @@ BGPUpstreamLookup(){
 	elif [ -z "$found_asname" ]; then
 		PrintErrorAndExit "Error: IP $1 is not part of an announced prefix, cannot continue"
 	fi
-	legend="\t${green}██ very likely transit\t( >66% BGP updates from this AS )${default}"
-	legend+="\n\t${yellow}██ likely transit\t( >33% BGP updates from this AS )${default}"
-	legend+="\n\t██ potentially transit\t( >25% BGP updates from this AS )"
-	legend+="\n\t${dim}██ unlikely transit\t( <25% BGP updates from this AS )${default}"
+	legend="\t${green}██ very likely transit\t( >= 66% BGP updates from this AS )${default}"
+	legend+="\n\t${yellow}██ likely transit\t( >= 33% BGP updates from this AS )${default}"
+	legend+="\n\t██ potentially transit\t( >= 25% BGP updates from this AS )"
+	legend+="\n\t${dim}██ unlikely transit\t( < 25% BGP updates from this AS )${default}"
 
 	BoxHeader "Recently observed upstream/transit AS for $1"
 	if [ "$JSON_OUTPUT" = false ]; then
@@ -2534,13 +2534,13 @@ BGPUpstreamLookup(){
 		asname=$(host -t TXT "AS${asn}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
 		integer_probability=$(( count*100/tot ))
 		probability=$(jq -n "$count*100/$tot")
-		if (( integer_probability > 66 )); then
+		if (( integer_probability >= 66 )); then
 			probability_color="${green}"
 			(( green_upstreams_count++ ))
-		elif (( integer_probability > 33 )); then
+		elif (( integer_probability >= 33 )); then
 			probability_color="${yellow}"
 			(( yellow_upstreams_count++ ))
-		elif (( integer_probability > 25 )); then
+		elif (( integer_probability >= 25 )); then
 			probability_color="${default}"
 			(( white_upstreams_count++ ))
 		else
