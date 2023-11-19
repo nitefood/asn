@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.74.1"
+ASN_VERSION="0.74.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -1832,6 +1832,7 @@ BulkGeolocate(){
 		if [[ -n $(jq 'select (.error != null) | .error' <<<"$ipmap_output") ]]; then
 			ipmap_output=""
 		fi
+		# Note: the free IP-API tier only supports unencrypted HTTP, not HTTPS
 		ipapi_output=$(docurl -m4 -s "http://ip-api.com/batch?fields=query,status,message,country,countryCode,regionName,city" --data ''"$ipapi_targets"'')
 
 		for target in $ipbatch; do
@@ -2178,6 +2179,7 @@ IPGeoRepLookup(){
 	ipmap_output=$(docurl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
+	# Note: the free IP-API tier only supports unencrypted HTTP, not HTTPS
 	ipapi_output=$(docurl -m4 -s "http://ip-api.com/json/$1?fields=status,message,country,countryCode,regionName,city,mobile,proxy,hosting")
 	ipapi_status=$(jq -r '.status' <<<"$ipapi_output")
 	if [ "$ipapi_status" = "fail" ]; then
@@ -2292,7 +2294,7 @@ IPGeoRepLookup(){
 	json_rep="none"
 	json_iqs_threat_score=""
 	json_iqs_threat_tags=""
-	is_blacklisted=$(docurl -m4 -s "http://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
+	is_blacklisted=$(docurl -m4 -s "https://api.stopforumspam.org/api?json&ip=$1" | jq -r '.ip.appears')
 	if [ "$is_blacklisted" = "1" ]; then
 		# IP is blacklisted by StopForumSpam
 		json_rep="bad"
