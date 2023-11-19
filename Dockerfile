@@ -15,6 +15,7 @@ RUN apt update && \
       ncurses-bin \
       nmap \
       whois \
+      netbase \
     && useradd --no-log-init -K UID_MIN=10000 -K GID_MIN=10000 user
 
 RUN mkdir -p /app
