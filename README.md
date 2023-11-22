@@ -28,10 +28,11 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
 * It will lookup relevant Autonomous System information for any given AS number, including:
 
-  * **Organization name**
+  * **Organization name and RIR region**
   * **IXP Presence** (*Internet Exchange facilities where the AS is present*)
+  * **Global AS rank** (*derived from the size of its customer cone, number of peering relationships and more*)
   * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
-  * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits).
+  * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits). Furthermore, a recap of *transits/peers/customers* amount (per latest CAIDA data) is displayed.
   * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
 
 * It will perform an **AS path trace** (using [mtr](https://github.com/traviscross/mtr) and retrieving AS data from the results) for single IPs or DNS results, optionally reporting detailed data for each hop, such as RPKI ROA validity, organization/network name, geographic location, etc.
@@ -62,7 +63,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
 * It is possible to search by **organization name** in order to retrieve a list of IPv4/6 network ranges related to a given company. A multiple choice menu will be presented if more than one organization matches the search query.
 
-* It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization.
+* It is possible to search for **ASNs matching a given name**, in order to map the ASNs for a given organization. The list will be enriched by each result's AS rank and useful tags highlighting the highest-ranking ASNs found.
 
 * It is possible to quickly identify the **transit/upstream AS network(s)** for a given prefix, through analysis of observed BGP updates and ASPATHs.
 
@@ -77,6 +78,7 @@ The script uses the following services for data retrieval:
 * [Team Cymru](https://team-cymru.com/community-services/ip-asn-mapping/)
 * [The Prefix WhoIs Project](https://pwhois.org/)
 * [PeeringDB](https://www.peeringdb.com/)
+* [CAIDA ASRank](https://asrank.caida.org/)
 * [ifconfig.co](https://ifconfig.co/)
 * [RIPEStat](https://stat.ripe.net/)
 * [RIPE IPmap](https://ipmap.ripe.net/)
@@ -93,6 +95,7 @@ It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode
 
 * [HE.net](https://bgp.he.net)
 * [BGPView](https://bgpview.io)
+* [BGPTools](https://bgp.tools)
 * [IPInfo.io](https://ipinfo.io)
 * [Host.io](https://host.io)
 
@@ -109,13 +112,13 @@ Requires Bash v4.2+. Tested on:
 
 ### Generic usage
 
-* *IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as known good*
+* *IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as good*
 
-![ipv4lookup](https://user-images.githubusercontent.com/24555810/159185461-cb7a8601-dcae-4188-b531-1eafec6ed19b.png)
+![ipv4lookup](https://github.com/nitefood/asn/assets/24555810/81def31a-e080-4b01-9aa2-25b979062963)
 
 * *IPv4 lookup (bad reputation IP) with threat analysis/scoring, CPE/CVE identification and open ports reporting*
 
-![ipv4badlookup](https://user-images.githubusercontent.com/24555810/159185495-1c2a0c71-2019-4f46-9d27-48d40ed9887a.png)
+![ipv4badlookup](https://github.com/nitefood/asn/assets/24555810/302dc69f-7026-4f41-afe6-e24c4d0a514a)
 
 * *IP fingerprinting with advanced datacenter+region identification, known vulnerabilities affecting the target and honeypot identification according to Shodan data*
 
@@ -125,19 +128,19 @@ Requires Bash v4.2+. Tested on:
 
 ![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
 
-* *Autonomous system number lookup with BGP stats, peering and prefix informations*
+* *Autonomous system number lookup with AS ranking, operational region, BGP stats, peering and prefix informations*
 
-![asnlookup](https://user-images.githubusercontent.com/24555810/160516155-d00d3d9b-915d-41f4-8496-bc5e9b98f4b0.png)
+![asnlookup](https://github.com/nitefood/asn/assets/24555810/4507085a-facf-4383-a9d4-573161454bec)
 
 * *Hostname/URL lookup*
 
-![hostnamelookup](https://user-images.githubusercontent.com/24555810/159185854-f07c005e-e014-4d11-921d-db0684c70981.png)
+![hostnamelookup](https://github.com/nitefood/asn/assets/24555810/f6c71594-d38a-4c7c-9142-5aa1e203f3fa)
 
 ### AS Path tracing
 
 * *ASPath trace to www.github.com*
 
-![pathtrace](https://user-images.githubusercontent.com/24555810/117336096-1d9ea700-ae9c-11eb-82dc-6aaf9dc68a6e.png)
+![pathtrace](https://github.com/nitefood/asn/assets/24555810/8dfa68ba-de39-47f4-96d3-618210197e70)
 
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
 
@@ -151,7 +154,7 @@ Requires Bash v4.2+. Tested on:
 
 * *Organization search for "github"*
 
-![search_by_org](https://user-images.githubusercontent.com/24555810/99845076-5b20a980-2b74-11eb-9312-986867034cc9.png)
+  ![search_by_org](https://user-images.githubusercontent.com/24555810/99845076-5b20a980-2b74-11eb-9312-986867034cc9.png)
 
 ### Shodan scanning
 
@@ -173,11 +176,15 @@ Requires Bash v4.2+. Tested on:
 
 ### Suggested ASNs search
 
-* *Suggested ASNs for "google"*
+* *Suggested ASNs (and respective AS rankings) for "google"*
 
-  ![asnsuggest](https://github.com/nitefood/asn/assets/24555810/80a465a8-afb4-47f9-94f8-8f72551041e6)
+  ![asnsuggest](https://github.com/nitefood/asn/assets/24555810/c8bd8cab-9894-4886-94b5-bfd6bb0b9d8e)
 
 ### Transit/Upstream lookup
+
+* *A large tier-1 network (**COMCAST**, AS7922) prefix is reachable through multiple other tier-1 networks like **COGENT** (AS174), **LEVEL3** (AS3356) etc. - likely through settlement-free peering rather than BGP transit:*
+
+  ![upstreamfinder_tier1_network](https://github.com/nitefood/asn/assets/24555810/4a6a00d9-7a8c-4765-a4d6-ea99aa516200)
 
 * *Transit identification for a multihomed AS (**AS30036** announces this prefix to **Hurricane** and **GTT** in a balanced way):*
 
@@ -187,9 +194,6 @@ Requires Bash v4.2+. Tested on:
 
   ![upstreamfinder_preferred_transit](https://github.com/nitefood/asn/assets/24555810/dbb64ecc-394a-4fbd-8607-5b7f6955b340)
 
-* *A large tier-1 network (**COMCAST**, AS7922) prefix is reachable through multiple other tier-1 networks like **COGENT** (AS174), **LEVEL3** (AS3356) etc. - likely through settlement-free peering rather than BGP transit:*
-
-  ![upstreamfinder_tier1_network](https://github.com/nitefood/asn/assets/24555810/77a04768-9064-4c79-9383-cea831e6efcd)
 
 - - -
 

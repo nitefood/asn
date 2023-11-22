@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.74.2"
+ASN_VERSION="0.75"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -338,7 +338,10 @@ RIPESuggestASN(){
 			for suggestion in $found_suggestions; do
 				echo -e "\n${green}$suggestion${default}"
 				for suggestion_asn in $(jq -r 'select (.description=="'"$suggestion"'") | .value' <<<"$ripe_suggest_output" | awk 'NR==1{print}'); do
-					echo -e "\t${yellow}$suggestion_asn${default}"
+					echo -en "\t${yellow}$suggestion_asn${default} (Rank: "
+					GetCAIDARank "${suggestion_asn:2}"
+					echo -en "${caida_asrank_recap}"
+					echo "${default})"
 				done
 			done
 			echo ""
@@ -386,8 +389,9 @@ WhoisIP(){
 			abusecontacts=$(AbuseLookupForPrefix "$abuse_whois_data" "$1")
 		fi
 		if [ "$UNANNOUNCED_PREFIX" = false ] && [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
-			# Prefix found in the Team Cymru DB
+			# Prefix found in the Team Cymru DB, perform pWhois lookup and CAIDA rank lookup
 			PwhoisLookup "$1"
+			GetCAIDARank "$found_asn"
 		else
 			# No data in the Team Cymru DB for this IP (unannounced prefix), or pWhois being skipped
 			if [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
@@ -495,6 +499,7 @@ WhoisIP(){
 			final_json_output+="\"is_announced\":true,"
 			final_json_output+="\"as_number\":\"$found_asn\","
 			final_json_output+="\"as_name\":\"${found_asname//\"/\\\"}\","
+			final_json_output+="\"as_rank\":\"${caida_asrank//\"/\\\"}\","
 			final_json_output+="\"route\":\"$found_route\","
 			final_json_output+="\"route_name\":\"$whois_routename\","
 			final_json_output+="\"roa_count\":\"$roacount_json_output\","
@@ -528,6 +533,7 @@ WhoisIP(){
 			summary_ipinfo=""
 		fi
 		printf "${white}%${indent}s${bluebg}ASN${default} ${red}%s %s${default}\n" "├" "$summary_asn" "$output_asname"
+		[[ "$UNANNOUNCED_PREFIX" = false ]] && printf "${white}%${indent}s${bluebg}RNK${default} ${default}%s${default}\n" "├" "$caida_asrank_recap"
 		printf "${white}%${indent}s${bluebg}ORG${default} ${green}%s${default}\n" "├" "$pwhois_org"
 		if [ "$found_subprefix" != "$found_route" ]; then
 			# target IP belongs to a subnet announced within a larger route
@@ -618,6 +624,8 @@ LookupASNAndRouteFromIP(){
 				found_asname=$(echo "$output" | awk -F'[|]' 'NR==1{print $4}')
 				found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $3}')
 				UNANNOUNCED_PREFIX=false
+				# lookup CAIDA rank info for the origin AS
+				GetCAIDARank "$found_asn"
 			fi
 		else
 			# DNS query (faster) for IPv4 addresses
@@ -897,7 +905,13 @@ TraceASPath(){
 	else
 		aspatharray_asnvalue="$found_asn"
 	fi
-	aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)" )
+	# Retrieve local AS CAIDA rank
+	GetCAIDARank "$found_asn"
+	if [ -n "$caida_asrank_text" ]; then
+		aspath_entry=$(printf "${red}%-6s ${green}%s${default}${dim} •%s${dim}${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)" "$caida_asrank_text")
+	else
+		aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)")
+	fi
 	aspath_array+=("$aspath_entry")
 
 	# mtr finished, analyze and output results
@@ -1014,8 +1028,14 @@ TraceASPath(){
 					asn_data="${red}[AS$found_asn] ${green}$found_asname${default}"
 					aspatharray_asnvalue="$found_asn"
 				fi
+				# Retrieve AS CAIDA rank for this hop
+				GetCAIDARank "$found_asn"
+				if [ -n "$caida_asrank_text" ]; then
+					aspath_entry=$(printf "${red}%-6s ${green}%s${default}${dim} •%s${dim}${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)" "$caida_asrank_text")
+				else
+					aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)")
+				fi
 				# avoid adding the same AS multiple times in a row in the summary path
-				aspath_entry=$(printf "${red}%-6s ${green}%s${default}" "$aspatharray_asnvalue" "$(echo "$found_asname" | cut -d ',' -f 1)" )
 				if [[ "${aspath_array[-1]}" != "$aspath_entry" ]]; then
 					aspath_array+=("$aspath_entry")
 				fi
@@ -1084,6 +1104,7 @@ TraceASPath(){
 			# 1. hop ASN, ORG, NET, ROA
 			hop_details=""
 			[[ "$DETAILED_TRACE" = false ]] && hop_details="       ├${bluebg}ASN${default} ${red}${hop_asn}${default}\n"
+			[[ "$ixp_tag" = "" ]] && hop_details+="        ├${bluebg}RNK${default} ${caida_asrank_recap}${default}\n"
 			hop_details+="        ├${bluebg}ORG${default} ${green}${hop_org}${default}\n"
 			hop_details+="        ├${bluebg}NET${default} ${yellow}${hop_net}${default}\n"
 			hop_details+="        ├${bluebg}ROA${default} ${rpki_output}\n"
@@ -1139,7 +1160,7 @@ TraceASPath(){
 	echo -en "\n  "
 	for as in "${aspath_array[@]}"; do
 		if [ "$as" = "${aspath_array[0]}" ]; then
-			echo -en "${as} ${yellow}(Local AS)${default}"
+			echo -en "${as} ${yellowbg} Local AS ${default}"
 		else
 			echo -en "${as}${default}"
 		fi
@@ -2144,8 +2165,59 @@ GetIXPresence(){
 		json_ixps=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ixps")
 	else
 		# normal output
-		echo -e "$outputix\n"
+		echo -e "$outputix"
 	fi
+}
+
+GetCAIDARank(){
+	# see if we already have CAIDA rank cached for this AS
+	asn="$1"
+	if [ -n "${CAIDARANK_CACHED_AS_DATA[$asn]}" ]; then
+		caida_data="${CAIDARANK_CACHED_AS_DATA[$asn]}"
+	else
+		caida_data=$(docurl -s "https://api.asrank.caida.org/dev/restful/asns/${asn}")
+		# store the rank in the CAIDARANK_CACHED_AS_DATA array
+		CAIDARANK_CACHED_AS_DATA[$asn]="$caida_data"
+	fi
+	caida_asrank=$(jq -r '.data.asn.rank' <<<"$caida_data")
+	caida_rir=$(jq -r '.data.asn.source' <<<"$caida_data")
+	case "${caida_rir}" in
+		"AFRINIC")
+			caida_rir="AFRINIC ${dim}(Africa)${default}"
+		;;
+		"APNIC")
+			caida_rir="APNIC ${dim}(Asia Pacific)${default}"
+		;;
+		"ARIN")
+			caida_rir="ARIN ${dim}(USA, Canada, many Caribbean and North Atlantic islands)${default}"
+		;;
+		"LACNIC")
+			caida_rir="LACNIC ${dim}(Latin America and the Caribbean)${default}"
+		;;
+		"RIPE")
+			caida_rir="RIPE ${dim}(Europe, the Middle East and parts of Central Asia)${default}"
+		;;
+	esac
+
+	caida_customercone=$(jq -r '.data.asn.cone.numberAsns' <<<"$caida_data")
+	caida_degree_total=$(jq -r '.data.asn.asnDegree.total' <<<"$caida_data")
+	caida_degree_customer=$(jq -r '.data.asn.asnDegree.customer' <<<"$caida_data")
+	caida_degree_peer=$(jq -r '.data.asn.asnDegree.peer' <<<"$caida_data")
+	caida_degree_provider=$(jq -r '.data.asn.asnDegree.provider' <<<"$caida_data")
+	# caida_asrank_color="${dim}"
+	caida_asrank_text=""
+	if (( caida_asrank <= 10 )); then
+		caida_asrank_text=" ${lightgreybg} TOP 10 AS ${default}"
+	elif (( caida_asrank <= 35 )); then
+		caida_asrank_text=" ${lightgreybg} TOP 35 AS ${default}"
+	elif (( caida_asrank <= 100 )); then
+		caida_asrank_text=" ${lightgreybg} TOP 100 AS ${default}"
+	elif (( caida_asrank <= 500)); then
+		caida_asrank_text=" ${lightgreybg} TOP 500 AS ${default}"
+	elif (( caida_asrank <= 1000)); then
+		caida_asrank_text=" ${lightgreybg} TOP 1000 AS ${default}"
+	fi
+	caida_asrank_recap="${dim}#${white}${caida_asrank}${caida_asrank_text}"
 }
 
 IPGeoRepLookup(){
@@ -2484,65 +2556,83 @@ BGPUpstreamLookup(){
 	elif [ -z "$found_asname" ]; then
 		PrintErrorAndExit "Error: IP $1 is not part of an announced prefix, cannot continue"
 	fi
-	legend="\t${green}██ very likely transit\t( >= 66% BGP updates from this AS )${default}"
-	legend+="\n\t${yellow}██ likely transit\t( >= 33% BGP updates from this AS )${default}"
-	legend+="\n\t██ potentially transit\t( >= 25% BGP updates from this AS )"
-	legend+="\n\t${dim}██ unlikely transit\t( < 25% BGP updates from this AS )${default}"
 
 	BoxHeader "Recently observed upstream/transit AS for $1"
-	if [ "$JSON_OUTPUT" = false ]; then
-		echo -e "\nLegend:\n$legend\n"
-		echo -e "${bluebg} Target IP: ${default} ${blue}$1${default}"
-		echo -e "${bluebg} Origin AS: ${default} ${red}[AS$found_asn] ${green}$found_asname${default}\n"
-	else
-		final_json_output=$(jq '. += [{ "origin_as": "'"$found_asn"'", "origin_as_name": "'"$found_asname"'" }]' <<<"$final_json_output")
-		final_json_output=$(jq '.[0] += {"upstreams":[]}' <<<"$final_json_output")
-	fi
 	# fetch all observed ASPATHs involving this IP address
-	updates=$(docurl -s "https://stat.ripe.net/data/bgp-updates/data.json?resource=$1&sourceapp=nitefood-asn" | jq '.data.updates[].attrs.path' )
+	full_json_data=$(docurl -s "https://stat.ripe.net/data/bgp-updates/data.json?resource=$1&sourceapp=nitefood-asn")
+	found_prefix=$(jq -r '.data.resource' <<<"$full_json_data")
+	updates=$(jq '.data.updates[].attrs.path' <<<"$full_json_data")
 
-	# skip prepending announcements by walking through the ASPATH (from the second position) until we find the first non-origin traversed AS.
-	# That will be the path length at which we then consider the ASNs to be transits for this prefix
-	UPSTREAM_FOUND=false
-	pathlen="2"
-	while [ "$UPSTREAM_FOUND" = false ]; do
-		asnlist=$(	jq '.[-'"$pathlen"'] | select(. != null)' <<<"$updates" | \
-					jq -rn '[inputs] | group_by(.) | map({key: .[0], count: length}) | sort_by(-.count) | .[] | (.count | tostring) + " " + (.key | tostring)'
-		)
-		if [ -z "$asnlist" ]; then
-			PrintErrorAndExit "Error: this IP address may have low visibility / low global reachability (no observable upstreams found)"
-		fi
-		upstreams=$(cut -d ' ' -f 2 <<<"$asnlist" | grep -v "$found_asn") # exclude origin AS
-		# echo -e "--DBG upstreams at level $pathlen:\n$upstreams\n--"
-		if [ -n "$upstreams" ]; then
-			UPSTREAM_FOUND=true
-		else
-			(( pathlen++ )) # no upstreams found (excluding origin AS). Increase ASPATH level and check again"
-		fi
-	done
+	GetCAIDARank "$found_asn"
+
+	asnlist=$(jq -r '. as $aspaths | $aspaths[first((range(1;length) | select($aspaths[.] == '"$found_asn"')) - 1)] // empty' <<<"$updates" | sort | uniq -c | sort -rn)
 	tot=0
 	for line in $asnlist; do
-		count=$(cut -d ' ' -f1 <<<"$line")
+		count=$(awk '{print $1}' <<<"$line")
 		tot=$(( tot+count ))
 	done
+	[ -z "$asnlist" ] && total_upstreams_count=0 || total_upstreams_count=$(wc -l <<<"$asnlist")
+	red_upstreams_count=0
 	green_upstreams_count=0
 	yellow_upstreams_count=0
 	white_upstreams_count=0
 	dim_upstreams_count=0
+	if (( caida_asrank < 100 )) || (( total_upstreams_count > 50 )); then
+		# origin AS is in the top 100, therefore less likely to need transits (given its large customer cone),
+		# or the prefix is widely announced (likely also by well-connected IXP RS peers).
+		# Raise the thresholds to infer transit relationship status (need a higher percentage of BGP updates)
+		green_probability=85
+		yellow_probability=75
+		white_probability=65
+	else
+		green_probability=66
+		yellow_probability=33
+		white_probability=25
+	fi
+
+	# create a static list of the largest known transit ASNs.
+	# The list includes most of the top 35 CAIDA ranked ASNs (https://asrank.caida.org/?page_number=1&page_size=40&sort=rank)
+	# Note: the list excludes Hurricane Electric (AS6939) because HE is known to largely reannounce most prefixes it receives
+	# (even from IXP RS/SFI peers who do not subscribe a transit relationship with them)
+	static_transits_array=( 3356 1299 174 6762 2914 6461 6453 3257 3491 9002 1273 5511 4637 12956 7473 1239 3320 701 7018 6830 7922 )
+
+	legend="\t${red}██ most likely transit\t( very large / Tier 1 upstream AS )${default}"
+	legend+="\n\t${green}██ very likely transit\t( >= ${green_probability}% BGP updates from this AS )${default}"
+	legend+="\n\t${yellow}██ likely transit\t( >= ${yellow_probability}% BGP updates from this AS )${default}"
+	legend+="\n\t██ potentially transit\t( >= ${white_probability}% BGP updates from this AS )${default}"
+	legend+="\n\t${dim}██ unlikely transit\t(  < ${white_probability}% BGP updates from this AS )${default}"
+
+	if [ "$JSON_OUTPUT" = false ]; then
+		echo -e "\nLegend:\n$legend\n"
+		echo -e "${bluebg} Target       : ${default} ${blue}$1${default} ${dim}(matching prefix: ${white}$found_prefix${dim})${default}"
+		echo -e "${bluebg} Origin AS    : ${default} ${red}[AS$found_asn] ${green}$found_asname${default}"
+		echo -e "${bluebg} CAIDA AS rank: ${default} ${caida_asrank_recap}${default}\n"
+	else
+		final_json_output=$(jq '. += [{ "prefix": "'"$found_prefix"'", "origin_as": "'"$found_asn"'", "origin_as_name": "'"$found_asname"'", "origin_as_rank": '"$caida_asrank"' }]' <<<"$final_json_output")
+		final_json_output=$(jq '.[0] += {"upstreams_count": '"$total_upstreams_count"',"upstreams":[]}' <<<"$final_json_output")
+	fi
+
 	for line in $asnlist; do
-		count=$(cut -d ' ' -f1 <<<"$line")
-		asn=$(cut -d ' ' -f2 <<<"$line")
-		[[ "$asn" = "$found_asn" ]] && continue # skip origin AS
+		is_tier1=false
+		count=$(awk '{print $1}' <<<"$line")
+		asn=$(awk '{print $2}' <<<"$line")
 		asname=$(host -t TXT "AS${asn}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
 		integer_probability=$(( count*100/tot ))
 		probability=$(jq -n "$count*100/$tot")
-		if (( integer_probability >= 66 )); then
+		if grep -qw "$asn" <<<"${static_transits_array[@]}" && (( caida_asrank > 35 )); then
+			# static transit list does not apply to most top ASNs (CAIDA ranked < 35).
+			# These large networks are more likely to arrange SFI relationships with other Tier-1 networks,
+			# rather than pay for transit
+			is_tier1=true
+			probability_color="${red}"
+			(( red_upstreams_count++ ))
+		elif (( integer_probability >= "$green_probability" )); then
 			probability_color="${green}"
 			(( green_upstreams_count++ ))
-		elif (( integer_probability >= 33 )); then
+		elif (( integer_probability >= "$yellow_probability" )); then
 			probability_color="${yellow}"
 			(( yellow_upstreams_count++ ))
-		elif (( integer_probability >= 25 )); then
+		elif (( integer_probability >= "$white_probability" )); then
 			probability_color="${default}"
 			(( white_upstreams_count++ ))
 		else
@@ -2551,7 +2641,7 @@ BGPUpstreamLookup(){
 		fi
 
 		if [ "$JSON_OUTPUT" = true ]; then
-			final_json_output=$(jq '.[0].upstreams += [{"asn":"'"$asn"'", "asname":"'"$asname"'", "probability":'"$(printf "%.2f" "$probability")"'}]' <<<"$final_json_output")
+			final_json_output=$(jq '.[0].upstreams += [{"asn":"'"$asn"'", "asname":"'"$asname"'", "probability":'"$(printf "%.2f" "$probability")"', "is_tier1":'"$is_tier1"'}]' <<<"$final_json_output")
 		else
 			printf "${probability_color}██\tAS%-6s (%6.2f%%) - %s${default}\n" "$asn" "$probability" "$asname"
 		fi
@@ -2559,24 +2649,26 @@ BGPUpstreamLookup(){
 
 	# count each type of upstreams and try to determine if this prefix is multihomed
 	# echo "dbg green: $green_upstreams_count, yellow: $yellow_upstreams_count, white: $white_upstreams_count, dim: $dim_upstreams_count"
-	MULTIPLE_TRANSITS=false
-	if (( green_upstreams_count >= 2 )); then
-		MULTIPLE_TRANSITS=true
-	elif (( green_upstreams_count == 0 )) && (( yellow_upstreams_count >= 2 )); then
-		MULTIPLE_TRANSITS=true
-	elif (( green_upstreams_count == 0 )) && (( yellow_upstreams_count == 0 )) && (( white_upstreams_count >= 2 )); then
-		MULTIPLE_TRANSITS=true
-	elif (( green_upstreams_count == 0 )) && (( yellow_upstreams_count == 0 )) && (( white_upstreams_count == 0 )) && (( dim_upstreams_count >= 2 )); then
-		MULTIPLE_TRANSITS=true
+	MULTIPLE_UPSTREAMS=false
+	multiple_string="multiple"
+	if (( total_upstreams_count >= 20 )); then
+		MULTIPLE_UPSTREAMS=true
+		multiple_string="several"
+	elif (( green_upstreams_count >= 2 )) || (( yellow_upstreams_count >= 2 )) || (( white_upstreams_count >= 2 )) || (( red_upstreams_count >= 2 )); then
+		MULTIPLE_UPSTREAMS=true
 	fi
 
 	if [ "$JSON_OUTPUT" = false ]; then
-		if [ "$MULTIPLE_TRANSITS" = true ]; then
-			echo -e "\n${bluebg} INFO ${default}${blue} This prefix seems to be announced by ${underline}multiple upstream ASNs${default}${blue}. Possible reasons include:\n\t- ${underline}BGP multihoming${default}${blue} (if few upstreams announce this prefix)\n\t- ${underline}Tier 1 origin AS${default}${blue} or highly reachable prefix${default}${blue} (if many upstreams announce this prefix)\n\t- ${underline}Anycast prefix${default}\n"
+		if [ "$MULTIPLE_UPSTREAMS" = true ]; then
+			echo -e "\n${bluebg} INFO ${default}${blue} This prefix seems to be reannounced by ${underline}$multiple_string ($total_upstreams_count) upstream ASNs${default}${blue}. Possible reasons include:\n\t- ${underline}BGP multihoming${default}${blue} (if few upstreams announce this prefix)\n\t- ${underline}Tier 1 origin AS${default}${blue} or highly reachable prefix${default}${blue} (if many upstreams announce this prefix)\n\t- ${underline}Anycast prefix${default}\n"
 		fi
 	else
 		json_resultcount="1"
-		final_json_output=$(jq '.[0] += {"multiple_transits": '"$MULTIPLE_TRANSITS"'}' <<<"$final_json_output")
+		final_json_output=$(jq '.[0] += {"multiple_upstreams": '"$MULTIPLE_UPSTREAMS"'}' <<<"$final_json_output")
+	fi
+
+	if (( total_upstreams_count == 0 )); then
+		echo -e "\n${lightgreybg} Prefix has not been observed in the DFZ recently ${default}\n"
 	fi
 }
 
@@ -3650,6 +3742,7 @@ IQS_ALWAYS_QUERY=false
 IQS_CUSTOM_SETTINGS="" # e.g. "strictness=1&allow_public_access_points=false" - see https://www.ipqualityscore.com/documentation/proxy-detection/overview -> "Note About Front End IP Lookups"
 declare -A PEERINGDB_CACHED_DATASETS
 declare -A PEERINGDB_CACHED_IXP_DATA
+declare -A CAIDARANK_CACHED_AS_DATA
 
 #*
 #* Parse command line options
@@ -4157,6 +4250,7 @@ if [ -z "$input" ]; then
 		if [ -z "$found_asname" ]; then
 			PrintErrorAndExit "Error: no data found for AS${asn}"
 		fi
+		GetCAIDARank "$asn"
 		target_asname="$found_asname"
 		if [ "$JSON_OUTPUT" = true ]; then
 			# JSON output
@@ -4165,6 +4259,7 @@ if [ -z "$input" ]; then
 			final_json_output+="{"
 			final_json_output+="\"asn\":\"${asn}\""
 			final_json_output+=",\"asname\":\"${target_asname//\"/\\\"}\""
+			final_json_output+=",\"asrank\":${caida_asrank//\"/\\\"}"
 			final_json_output+=",\"org\":\"${found_org//\"/\\\"}\""
 			final_json_output+=",\"holder\":\"${found_holder//\"/\\\"}\""
 			final_json_output+=",\"abuse_contacts\":${json_abuse_contacts}"
@@ -4202,8 +4297,9 @@ if [ -z "$input" ]; then
 				ripestat_link="<a href=\"https://stat.ripe.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">RIPEStat</a>"
 				he_link="<a href=\"https://bgp.he.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">HE.NET</a>"
 				bgpview_link="<a href=\"https://bgpview.io/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPView</a>"
+				bgptools_link="<a href=\"https://bgp.tools/as/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPTools</a>"
 				peeringdb_link="<a href=\"https://www.peeringdb.com/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">PeeringDB</a>"
-				echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $peeringdb_link🔗)</span>"
+				echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $bgptools_link🔗 • $peeringdb_link🔗)</span>"
 			fi
 			echo ""
 			echo -en "${bluebg} AS Name       ──>${default} ${green}${target_asname}"
@@ -4214,27 +4310,36 @@ if [ -z "$input" ]; then
 			fi
 			printf "\n"
 			echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_holder} (${found_org})"
+			echo -e "${bluebg} CAIDA AS Rank ──>${default} ${caida_asrank_recap}"
 			echo -e "${bluebg} Abuse contact ──>${default} ${blue}${found_abuse_contact}"
 			echo -e "${bluebg} AS Reg. date  ──>${default} ${white}${found_createdate}"
+			echo -e "${bluebg} RIR (Region)  ──>${default} ${white}${caida_rir}"
 			echo -en "${bluebg} Peering @IXPs ──>${default} "
 			GetIXPresence "$asn"
+			echo ""
 			BoxHeader "BGP informations for AS${asn} (${target_asname})"
+			echo ""
+			echo -e "${bluebg} BGP Neighbors  ────>${default} ${green}${caida_degree_total}${default} ${dim}(${default}${caida_degree_provider}${dim} Transits • ${default}${caida_degree_peer}${dim} Peers • ${default}${caida_degree_customer}${dim} Customers)${default}"
+			echo -e "${bluebg} Customer cone  ────>${default} ${green}${caida_customercone} ${default}${dim}(# of ASNs observed in the customer cone for this AS)${default}"
+			echo ""
+			BoxHeader "Prefix informations for AS${asn} (${target_asname})"
 			echo ""
 			QueryRipestat "${asn}"
 			if [ -n "$ripestat_routing_data" ]; then
 				echo -e "${bluebg} IPv4 Prefixes  ────>${default} ${green}${ripestat_ipv4}"
 				echo -e "${bluebg} IPv6 Prefixes  ────>${default} ${yellow}${ripestat_ipv6}"
-				echo -e "${bluebg} BGP Neighbours ────>${default} ${blue}${ripestat_bgp}${default}\n"
 			fi
 			if [ -n "$ripestat_neighbours_data" ]; then
 				[[ -n "$upstream_peers" ]] && upstream_peers=$(echo -e "$upstream_peers") || upstream_peers="${redbg} NONE ${default}"
 				[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
 				[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
+				echo ""
 				BoxHeader "Peering informations for AS${asn} (${target_asname})"
 				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
 				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
-				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}\n"
+				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}"
 			fi
+			echo ""
 			BoxHeader "Aggregated IP resources for AS${asn} (${target_asname})"
 			echo -e "\n${green}───── IPv4 ─────${default}"
 			[[ -n "$ipv4_inetnums" ]] && echo -e "${green}${ipv4_inetnums}${default}" || echo -e "\n${redbg} NONE ${default}"
