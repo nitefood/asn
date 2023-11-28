@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.75"
+ASN_VERSION="0.75.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2679,11 +2679,14 @@ AsnServerListener(){
 	BoxHeader "ASN Lookup Server v$ASN_VERSION on $HOSTNAME"
 
 	if [ "$ASN_DEBUG" = true ]; then
-		echo -en "\n- ${yellow}[DBG]${default} Server BIND_ADDR :"
-		[[ -z "$ASN_SRV_BINDADDR" ]] && echo -en " ${green}(default v4/v6)${default}" || echo -en " $ASN_SRV_BINDADDR"
-		echo -en "\n- ${yellow}[DBG]${default} Server BIND_PORT : $ASN_SRV_BINDPORT"
-		[[ "$ASN_SRV_BINDPORT" = "$DEFAULT_SERVER_BINDPORT" ]] && echo -en " ${green}(default)${default}"
-		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'" >&2
+		server_user_uid=$(id -u)
+		server_user_name=$(id -n -u "$server_user_uid")
+		echo -e "\n- ${yellow}[DBG]${default} Server UID       : ${blue}${server_user_uid} (${server_user_name})${default}" >&2
+		echo -en "- ${yellow}[DBG]${default} Server BIND_ADDR :" >&2
+		[[ -z "$ASN_SRV_BINDADDR" ]] && echo -en " ${green}not specified (default v4/v6)${default}" || echo -en " $ASN_SRV_BINDADDR" >&2
+		echo -en "\n- ${yellow}[DBG]${default} Server BIND_PORT : $ASN_SRV_BINDPORT" >&2
+		[[ "$ASN_SRV_BINDPORT" = "$DEFAULT_SERVER_BINDPORT" ]] && echo -en " ${green}(default)${default}" >&2
+		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'\n" >&2
 	fi
 
 	# fetch external IP and ASN to include in the HTML reports
@@ -4310,7 +4313,7 @@ if [ -z "$input" ]; then
 			fi
 			printf "\n"
 			echo -e "${bluebg} Organization  ──>${default} ${yellow}${found_holder} (${found_org})"
-			echo -e "${bluebg} CAIDA AS Rank ──>${default} ${caida_asrank_recap}"
+			echo -e "${bluebg} CAIDA AS Rank ──>${default} ${caida_asrank_recap}${default}"
 			echo -e "${bluebg} Abuse contact ──>${default} ${blue}${found_abuse_contact}"
 			echo -e "${bluebg} AS Reg. date  ──>${default} ${white}${found_createdate}"
 			echo -e "${bluebg} RIR (Region)  ──>${default} ${white}${caida_rir}"
