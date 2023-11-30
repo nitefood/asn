@@ -1,15 +1,21 @@
 FROM alpine:20230901
 
-ARG IQS_TOKEN
-RUN if [ -n "$IQS_TOKEN" ]; then mkdir -p /etc/asn && echo "$IQS_TOKEN" > /etc/asn/iqs_token; fi
+ENV IQS_TOKEN ""
+
+# prepare the config directory
+RUN mkdir -p /etc/asn && touch /etc/asn/iqs_token && chown nobody:nobody /etc/asn/iqs_token
+
+# create the entrypoint script that writes the IQS token to the config file
+RUN echo -e "#!/bin/sh\nif [ -n \"\$IQS_TOKEN\" ]; then echo \"\$IQS_TOKEN\" > /etc/asn/iqs_token; fi\nexec \"\$@\"" > /entrypoint.sh && \
+    chmod +x /entrypoint.sh
 
 # Install prerequisite packages
-RUN	apk update && apk add --no-cache bash ncurses nmap nmap-ncat mtr aha curl whois grepcidr3 coreutils ipcalc bind-tools jq
+RUN	apk update && apk add --no-cache aha bash bind-tools coreutils curl grepcidr3 ipcalc jq mtr ncurses nmap nmap-ncat whois
 COPY asn /bin/asn
 RUN chmod 0755 /bin/asn
 
 # Start the service by default
 USER nobody
 EXPOSE 49200/tcp
-ENTRYPOINT ["/bin/asn"]
+ENTRYPOINT ["/entrypoint.sh", "/bin/asn"]
 CMD ["-l", "0.0.0.0"]
