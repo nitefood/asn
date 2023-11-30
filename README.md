@@ -257,6 +257,12 @@ Some additional packages are also required for full functionality:
   yay -S asn-git
   ```
 
+* **Alpine Linux (edge)** *(thanks [Francesco Colista](https://github.com/fcolista))*
+
+  ```
+  apk update && apk add asn
+  ```
+
 * **FreeBSD**:
 
   ```
