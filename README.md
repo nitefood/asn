@@ -203,6 +203,14 @@ This script requires **BASH v4.2** or later. You can check your version by runni
 
 Some additional packages are also required for full functionality:
 
+* **Alpine Linux:**
+
+A packaged version is available starting from v3.19:
+
+  ```
+  apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community asn
+  ```
+
 * **Debian 10 / Ubuntu 20.04 (or newer):**
 
   ```
