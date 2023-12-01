@@ -1,4 +1,4 @@
-FROM alpine:20230901
+FROM alpine:3.18.5
 
 ENV IQS_TOKEN ""
 
@@ -11,7 +11,8 @@ RUN mkdir -p /etc/asn && \
     echo -e "#!/bin/sh\nif [ -n \"\$IQS_TOKEN\" ]; then echo \"\$IQS_TOKEN\" > /etc/asn/iqs_token; fi\nexec \"\$@\"" > /entrypoint.sh && \
     chmod +x /entrypoint.sh && \
     apk update && \
-    apk add --no-cache aha bash bind-tools coreutils curl grepcidr3 ipcalc jq mtr ncurses nmap nmap-ncat whois
+    apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community grepcidr3 && \
+    apk add --no-cache aha bash bind-tools coreutils curl ipcalc jq mtr ncurses nmap nmap-ncat whois
 
 COPY asn /bin/asn
 RUN chmod 0755 /bin/asn
