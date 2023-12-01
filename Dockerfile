@@ -2,15 +2,17 @@ FROM alpine:20230901
 
 ENV IQS_TOKEN ""
 
-# prepare the config directory
-RUN mkdir -p /etc/asn && touch /etc/asn/iqs_token && chown nobody:nobody /etc/asn/iqs_token
+# - Prepare the config directory
+# - Create the entrypoint script that writes the IQS token to the config file
+# - Install prerequisite packages
+RUN mkdir -p /etc/asn && \
+    touch /etc/asn/iqs_token && \
+    chown nobody:nobody /etc/asn/iqs_token && \
+    echo -e "#!/bin/sh\nif [ -n \"\$IQS_TOKEN\" ]; then echo \"\$IQS_TOKEN\" > /etc/asn/iqs_token; fi\nexec \"\$@\"" > /entrypoint.sh && \
+    chmod +x /entrypoint.sh && \
+    apk update && \
+    apk add --no-cache aha bash bind-tools coreutils curl grepcidr3 ipcalc jq mtr ncurses nmap nmap-ncat whois
 
-# create the entrypoint script that writes the IQS token to the config file
-RUN echo -e "#!/bin/sh\nif [ -n \"\$IQS_TOKEN\" ]; then echo \"\$IQS_TOKEN\" > /etc/asn/iqs_token; fi\nexec \"\$@\"" > /entrypoint.sh && \
-    chmod +x /entrypoint.sh
-
-# Install prerequisite packages
-RUN	apk update && apk add --no-cache aha bash bind-tools coreutils curl grepcidr3 ipcalc jq mtr ncurses nmap nmap-ncat whois
 COPY asn /bin/asn
 RUN chmod 0755 /bin/asn
 
