@@ -1,23 +1,24 @@
-# Build grepcidr from source as not available from alpine repos
-FROM alpine AS build
-RUN apk add --no-cache g++ make
-ADD http://www.pc-tools.net/files/unix/grepcidr-2.0.tar.gz /build/grepcidr-2.0.tar.gz
-WORKDIR /build
-RUN tar xzf grepcidr-2.0.tar.gz \
-    && cd grepcidr-2.0 \
-    && make \
-    && make install
+FROM alpine:3.18.5
 
-# Actual image
-FROM alpine
+ENV IQS_TOKEN ""
 
-RUN apk add --no-cache curl whois bind-tools mtr jq ipcalc nmap nmap-ncat aha bash ncurses
-COPY --from=build /usr/local/bin/grepcidr /usr/local/bin/grepcidr
+# - Prepare the config directory
+# - Create the entrypoint script that writes the IQS token to the config file
+# - Install prerequisite packages
+RUN mkdir -p /etc/asn && \
+    touch /etc/asn/iqs_token && \
+    chown nobody:nobody /etc/asn/iqs_token && \
+    echo -e "#!/bin/sh\nif [ -n \"\$IQS_TOKEN\" ]; then echo \"\$IQS_TOKEN\" > /etc/asn/iqs_token; fi\nexec \"\$@\"" > /entrypoint.sh && \
+    chmod +x /entrypoint.sh && \
+    apk update && \
+    apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community grepcidr3 && \
+    apk add --no-cache aha bash bind-tools coreutils curl ipcalc jq mtr ncurses nmap nmap-ncat whois
 
-RUN mkdir -p /app
-RUN curl "https://raw.githubusercontent.com/arbal/asn/master/asn" > /app/asn
-RUN chmod 0755 /app/asn
+COPY asn /bin/asn
+RUN chmod 0755 /bin/asn
 
+# Start the service by default
+USER nobody
 EXPOSE 49200/tcp
-ENTRYPOINT ["/app/asn"]
+ENTRYPOINT ["/entrypoint.sh", "/bin/asn"]
 CMD ["-l", "0.0.0.0"]
