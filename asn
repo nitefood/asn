@@ -2689,6 +2689,8 @@ AsnServerListener(){
 		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'\n" >&2
 	fi
 
+	CLOUD_SHELL_MARK="${red}❌ NO${default}"
+
 	# fetch external IP and ASN to include in the HTML reports
 	StatusbarMessage "Detecting host external IP and ASN"
 	WhatIsMyIP
@@ -2707,6 +2709,17 @@ AsnServerListener(){
 	server_country=$(echo "${found_asname##*,}" | tr -d ' ')
 	[[ -z "$server_country" ]] && server_country="(Unknown)"
 
+	# prepare the server URL (for the JS bookmarklet)
+	INTERNAL_ASNSERVER_BINDURL="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
+	BOOKMARKLET_URL="http://$INTERNAL_ASNSERVER_BINDURL/asn_bookmarklet"
+	# detect if we're running in Google Cloud Shell environment
+	if [ "$GOOGLE_CLOUD_SHELL" = true ] && [ -n "$WEB_HOST" ]; then
+		CLOUD_SHELL_URL="${ASN_SRV_BINDPORT}-${WEB_HOST}"
+		INTERNAL_ASNSERVER_BINDURL="$CLOUD_SHELL_URL"
+		BOOKMARKLET_URL="https://${CLOUD_SHELL_URL}/asn_bookmarklet"
+		CLOUD_SHELL_MARK="${green}✓ YES${default}"
+	fi
+
 	StatusbarMessage
 
 	if [ "$HAVE_IPV6" = true ]; then
@@ -2723,7 +2736,9 @@ AsnServerListener(){
 	echo -e "\n- Server ext. IP  : ${blue}${local_wanip}${default}" \
 			"\n- Server Country  : ${blue}${server_country}${default}" \
 			"\n- Server ASN      : ${red}[AS${found_asn}]${default} ${green}$found_asname${default}" \
-			"\n- Server has IPv6 : $ipv6_mark" \
+			"\n- Server has IPv6 : ${ipv6_mark}" \
+			"\n- Running on GCP  : ${CLOUD_SHELL_MARK}" \
+			"\n- Bookmarklet URL : ${BOOKMARKLET_URL}" \
 			"\n\n[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server listening on ${white}${DISPLAY_ASN_SRV_BINDADDR}:${ASN_SRV_BINDPORT}${default}"
 
 	server_country="$(echo -e "$server_country" | tr '[:upper:]' '[:lower:]')"
@@ -2745,6 +2760,7 @@ AsnServerListener(){
 			 	server_country=\"$server_country\" \
 				INTERNAL_CONNHANDLER_CHILD=false \
 			 	INTERNAL_ASNSERVER_CONNHANDLER=true \
+				INTERNAL_ASNSERVER_BINDURL="$INTERNAL_ASNSERVER_BINDURL" \
 			 	MONOCHROME_MODE=\"$MONOCHROME_MODE\" \
 			 	ASN_DEBUG=\"$ASN_DEBUG\" \
 			 	\"$0\"
@@ -3094,7 +3110,7 @@ HandleNcatClientConnection() {
 	http_ko_json='HTTP/1.0 400\r\nContent-Type: application/json\r\n'
 
 	# Javascript bookmarklet
-	js_bookmarklet='javascript:(function(){var asnserver="localhost:49200",target=window.location.hostname,'
+	js_bookmarklet='javascript:(function(){var asnserver="'"${INTERNAL_ASNSERVER_BINDURL}"'",target=window.location.hostname,'
 	js_bookmarklet+='width=screen.width-screen.width/7,height=screen.height-screen.height/4,left=window.innerWidth/2-width/2,top=window.innerHeight/2-height/2;'
 	js_bookmarklet+='window.open("http://"+asnserver+"/asn_lookup&"+target,"newWindow","width="+width+",height="+height+",top="+top+",left="+left)})();'
 
