@@ -6,6 +6,7 @@
 
 * [Description](#description)
 * [Screenshots](#screenshots)
+* [Running the script from a container](#running-the-script-from-a-container)
 * [Installation](#installation)
 * [Usage (as a command line tool)](#usage)
 * [Usage (as a lookup & traceroute server)](#running-lookups-from-the-browser)
@@ -194,6 +195,23 @@ Requires Bash v4.2+. Tested on:
 
   ![upstreamfinder_preferred_transit](https://github.com/nitefood/asn/assets/24555810/dbb64ecc-394a-4fbd-8607-5b7f6955b340)
 
+
+- - -
+
+## Running the script from a container
+
+To run the script without installing it locally, you have the following options:
+
+* **Docker** _(thanks [Gianni Stubbe](https://github.com/33Fraise33), [anarcat](https://github.com/anarcat), [Francesco Colista](https://github.com/fcolista))_
+
+  Usage examples:
+  - Client mode: `docker run -it nitefood/asn 1.1.1.1`
+  - Start server: `docker run -it nitefood/asn`
+  - Supply [IQS token](#ip-reputation-api-token): `docker run -it -e IQS_TOKEN="<your_token_here>" nitefood/asn [options]`
+
+* **Google Cloud Shell**
+
+  _(Coming soon)_
 
 - - -
 
