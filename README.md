@@ -204,10 +204,12 @@ To run the script without installing it locally, you have the following options:
 
 * **Docker** _(thanks [Gianni Stubbe](https://github.com/33Fraise33), [anarcat](https://github.com/anarcat), [Francesco Colista](https://github.com/fcolista))_
 
+  _Note: the Docker image runs by default in server mode, if no parameters are given. This is equivalent to running the tool as `asn -l 0.0.0.0` (run server, bind to all IPv4 interfaces - this is necessary to expose the server port to the host machine). You can run the server with different [options](#syntax) by explicitly passing `-l [options]`. It's also possible to pass an [IpQualityScore token](#ip-reputation-api-token) (both client and server runs) by setting the `IQS_TOKEN` environment variable (example below) in the container._
+
   Usage examples:
+  - Start server: `docker run -it -p 49200:49200 nitefood/asn`
   - Client mode: `docker run -it nitefood/asn 1.1.1.1`
-  - Start server: `docker run -it nitefood/asn`
-  - Supply [IQS token](#ip-reputation-api-token): `docker run -it -e IQS_TOKEN="<your_token_here>" nitefood/asn [options]`
+  - Supply an IQS token: `docker run -it -e IQS_TOKEN="<your_token_here>" nitefood/asn [...]`
 
 * **Google Cloud Shell**
 
