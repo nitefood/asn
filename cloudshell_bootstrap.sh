@@ -21,8 +21,8 @@ echo -en "Enter your IPQualityScore API token (or press Enter to skip): "
 read -sr IQS_TOKEN
 if [ -n "$IQS_TOKEN" ]; then
 	echo -en "- Enabling IPQualityScore lookups..."
-	mkdir -p /etc/asn
-	echo "$IQS_TOKEN" > /etc/asn/iqs_token
+	sudo mkdir -p /etc/asn
+	echo "$IQS_TOKEN" | sudo tee /etc/asn/iqs_token
 	echo "${green}OK${default}"
 else
 	echo -e "- IPQualityScore lookups ${red}DISABLED${default}"
