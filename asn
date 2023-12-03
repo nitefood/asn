@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.75.1"
+ASN_VERSION="0.75.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
