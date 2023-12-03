@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.75.1"
+ASN_VERSION="0.75.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2689,6 +2689,8 @@ AsnServerListener(){
 		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'\n" >&2
 	fi
 
+	CLOUD_SHELL_MARK="${red}❌ NO${default}"
+
 	# fetch external IP and ASN to include in the HTML reports
 	StatusbarMessage "Detecting host external IP and ASN"
 	WhatIsMyIP
@@ -2707,6 +2709,22 @@ AsnServerListener(){
 	server_country=$(echo "${found_asname##*,}" | tr -d ' ')
 	[[ -z "$server_country" ]] && server_country="(Unknown)"
 
+	# prepare the server URL (for the JS bookmarklet)
+	if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ] || [ "$ASN_SRV_BINDADDR" = "::" ]; then
+		INTERNAL_ASNSERVER_ADDRESS="127.0.0.1:$ASN_SRV_BINDPORT"
+	else
+		INTERNAL_ASNSERVER_ADDRESS="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
+	fi
+	BOOKMARKLET_URL="http://${INTERNAL_ASNSERVER_ADDRESS}/asn_bookmarklet"
+	# detect if we're running in Google Cloud Shell environment
+	if [ "$GOOGLE_CLOUD_SHELL" = true ] && [ -n "$WEB_HOST" ]; then
+		# on Google Cloud Shell, the $WEB_HOST environment variable contains the external hostname to reach the server
+		# the format is https://<port>-<hostname> (cheers https://stackoverflow.com/a/70255668)
+		INTERNAL_ASNSERVER_ADDRESS="${ASN_SRV_BINDPORT}-${WEB_HOST}"
+		BOOKMARKLET_URL="https://${INTERNAL_ASNSERVER_ADDRESS}/asn_bookmarklet"
+		CLOUD_SHELL_MARK="${green}✓ YES${default}"
+	fi
+
 	StatusbarMessage
 
 	if [ "$HAVE_IPV6" = true ]; then
@@ -2723,7 +2741,9 @@ AsnServerListener(){
 	echo -e "\n- Server ext. IP  : ${blue}${local_wanip}${default}" \
 			"\n- Server Country  : ${blue}${server_country}${default}" \
 			"\n- Server ASN      : ${red}[AS${found_asn}]${default} ${green}$found_asname${default}" \
-			"\n- Server has IPv6 : $ipv6_mark" \
+			"\n- Server has IPv6 : ${ipv6_mark}" \
+			"\n- Running on GCP  : ${CLOUD_SHELL_MARK}" \
+			"\n- Bookmarklet URL : ${BOOKMARKLET_URL}" \
 			"\n\n[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server listening on ${white}${DISPLAY_ASN_SRV_BINDADDR}:${ASN_SRV_BINDPORT}${default}"
 
 	server_country="$(echo -e "$server_country" | tr '[:upper:]' '[:lower:]')"
@@ -2745,6 +2765,7 @@ AsnServerListener(){
 			 	server_country=\"$server_country\" \
 				INTERNAL_CONNHANDLER_CHILD=false \
 			 	INTERNAL_ASNSERVER_CONNHANDLER=true \
+				INTERNAL_ASNSERVER_ADDRESS="$INTERNAL_ASNSERVER_ADDRESS" \
 			 	MONOCHROME_MODE=\"$MONOCHROME_MODE\" \
 			 	ASN_DEBUG=\"$ASN_DEBUG\" \
 			 	\"$0\"
@@ -3094,7 +3115,7 @@ HandleNcatClientConnection() {
 	http_ko_json='HTTP/1.0 400\r\nContent-Type: application/json\r\n'
 
 	# Javascript bookmarklet
-	js_bookmarklet='javascript:(function(){var asnserver="localhost:49200",target=window.location.hostname,'
+	js_bookmarklet='javascript:(function(){var asnserver="'"${INTERNAL_ASNSERVER_ADDRESS}"'",target=window.location.hostname,'
 	js_bookmarklet+='width=screen.width-screen.width/7,height=screen.height-screen.height/4,left=window.innerWidth/2-width/2,top=window.innerHeight/2-height/2;'
 	js_bookmarklet+='window.open("http://"+asnserver+"/asn_lookup&"+target,"newWindow","width="+width+",height="+height+",top="+top+",left="+left)})();'
 
@@ -3345,7 +3366,8 @@ HandleNcatClientConnection() {
 	DebugPrint "RECEIVED new client request: '$line'"
 
 	# handle 'asn_bookmarklet' command. This will show a web page for easy dragging&dropping of the bookmarklet to the favorites toolbar
-	if (echo -e "$line" | grep -Eq "^GET /asn_bookmarklet HTTP"); then
+	if (echo -e "$line" | grep -Eq "^GET /asn_bookmarklet[?& ]"); then
+		DebugPrint "SERVING bookmarklet page to client"
 		echo -e "${http_ok}${html_bookmarklet_page}"
 
 	# handle 'termbin_share' command. This will decode the input and send it to termbin, returning a html link to the client

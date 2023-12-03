@@ -213,7 +213,15 @@ To run the script without installing it locally, you have the following options:
 
 * **Google Cloud Shell**
 
-  _(Coming soon)_
+  _Note: server mode **is supported** out of the box in Cloud Shell, just follow the **bookmarklet** link that will be shown at server launch to access the VM for remote lookups._
+
+  **1.** Clone the repository in Cloud Shell by clicking the following button:
+
+  [![Open in Cloud Shell](https://gstatic.com/cloudssh/images/open-btn.svg)](https://shell.cloud.google.com/cloudshell/editor?cloudshell_git_repo=https://github.com/nitefood/asn&ephemeral=true&show=terminal)
+
+  **2.** Prepare the GCP environment by launching `./cloudshell_bootstrap.sh`
+
+  **3.** _(OPTIONAL)_ Input your [IpQualityScore token](#ip-reputation-api-token) when requested to enable in-depth threat analisys and scoring
 
 - - -
 
