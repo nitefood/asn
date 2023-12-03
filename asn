@@ -3366,7 +3366,8 @@ HandleNcatClientConnection() {
 	DebugPrint "RECEIVED new client request: '$line'"
 
 	# handle 'asn_bookmarklet' command. This will show a web page for easy dragging&dropping of the bookmarklet to the favorites toolbar
-	if (echo -e "$line" | grep -Eq "^GET /asn_bookmarklet[?&]"); then
+	if (echo -e "$line" | grep -Eq "^GET /asn_bookmarklet[?& ]"); then
+		DebugPrint "SERVING bookmarklet page to client"
 		echo -e "${http_ok}${html_bookmarklet_page}"
 
 	# handle 'termbin_share' command. This will decode the input and send it to termbin, returning a html link to the client
