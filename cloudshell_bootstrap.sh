@@ -35,4 +35,4 @@ echo -en "- Installing the asn script..."
 sudo install -m 755 asn /usr/bin
 echo -e "${green}OK${default}"
 echo -e "\n${greenbg} All done ${default}\n"
-echo -e "Example usage:\n\tServer mode : ${blue}asn -l 0.0.0.0${default}\n\tASPath trace: ${blue}asn 1.1.1.1${default}\n\n"
+echo -e "Example usage:\n\tServer mode : ${blue}asn -l${default}\n\tASPath trace: ${blue}asn 1.1.1.1${default}\n\nFor a full feature list visit https://github.com/nitefood/asn\n\n"
