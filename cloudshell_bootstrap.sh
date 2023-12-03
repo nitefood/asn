@@ -17,7 +17,7 @@ default=$'\e[0m'
 
 clear
 echo -e "${dim}$banner${default}\n"
-echo -e "Enter your IPQualityScore API token (or press Enter to skip): "
+echo -en "Enter your IPQualityScore API token (or press Enter to skip): "
 read -sr IQS_TOKEN
 if [ -n "$IQS_TOKEN" ]; then
 	echo -en "- Enabling IPQualityScore lookups..."
@@ -35,4 +35,4 @@ echo -en "- Installing the asn script..."
 sudo install -m 755 asn /usr/bin
 echo -e "${green}OK${default}"
 echo -e "\n${greenbg} All done ${default}\n"
-echo -e "Example usage:\n\tServer mode: ${blue}asn -l 0.0.0.0${default}\n\tASPath trace: ${blue}asn 1.1.1.1${default}\n\n"
+echo -e "Example usage:\n\tServer mode : ${blue}asn -l 0.0.0.0${default}\n\tASPath trace: ${blue}asn 1.1.1.1${default}\n\n"
