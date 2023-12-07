@@ -2,7 +2,28 @@
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/asn.svg)](https://repology.org/project/asn/versions)
 
-*Quick jump:*
+#### Container support:
+
+[![Docker](https://img.shields.io/badge/docker-%230db7ed.svg?style=for-the-badge&logo=docker&logoColor=white)](#running-the-script-from-a-container)
+[![Google Cloud](https://img.shields.io/badge/GoogleCloud-%234285F4.svg?style=for-the-badge&logo=google-cloud&logoColor=white)](#running-the-script-from-a-container)
+
+#### OS support:
+
+[![Debian](https://img.shields.io/badge/Debian-D70A53?style=for-the-badge&logo=debian&logoColor=white)](#installation)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](#installation)
+[![Cent OS](https://img.shields.io/badge/cent%20os-002260?style=for-the-badge&logo=centos&logoColor=F0F0F0)](#installation)
+[![Red Hat](https://img.shields.io/badge/Red%20Hat-EE0000?style=for-the-badge&logo=redhat&logoColor=white)](#installation)
+[![Rocky Linux](https://img.shields.io/badge/-Rocky%20Linux-%2310B981?style=for-the-badge&logo=rockylinux&logoColor=white)](#installation)
+[![Fedora](https://img.shields.io/badge/Fedora-294172?style=for-the-badge&logo=fedora&logoColor=white)](#installation)
+[![Arch](https://img.shields.io/badge/Arch%20Linux-1793D1?logo=arch-linux&logoColor=fff&style=for-the-badge)](#installation)
+[![Manjaro](https://img.shields.io/badge/Manjaro-35BF5C?style=for-the-badge&logo=Manjaro&logoColor=white)](#installation)
+[![Alpine Linux](https://img.shields.io/badge/Alpine_Linux-%230D597F.svg?style=for-the-badge&logo=alpine-linux&logoColor=white)](#installation)
+[![FreeBSD](https://img.shields.io/badge/-FreeBSD-%23870000?style=for-the-badge&logo=freebsd&logoColor=white)](#installation)
+[![Nix](https://img.shields.io/badge/NIX-5277C3.svg?style=for-the-badge&logo=NixOS&logoColor=white)](#installation)
+[![macOS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0)](#installation)
+[![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#installation)
+
+### Table of contents:
 
 * [Description](#description)
 * [Screenshots](#screenshots)
@@ -11,6 +32,8 @@
 * [Usage (as a command line tool)](#usage)
 * [Usage (as a lookup & traceroute server)](#running-lookups-from-the-browser)
 * [Usage (as a lookup API with JSON output)](#json-output-and-api-mode)
+
+---
 
 ## Description
 
@@ -202,7 +225,7 @@ Requires Bash v4.2+. Tested on:
 
 To run the script without installing it locally, you have the following options:
 
-* **Docker** _(thanks [Gianni Stubbe](https://github.com/33Fraise33), [anarcat](https://github.com/anarcat), [Francesco Colista](https://github.com/fcolista))_
+* **Docker** _(thanks [Gianni Stubbe](https://github.com/33Fraise33), [anarcat](https://github.com/anarcat), [Francesco Colista](https://github.com/fcolista), [arbal](https://github.com/arbal))_
 
   _Note: the Docker image runs by default in server mode, if no parameters are given. This is equivalent to running the tool as `asn -l 0.0.0.0` (run server, bind to all IPv4 interfaces - this is necessary to expose the server port to the host machine). You can run the server with different [options](#syntax) by explicitly passing `-l [options]`. It's also possible to pass an [IpQualityScore token](#ip-reputation-api-token) (both client and server runs) by setting the `IQS_TOKEN` environment variable (example below) in the container._
 
