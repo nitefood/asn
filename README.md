@@ -308,10 +308,10 @@ Some additional packages are also required for full functionality:
   yay -S asn-git
   ```
 
-* **Alpine Linux (edge)** *(thanks [Francesco Colista](https://github.com/fcolista))*
+* **Alpine Linux 3.18 (or newer)** *(thanks [Francesco Colista](https://github.com/fcolista))*
 
   ```
-  apk update && apk add asn
+  apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community asn
   ```
 
 * **FreeBSD**:
