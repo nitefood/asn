@@ -18,6 +18,7 @@
 [![Arch](https://img.shields.io/badge/Arch%20Linux-1793D1?logo=arch-linux&logoColor=fff&style=for-the-badge)](#installation)
 [![Manjaro](https://img.shields.io/badge/Manjaro-35BF5C?style=for-the-badge&logo=Manjaro&logoColor=white)](#installation)
 [![Alpine Linux](https://img.shields.io/badge/Alpine_Linux-%230D597F.svg?style=for-the-badge&logo=alpine-linux&logoColor=white)](#installation)
+[![openSUSE](https://img.shields.io/badge/openSUSE-73BA25?logo=opensuse&logoColor=fff&style=for-the-badge)](#installation)
 [![FreeBSD](https://img.shields.io/badge/-FreeBSD-%23870000?style=for-the-badge&logo=freebsd&logoColor=white)](#installation)
 [![Nix](https://img.shields.io/badge/NIX-5277C3.svg?style=for-the-badge&logo=NixOS&logoColor=white)](#installation)
 [![macOS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0)](#installation)
@@ -314,6 +315,12 @@ Some additional packages are also required for full functionality:
   apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community asn
   ```
 
+* **openSUSE Leap 15.5 (or newer), openSUSE Tumbleweed**
+
+  ```
+  zypper in -y curl whois bind-utils mtr jq nmap ncat ipcalc aha grepcidr
+  ```
+  
 * **FreeBSD**:
 
   ```
