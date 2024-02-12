@@ -320,7 +320,7 @@ Some additional packages are also required for full functionality:
   ```
   zypper in -y curl whois bind-utils mtr jq nmap ncat ipcalc aha grepcidr
   ```
-  
+
 * **FreeBSD**:
 
   ```
@@ -456,9 +456,10 @@ where `TARGET` can be one of the following:
 
 * `[-n]`
 
-  * disables path tracing and only outputs lookup info for targets
+  * disables path tracing and only outputs lookup info _(for IP targets)_
+  * disables additional INETNUM/origin lookups _(for AS targets)_
 
-    *.asnrc option equivalent: `MTR_TRACING=false` (default: `true`)*
+    *.asnrc option equivalent: `MTR_TRACING=false` (default: `true`), `ADDITIONAL_INETNUM_LOOKUP=false` (default: `true`)*
 
 * `[-s]`
 
@@ -576,6 +577,7 @@ The following values are the defaults. Any (or all) of them can be specified in 
 
 ```shell
 MTR_TRACING=true
+ADDITIONAL_INETNUM_LOOKUP=true
 DETAILED_TRACE=false
 MTR_ROUNDS=5
 MAX_CONCURRENT_SHODAN_REQUESTS=10

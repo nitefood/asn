@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.75.2"
+ASN_VERSION="0.75.3"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -209,8 +209,8 @@ QueryRipestat(){
 
 	prefixcounter=0
 	for prefix in $ipv4_ripe_prefixes; do
-		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
 		((prefixcounter++))
+		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
 		# old way (one whois lookup per prefix)
 		# parent_inetnum=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
 		# 				grep -E -m1 "^inetnum" | awk '{print $2"-"$4}' | xargs ipcalc -r 2>/dev/null | grep -v "deaggregate")
@@ -251,36 +251,39 @@ QueryRipestat(){
 		echo -e "-k" >&6
 	fi
 
-	# fetch further inetnums allocated to this AS from pWhois
-	pwhois_prefixes=$(PwhoisListPrefixesForOrg "$found_org")
-	pwhois_unique_prefixes=$(comm -13 <(echo -e "$ipv4_ripe_prefixes" | sort) <(echo -e "$pwhois_prefixes" | sort))
-	pwhois_unique_prefixes_count=$(wc -l <<<"$pwhois_unique_prefixes")
-	prefixcounter=0
-	for prefix in $pwhois_unique_prefixes; do
-		# found a new prefix in pWhois, check if it's announced by a different AS
-		# (e.g. target AS has delegated announcements for this prefix to another AS)
-		((prefixcounter++))
-		StatusbarMessage "Identifying origin AS for additional IPv4 prefix $prefixcounter/$pwhois_unique_prefixes_count"
-		LookupASNAndRouteFromIP "$prefix"
-		prefix_originator_asn="$found_asn"
-		if [ -z "$prefix_originator_asn" ] || [ "$prefix_originator_asn" = "$1" ]; then
-			# prefix originator is same as target AS, or prefix not announced
-			# add this prefix to the allocated IP resources for this AS
-			ipv4_inetnums+="$prefix\n"
-		else
-			# this prefix is allocated to target AS, but is being announced by a different AS
-			prefix_originator_org=$(docurl -m5 -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
-				jq -r 'select (.data.holder != null) | .data.holder' | \
-				awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
-			)
-			if [ "$JSON_OUTPUT" = true ]; then
-				[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
-				json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"$prefix_originator_org\"}"
+	if [ "$ADDITIONAL_INETNUM_LOOKUP" = true ]; then
+		# fetch further inetnums allocated to this AS from pWhois
+		StatusbarMessage "Identifying additional INETNUMs allocated to AS$1 (Hint: use -n to skip)"
+		pwhois_prefixes=$(PwhoisListPrefixesForOrg "$found_org")
+		pwhois_unique_prefixes=$(comm -13 <(echo -e "$ipv4_ripe_prefixes" | sort) <(echo -e "$pwhois_prefixes" | sort))
+		pwhois_unique_prefixes_count=$(wc -l <<<"$pwhois_unique_prefixes")
+		prefixcounter=0
+		for prefix in $pwhois_unique_prefixes; do
+			# found a new prefix in pWhois, check if it's announced by a different AS
+			# (e.g. target AS has delegated announcements for this prefix to another AS)
+			((prefixcounter++))
+			StatusbarMessage "Identifying origin AS for additional IPv4 prefix $prefixcounter/$pwhois_unique_prefixes_count"
+			LookupASNAndRouteFromIP "$prefix"
+			prefix_originator_asn="$found_asn"
+			if [ -z "$prefix_originator_asn" ] || [ "$prefix_originator_asn" = "$1" ]; then
+				# prefix originator is same as target AS, or prefix not announced
+				# add this prefix to the allocated IP resources for this AS
+				ipv4_inetnums+="$prefix\n"
 			else
-				ipv4_inetnums+="$prefix (announced by AS${prefix_originator_asn} - ${prefix_originator_org})\n"
+				# this prefix is allocated to target AS, but is being announced by a different AS
+				prefix_originator_org=$(docurl -m5 -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
+					jq -r 'select (.data.holder != null) | .data.holder' | \
+					awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
+				)
+				if [ "$JSON_OUTPUT" = true ]; then
+					[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
+					json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"$prefix_originator_org\"}"
+				else
+					ipv4_inetnums+="$prefix (announced by AS${prefix_originator_asn} - ${prefix_originator_org})\n"
+				fi
 			fi
-		fi
-	done
+		done
+	fi
 
 	if [ -n "$ipv4_inetnums" ]; then
 		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
@@ -3752,6 +3755,7 @@ peeringdb_ipv6_dataset=""
 
 # default options (configurable via $HOME/.asnrc)
 MTR_TRACING=true
+ADDITIONAL_INETNUM_LOOKUP=true
 DETAILED_TRACE=false
 MTR_ROUNDS=5
 MAX_CONCURRENT_SHODAN_REQUESTS=10
@@ -3839,6 +3843,7 @@ while getopts "$optspec" optchar; do {
     case "${optchar}" in
 		"n")
 			MTR_TRACING=false
+			ADDITIONAL_INETNUM_LOOKUP=false
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"t")
