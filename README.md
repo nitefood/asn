@@ -105,6 +105,7 @@ The script uses the following services for data retrieval:
 * [PeeringDB](https://www.peeringdb.com/)
 * [CAIDA ASRank](https://asrank.caida.org/)
 * [ifconfig.co](https://ifconfig.co/)
+* [ipify](https://www.ipify.org/)
 * [RIPEStat](https://stat.ripe.net/)
 * [RIPE IPmap](https://ipmap.ripe.net/)
 * [ip-api](https://ip-api.com/)

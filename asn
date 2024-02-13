@@ -2714,7 +2714,7 @@ AsnServerListener(){
 
 	# prepare the server URL (for the JS bookmarklet)
 	if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ] || [ "$ASN_SRV_BINDADDR" = "::" ]; then
-		INTERNAL_ASNSERVER_ADDRESS="127.0.0.1:$ASN_SRV_BINDPORT"
+		INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
 	else
 		INTERNAL_ASNSERVER_ADDRESS="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
 	fi
@@ -2844,6 +2844,8 @@ WhatIsMyIP() {
 	[[ -n "$local_wanip" ]] && return
 	# retrieve local WAN IP (v6 takes precedence) from ifconfig.co
 	local_wanip=$(docurl -s "https://ifconfig.co")
+	# handle ifconfig.co serving a captcha-type redirect page (e.g. when coming from some AWS networks)
+	grep -qE '^<!DOCTYPE html>' <<<"$local_wanip" && local_wanip=$(docurl -s "https://api64.ipify.org")
 	# check if we default to an IPv6 internet connection
 	if echo "$local_wanip" | grep -q ':'; then
 		HAVE_IPV6=true
