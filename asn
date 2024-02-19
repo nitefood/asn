@@ -208,6 +208,7 @@ QueryRipestat(){
 	done
 
 	prefixcounter=0
+	lookedup_parents=""
 	for prefix in $ipv4_ripe_prefixes; do
 		((prefixcounter++))
 		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
@@ -234,13 +235,24 @@ QueryRipestat(){
 			parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
 			# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
 			# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
-			LookupASNAndRouteFromIP "$parent_inetnum"
-			if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
-				# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
-				ipv4_inetnums+="$parent_inetnum\n"
+			if ! grep -q "$parent_inetnum" <<<"$lookedup_parents"; then
+				# this parent inetnum hasn't been looked up yet
+				lookedup_parents+="$parent_inetnum\n"
+				LookupASNAndRouteFromIP "$parent_inetnum"
+				if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
+					# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
+					ipv4_inetnums+="$parent_inetnum\n"
+				else
+					# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
+					ipv4_inetnums+="$prefix\n"
+				fi
 			else
-				# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
-				ipv4_inetnums+="$prefix\n"
+				# this parent inetnum has already been looked up
+				# if it's not present in the list of ipv4_inetnums, it means it's part of a larger supernet by some other AS.
+				# therefore we only add the announced (smaller) prefix to the list
+				if ! grep -q "$parent_inetnum" <<<"$ipv4_inetnums"; then
+					ipv4_inetnums+="$prefix\n"
+				fi
 			fi
 		else
 			ipv4_inetnums+="$prefix\n"
@@ -256,8 +268,10 @@ QueryRipestat(){
 		StatusbarMessage "Identifying additional INETNUMs allocated to AS$1 (Hint: use -n to skip)"
 		pwhois_prefixes=$(PwhoisListPrefixesForOrg "$found_org")
 		pwhois_unique_prefixes=$(comm -13 <(echo -e "$ipv4_ripe_prefixes" | sort) <(echo -e "$pwhois_prefixes" | sort))
+		pwhois_unique_prefixes=$(comm -13 <(echo -e "$lookedup_parents" | sort) <(echo -e "$pwhois_unique_prefixes" | sort))
 		pwhois_unique_prefixes_count=$(wc -l <<<"$pwhois_unique_prefixes")
 		prefixcounter=0
+		echo "DBG: looking up these additional IPv4 prefixes: $pwhois_unique_prefixes" >&2
 		for prefix in $pwhois_unique_prefixes; do
 			# found a new prefix in pWhois, check if it's announced by a different AS
 			# (e.g. target AS has delegated announcements for this prefix to another AS)
@@ -632,8 +646,11 @@ LookupASNAndRouteFromIP(){
 			fi
 		else
 			# DNS query (faster) for IPv4 addresses
-			rev=$(echo "$1" | awk -F'.' '{printf $4 "." $3 "." $2 "." $1}')
-			output=$(host -t TXT "$rev.origin.asn.cymru.com" | awk -F'"' 'NR==1{print $2}' | sed 's/\ *|\ */|/g')
+			# rev=$(echo "$1" | cut -d '/' -f 1 | awk -F'.' '{printf $4 "." $3 "." $2 "." $1}')
+			# output=$(host -t TXT "$rev.origin.asn.cymru.com" | awk -F'"' 'NR==1{print $2}' | sed 's/\ *|\ */|/g')
+
+			# TEMP switch to whois query (Cymrus' nameserver is wrongly returning NXDOMAIN for some legit queries as of 2024-02-19)
+			output=$(whois -h whois.cymru.com " -f -p -u $1" | sed 's/\ *|\ */|/g')
 			found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}' | cut -d ' ' -f 1) # final cut gets first origin AS only if cymru has multiple
 			if [ -n "$found_asn" ]; then
 				found_asname=$(host -t TXT "AS$found_asn.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
@@ -2543,11 +2560,19 @@ PwhoisListPrefixesForOrg(){
 	org="$1"
 	full_org_search_data=$(whois -h whois.pwhois.org "registry org-name=$org")
 	orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+	echo -e "\nDBG orgids:\n$orgids" >&2
+	# assemble bulk pWhois query
+	pwhois_bulk_query="begin\n"
 	for orgid in $orgids; do
-		for prefix in $(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>"); do
-			iprange=$(echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ')
-			IpcalcDeaggregate "$iprange"
-		done
+		pwhois_bulk_query+="netblock org-id=${orgid}\n"
+	done
+	pwhois_bulk_query+="end"
+	echo -e "\nDBG: pWhois query: $pwhois_bulk_query" >&2
+	# query pWhois
+	for prefix in $(ncat whois.pwhois.org 43 <<<"$pwhois_bulk_query" | grep -E "^\*>"); do
+		iprange=$(echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ')
+		IpcalcDeaggregate "$iprange"
+		echo "DBG: FOUND ADDITIONAL IPRANGE $iprange" >&2
 	done
 }
 
