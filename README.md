@@ -156,7 +156,7 @@ Requires Bash v4.2+. Tested on:
 
 * *Autonomous system number lookup with AS ranking, operational region, BGP stats, peering and prefix informations*
 
-![asnlookup](https://github.com/nitefood/asn/assets/24555810/4507085a-facf-4383-a9d4-573161454bec)
+![asnlookup](https://github.com/nitefood/asn/assets/24555810/758890d8-7103-41f3-978e-ba5799213af6)
 
 * *Hostname/URL lookup*
 
@@ -252,13 +252,21 @@ To run the script without installing it locally, you have the following options:
 
 ## Installation
 
-### Prerequisite packages
-
 This script requires **BASH v4.2** or later. You can check your version by running from your shell:
 
-`bash -c 'echo $BASH_VERSION'`
+```
+bash -c 'echo $BASH_VERSION'
+```
 
-Some additional packages are also required for full functionality:
+After installation, you can use the script by running the `asn` command.
+
+### Method 1: Install prerequisites + manual download
+
+> *Note: this method is **recommended** as it will always get you the **latest version** of the script.*
+
+<details><summary><b>STEP 1. Install prerequisite packages</b></summary><p>
+
+Some packages are required for full functionality:
 
 * **Debian 10 / Ubuntu 20.04 (or newer):**
 
@@ -304,18 +312,6 @@ Some additional packages are also required for full functionality:
   dnf -y install curl whois bind-utils mtr jq nmap nmap-ncat ipcalc aha grepcidr
   ```
 
-* **Manjaro/Arch Linux:** *(thanks [Worty](https://github.com/worty))*
-
-  ```
-  yay -S asn-git
-  ```
-
-* **Alpine Linux 3.18 (or newer)** *(thanks [Francesco Colista](https://github.com/fcolista))*
-
-  ```
-  apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community asn
-  ```
-
 * **openSUSE Leap 15.5 (or newer), openSUSE Tumbleweed**
 
   ```
@@ -328,6 +324,51 @@ Some additional packages are also required for full functionality:
   env ASSUME_ALWAYS_YES=YES pkg install bash coreutils curl whois mtr jq ipcalc grepcidr nmap aha
   ```
 
+* **Windows**:
+
+  * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
+    Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
+    Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
+
+    > *Note for Windows users: Check [this](https://devblogs.microsoft.com/commandline/systemd-support-is-now-available-in-wsl/) page for details on how to activate **systemd** if you plan to install the [asn service](#installing-the-asn-server-as-a-system-service).*
+
+  * **using [Cygwin](https://cygwin.com/index.html):**
+    Most of the prerequisite packages listed above for *Debian 10 / Ubuntu 20.04 (or newer)* are obtainable directly with Cygwin's own Setup wizard (or through scripts like *apt-cyg*). You will still have to manually compile (or find a suitable third-party precompiled binary) the *mtr*, *grepcidr* and *aha* tools. Instructions on how to do so can be found directly on the respective projects homepages.
+</p></details>
+
+<details><summary><b>STEP 2. Script download and installation</b></summary><p>
+
+Afterwards, to install the **asn** script from your shell to **/usr/bin**:
+
+`curl "https://raw.githubusercontent.com/nitefood/asn/master/asn" > /usr/bin/asn && chmod 0755 /usr/bin/asn`
+
+</p></details>
+
+### Method 2: Installing a packaged version of the script
+
+> *Note: packages may not reflect the latest version, check [Repology](https://repology.org/project/asn/versions) first.*
+
+Packaged versions of the tool are available for the following distributions:
+
+<details><summary><b>Distribution list</b></summary><p>
+
+* **Debian Sid / Ubuntu 24.04 (or newer):** *(thanks [Marcos Rodrigues de Carvalo](https://github.com/odaydebian))*
+
+  ```
+  sudo apt update && sudo apt install asn
+  ```
+* **Manjaro / Arch Linux:** *(thanks [Worty](https://github.com/worty))*
+
+  ```
+  yay -S asn-git
+  ```
+
+* **Alpine Linux 3.18 (or newer)** *(thanks [Francesco Colista](https://github.com/fcolista))*
+
+  ```
+  apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community asn
+  ```
+
 * **NixOS** *(thanks [devhell](https://github.com/devhell))*
 
   * Package [here](https://github.com/NixOS/nixpkgs/tree/master/pkgs/applications/networking/asn)
@@ -338,32 +379,15 @@ Some additional packages are also required for full functionality:
   brew install asn
   ```
 
-  *Notes for MacOS users:*
+  >*Note for MacOS users:*
+  >
+  > *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
 
-  * *If `mtr` still can't be found after running the command above, [this](https://docs.brew.sh/FAQ#my-mac-apps-dont-find-usrlocalbin-utilities) may help to fix it.*
-  * *Homebrew has a [policy](https://github.com/Homebrew/homebrew-core/issues/35085#issuecomment-447184214) not to install any binary with the **setuid** bit, and mtr (or actually, the mtr-packet helper binary that comes with it) requires to elevate to root to perform traces (good explanations for this can be found [here](https://github.com/traviscross/mtr/issues/204#issuecomment-723961118) and [here](https://github.com/traviscross/mtr/blob/master/SECURITY)). If mtr (and therefore `asn`) traces are not working on your system, you should either run `asn` as root using **sudo**, or set the proper SUID permission bit on the mtr (or better, on the mtr-packet) binary.*
+</p></details>
 
-* **Windows**:
+### *(Optional)* Installing the *asn server* as a system service
 
-  * **using [WSL2](https://docs.microsoft.com/en-us/windows/wsl/about) (recommended):**
-    Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
-    Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
-    *Note for WSL2 users:*
-    * ~~*systemd is not currently available in WSL2, so you won't be able to run the **asn server** in daemon mode as described below (if you want server mode you'll have to launch it manually using `asn -l`). An alternative could be to run it as a background process (optionally also using `nohup`), or using Windows' own task scheduler to start it at boot.*~~ **UPDATE: systemd is now supported on WSL2. Check [this](https://devblogs.microsoft.com/commandline/systemd-support-is-now-available-in-wsl/) page for details on how to activate it.**
-  * **using [Cygwin](https://cygwin.com/index.html):**
-    Most of the prerequisite packages listed above for *Debian 10 / Ubuntu 20.04 (or newer)* are obtainable directly with Cygwin's own Setup wizard (or through scripts like *apt-cyg*). You will still have to manually compile (or find a suitable third-party precompiled binary) the *mtr*, *grepcidr* and *aha* tools. Instructions on how to do so can be found directly on the respective projects homepages.
-
-### Script download and installation
-
-Afterwards, to install the **asn** script from your shell to **/usr/bin**:
-
-`curl "https://raw.githubusercontent.com/nitefood/asn/master/asn" > /usr/bin/asn && chmod 0755 /usr/bin/asn`
-
-You can then use the script by running `asn`.
-
-### Installing the *asn server* as a system service
-
-*Note: this step is optional, and these instructions are only for systemd-based Linux systems (most current major distributions).*
+>*Note: this step is optional, and these instructions are only for **systemd**-based Linux systems (most current major distributions).*
 
 To control the **asn server** with utilities like *systemctl* and *service*, and to enable it to automatically start at boot, follow these steps:
 
@@ -447,20 +471,20 @@ where `TARGET` can be one of the following:
 
   * enables lookup and path tracing for targets **(this is the default behavior)**
 
-    *.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)*
+    >*.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)*
 
 * `[-d]`
 
   * enables detailed trace mode (more info below)
 
-    *.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)*
+    >*.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)*
 
 * `[-n]`
 
   * disables path tracing and only outputs lookup info _(for IP targets)_
   * disables additional INETNUM/origin lookups _(for AS targets)_
 
-    *.asnrc option equivalent: `MTR_TRACING=false` (default: `true`), `ADDITIONAL_INETNUM_LOOKUP=false` (default: `true`)*
+    >*.asnrc option equivalent: `MTR_TRACING=false` (default: `true`), `ADDITIONAL_INETNUM_LOOKUP=false` (default: `true`)*
 
 * `[-s]`
 
@@ -495,25 +519,25 @@ where `TARGET` can be one of the following:
 
   * enables compact JSON output. Useful for feeding the output into other tools (like `jq` or other parsers), or storing the lookup results.
 
-    *.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)*
+    >*.asnrc option equivalent: `JSON_OUTPUT=true` (default: `false`)*
 
 * `-J`
 
   * enables pretty-printed JSON output.
 
-    *.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)*
+    >*.asnrc option equivalent: `JSON_PRETTY=true` (default: `false`)*
 
 * `-m`
 
   * enables monochrome mode (disables all colors).
 
-    *.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)*
+    >*.asnrc option equivalent: `MONOCHROME_MODE=true` (default: `false`)*
 
 * `-v`
 
   * Enable debug messages (will display all URLs being queried to help identify external API slowdowns)
 
-    *.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
+    >*.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
 
 * `-h`
 
@@ -525,13 +549,13 @@ where `TARGET` can be one of the following:
 
   * IP address (v4/v6) to bind the listening server to (e.g. `asn -l 0.0.0.0`)
 
-    *.asnrc option equivalent: `DEFAULT_SERVER_BINDADDR_v4="<IPv4address>"` (default: `"127.0.0.1"`) and `DEFAULT_SERVER_BINDADDR_v6="<IPv6address>"` (default: `"::1"`)*
+    >*.asnrc option equivalent: `DEFAULT_SERVER_BINDADDR_v4="<IPv4address>"` (default: `"127.0.0.1"`) and `DEFAULT_SERVER_BINDADDR_v6="<IPv6address>"` (default: `"::1"`)*
 
 * `BIND_PORT`
 
   * TCP Port to bind the listening server to (e.g. `asn -l 12345`)
 
-    *.asnrc option equivalent: `DEFAULT_SERVER_BINDPORT="<port>"` (default: `"49200"`)*
+    >*.asnrc option equivalent: `DEFAULT_SERVER_BINDPORT="<port>"` (default: `"49200"`)*
 
 * `BIND_ADDRESS BIND_PORT`
 
@@ -541,7 +565,7 @@ where `TARGET` can be one of the following:
 
   * Enable verbose output and debug messages in server mode
 
-    *.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
+    >*.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
 
 * `--allow host[,host,...]`
 
@@ -811,7 +835,7 @@ Target types can be mixed and queried in a single run. Targets can be piped to t
 
 Shodan scan results can be output in JSON mode by passing the `-j` or `-J` options.
 
-*Note: the Nmap tool is needed to use this feature, but note that **no packets whatsoever** are sent to the targets. Nmap is only required to break down CIDR blocks into single IPs (as a calculator tool).*
+>*Note: the Nmap tool is needed to use this feature, but note that **no packets whatsoever** are sent to the targets. Nmap is only required to break down CIDR blocks into single IPs (as a calculator tool).*
 
 ## Mapping the IP(v4/v6) address space of specific countries
 
@@ -856,10 +880,15 @@ last | asn -g
 
 The tool can be instructed to output lookup results in JSON mode by using the `-j` (compact JSON) or `-J` (pretty-printed JSON) command line options:
 
-*Example 1 - IPv4 lookup:*
+<details><summary><i>Example 1 - IPv4 lookup</i></summary><p>
 
-```jsonp
-root@KRUSTY:~# asn -J 8.8.8.8
+##### Command:
+
+`asn -J 8.8.8.8`
+
+##### Output:
+
+```json
 {
   "target": "8.8.8.8",
   "target_type": "ipv4",
@@ -920,89 +949,97 @@ root@KRUSTY:~# asn -J 8.8.8.8
   ]
 }
 ```
+</p></details>
+<details><summary><i>Example 2 - ASN lookup</i></summary><p>
 
-*Example 2 - ASN lookup:*
+##### Command:
 
-```jsonp
-root@KRUSTY:~# asn -J 5505
+`asn -J 5505`
+
+##### Output:
+
+```json
 {
   "target": "5505",
   "target_type": "asn",
   "result": "ok",
   "reason": "success",
-  "version": "0.72.1",
-  "request_time": "2022-03-28T21:59:51",
-  "request_duration": 4,
+  "version": "0.76.0",
+  "request_time": "2024-02-22T00:11:41",
+  "request_duration": 10,
   "result_count": 1,
   "results": [
     {
       "asn": "5505",
       "asname": "VADAVO, ES",
-      "org": "VDV-VLC-RED05 VDV-VLC-RED05 - CLIENTES DATACENTER",
+      "asrank": 3779,
+      "org": "VDV-VLC-RED06 VDV-VLC-RED06 - CLIENTES TELECOM",
       "holder": "VADAVO SOLUCIONES SL",
       "abuse_contacts": [
         "abuse@vadavo.com"
       ],
       "registration_date": "2016-12-13T08:28:07",
       "ixp_presence": [
-        "NIXVAL-ix: Peering LAN1",
         "DE-CIX Madrid: DE-CIX Madrid Peering LAN",
-        "ESPANIX Madrid Lower LAN",
-        "IXPlay Global Peers"
+        "ESPANIX Madrid Lower LAN"
       ],
       "prefix_count_v4": 8,
       "prefix_count_v6": 1,
-      "bgp_peer_count": 32,
+      "bgp_peer_count": 36,
       "bgp_peers": {
         "upstream": [
           "1299",
           "6939",
-          "3262",
-          "34549",
-          "13030",
-          "25369",
-          "33891",
-          "35280",
+          "59432",
+          "174",
           "25091",
-          "41327",
-          "1239",
-          "34927",
-          "60501",
-          "4455",
-          "24482",
-          "13786",
+          "33891",
           "8218",
+          "41327",
+          "48348",
+          "35280",
+          "35625",
+          "4455",
+          "13030",
+          "202766",
+          "3303",
+          "6057",
+          "137409",
           "15830"
         ],
         "downstream": [
-          "200509",
           "48952",
-          "207495",
           "208248",
-          "205093",
-          "202054",
-          "205086"
+          "205086",
+          "202054"
         ],
         "uncertain": [
-          "61573",
-          "51185",
-          "271253",
-          "264479",
-          "34854",
+          "47787",
+          "39384",
+          "37721",
+          "36236",
           "25160",
-          "37721"
+          "24482",
+          "51185",
+          "49544",
+          "41047",
+          "29680",
+          "29049",
+          "212483",
+          "14840",
+          "34927"
         ]
       },
       "announced_prefixes": {
         "v4": [
-          "185.123.206.0/24",
-          "185.210.227.0/24",
-          "185.123.205.0/24",
           "185.123.204.0/24",
           "185.123.207.0/24",
-          "185.210.226.0/24",
           "188.130.247.0/24",
-          "185.210.225.0/24"
+          "185.210.226.0/24",
+          "185.210.227.0/24",
+          "185.123.205.0/24",
+          "185.210.225.0/24",
+          "185.123.206.0/24"
         ],
         "v6": [
           "2a03:9320::/32"
@@ -1021,7 +1058,14 @@ root@KRUSTY:~# asn -J 5505
         ]
       },
       "inetnums_announced_by_other_as": {
-        "v4": [],
+        "v4": [
+          {
+            "prefix": "188.130.254.0/24",
+            "origin_asn": "",
+            "origin_org": "",
+            "is_announced": false
+          }
+        ],
         "v6": []
       }
     }
@@ -1029,51 +1073,87 @@ root@KRUSTY:~# asn -J 5505
 }
 ```
 
-*Example 3 - enumerating abuse contacts for every IP to which a hostname resolves:*
+</p></details>
+<details><summary><i>Example 3 - enumerating abuse contacts for every IP to which a hostname resolves</i></summary><p>
 
-```shell
-root@KRUSTY:~# asn -j www.google.com | jq '[.results[].abuse_contacts[]] | unique[]'
+##### Command:
+
+`asn -j www.google.com | jq '[.results[].abuse_contacts[]] | unique[]'`
+
+##### Output:
+
+```
 "network-abuse@google.com"
 "ripe-contact@google.com"
 ```
 
-*Example 4 - enumerating known vulnerabilities for a target:*
+</p></details>
+<details><summary><i>Example 4 - enumerating known vulnerabilities for a target</i></summary><p>
 
-```shell
-root@KRUSTY:~# asn -j 45.67.34.100 | jq '.results[].fingerprinting.vulns[]'
+##### Command:
+
+`asn -j 45.67.34.100 | jq '.results[].fingerprinting.vulns[]'`
+
+##### Output:
+```
 "CVE-2017-15906"
 "CVE-2018-15919"
 ```
 
-*Example 5 - upstream/transit AS lookup for a given IP:*
+</p></details>
+<details><summary><i>Example 5 - upstream/transit AS lookup for a given IP</i></summary><p>
 
-```shell
-root@KRUSTY:~#: asn -Ju 72.17.119.201
+##### Command:
+
+`asn -Ju 72.17.119.201`
+
+##### Output:
+
+```json
 {
   "target": "72.17.119.201",
   "target_type": "ipv4",
   "result": "ok",
   "reason": "success",
-  "version": "0.74",
-  "request_time": "2023-05-11T23:46:12",
-  "request_duration": 1,
+  "version": "0.76.0",
+  "request_time": "2024-02-22T00:15:25",
+  "request_duration": 3,
   "result_count": 1,
   "results": [
     {
+      "prefix": "72.17.0.0/17",
       "origin_as": "33363",
       "origin_as_name": "BHN-33363, US",
+      "origin_as_rank": 435,
+      "upstreams_count": 1,
       "upstreams": [
         {
           "asn": "7843",
           "asname": "TWC-7843-BB, US",
-          "probability": 100
+          "probability": 100,
+          "is_tier1": false
         }
       ],
-      "multiple_transits": false
+      "multiple_upstreams": false
     }
   ]
 }
 ```
+
+</p></details>
+<details><summary><i>Example 6 - enumerating unannounced address blocks for a given AS</i></summary><p>
+
+##### Command:
+
+`asn -j AS5505 | jq -r '.results[].inetnums_announced_by_other_as.v4[] | select(.is_announced==false) | .prefix'`
+
+##### Output:
+
+```
+188.130.254.0/24
+```
+
+</p></details>
 
 #### Remotely (API endpoint)
 
@@ -1124,6 +1204,8 @@ root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_jsonp&10.0.0.1"
 An initial version of this script was featured in the **Security Trails** blog post "[*ASN Lookup Tools, Strategies and Techniques*](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
 
 Thanks [Massimo Candela](https://github.com/massimocandela/) for your support and excellent work on [IPmap](https://ipmap.ripe.net/), [BGPlay](https://github.com/massimocandela/BGPlay) and [TraceMON](https://github.com/RIPE-NCC/tracemon)!
+
+Thanks to all the awesome contributors for their code, ideas, suggestions, packages and bug reports!
 
 ## Feedback and contributing
 

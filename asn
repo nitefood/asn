@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.75.3"
+ASN_VERSION="0.76.0"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -164,7 +164,6 @@ QueryRipestat(){
 
 	StatusbarMessage "Retrieving prefix allocations and announcements for AS$1 ($found_asname)"
 	ipv4_inetnums=""
-	ipv4_other_inetnums=""
 	ipv6_inetnums=""
 	json_ipv4_other_inetnums=""
 	json_ipv6_other_inetnums=""
@@ -208,6 +207,7 @@ QueryRipestat(){
 	done
 
 	prefixcounter=0
+	lookedup_parents_cache=""
 	for prefix in $ipv4_ripe_prefixes; do
 		((prefixcounter++))
 		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
@@ -234,13 +234,24 @@ QueryRipestat(){
 			parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
 			# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
 			# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
-			LookupASNAndRouteFromIP "$parent_inetnum"
-			if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
-				# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
-				ipv4_inetnums+="$parent_inetnum\n"
+			if ! grep -q "$parent_inetnum" <<<"$lookedup_parents_cache"; then
+				# this parent inetnum hasn't been looked up yet
+				lookedup_parents_cache+="$parent_inetnum\n"
+				LookupASNAndRouteFromIP "$parent_inetnum"
+				if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
+					# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
+					ipv4_inetnums+="$parent_inetnum\n"
+				else
+					# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
+					ipv4_inetnums+="$prefix\n"
+				fi
 			else
-				# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
-				ipv4_inetnums+="$prefix\n"
+				# this parent inetnum has already been looked up
+				# if it's not present in the list of ipv4_inetnums, it means it's part of a larger supernet by some other AS.
+				# therefore we only add the announced (smaller) prefix to the list
+				if ! grep -q "$parent_inetnum" <<<"$ipv4_inetnums"; then
+					ipv4_inetnums+="$prefix\n"
+				fi
 			fi
 		else
 			ipv4_inetnums+="$prefix\n"
@@ -253,50 +264,110 @@ QueryRipestat(){
 
 	if [ "$ADDITIONAL_INETNUM_LOOKUP" = true ]; then
 		# fetch further inetnums allocated to this AS from pWhois
-		StatusbarMessage "Identifying additional INETNUMs allocated to AS$1 (Hint: use -n to skip)"
+		StatusbarMessage "Identifying additional INETNUMs (not announced or announced by other AS) allocated to AS$1"
 		pwhois_prefixes=$(PwhoisListPrefixesForOrg "$found_org")
 		pwhois_unique_prefixes=$(comm -13 <(echo -e "$ipv4_ripe_prefixes" | sort) <(echo -e "$pwhois_prefixes" | sort))
-		pwhois_unique_prefixes_count=$(wc -l <<<"$pwhois_unique_prefixes")
-		prefixcounter=0
-		for prefix in $pwhois_unique_prefixes; do
-			# found a new prefix in pWhois, check if it's announced by a different AS
-			# (e.g. target AS has delegated announcements for this prefix to another AS)
-			((prefixcounter++))
-			StatusbarMessage "Identifying origin AS for additional IPv4 prefix $prefixcounter/$pwhois_unique_prefixes_count"
-			LookupASNAndRouteFromIP "$prefix"
-			prefix_originator_asn="$found_asn"
-			if [ -z "$prefix_originator_asn" ] || [ "$prefix_originator_asn" = "$1" ]; then
-				# prefix originator is same as target AS, or prefix not announced
-				# add this prefix to the allocated IP resources for this AS
-				ipv4_inetnums+="$prefix\n"
-			else
-				# this prefix is allocated to target AS, but is being announced by a different AS
-				prefix_originator_org=$(docurl -m5 -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
-					jq -r 'select (.data.holder != null) | .data.holder' | \
-					awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
-				)
-				if [ "$JSON_OUTPUT" = true ]; then
-					[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
-					json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"$prefix_originator_org\"}"
+		pwhois_unique_prefixes=$(comm -13 <(echo -e "$lookedup_parents_cache" | sort) <(echo -e "$pwhois_unique_prefixes" | sort))
+		if [ -n "$pwhois_unique_prefixes" ]; then
+			pwhois_unique_prefixes_count=$(wc -l <<<"$pwhois_unique_prefixes")
+			StatusbarMessage "Identifying origin AS for $pwhois_unique_prefixes_count additional IPv4 prefix(es)"
+			# NEW WAY (bulk query to Team Cymru whois server)
+			# map the unique prefixes pWhois reported to an array
+			mapfile -t pwhois_unique_prefixes_array < <(echo -e "$pwhois_unique_prefixes")
+			# assemble a bulk Team Cymru whois lookup query for the new prefixes found in pWhois.
+			# we'll check if they're announced by the target AS, by different one, or by no one at all
+			# (e.g. target AS has delegated announcements for this prefix to another AS, or is not announcing it)
+			# and compile a list to integrate into the allocated IP resources for this AS
+			teamcymru_bulk_query="begin\n"
+			for prefix in $pwhois_unique_prefixes; do
+				teamcymru_bulk_query+="$prefix\n"
+			done
+			teamcymru_bulk_query+="end"
+			prefixcounter=0
+			for single_prefix_data in $(echo -e "$teamcymru_bulk_query" | ncat --no-shutdown whois.cymru.com 43 | grep "|" | sed 's/\ *|\ */|/g'); do
+				prefix="${pwhois_unique_prefixes_array[$prefixcounter]}"
+				prefix_originator_asn=$(echo "$single_prefix_data" | cut -d '|' -f 1)
+				if [ "$prefix_originator_asn" = "$1" ]; then
+					# prefix originator is same as target AS, add this prefix to the allocated IP resources for this AS
+					ipv4_inetnums+="$prefix\n"
+				elif [ "$prefix_originator_asn" = "NA" ]; then
+					# prefix not announced, add this prefix to the allocated IP resources for this AS with a "not announced" remark
+					if [ "$JSON_OUTPUT" = true ]; then
+						[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
+						json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"\",\"origin_org\":\"\", \"is_announced\":false}"
+					elif [ "$IS_ASN_CHILD" = true ]; then
+						# skip colors, they will be added along with hyperlinks later
+						ipv4_inetnums+=$(printf "%-18s → not announced" "$prefix")
+						ipv4_inetnums+="\n"
+					else
+						ipv4_inetnums+=$(printf "${dim}%-18s → ${red}not announced${default}${green}" "$prefix")
+						ipv4_inetnums+="\n"
+					fi
 				else
-					ipv4_inetnums+="$prefix (announced by AS${prefix_originator_asn} - ${prefix_originator_org})\n"
+					# prefix is announced by a different AS, add this prefix to the allocated IP resources for this AS
+					prefix_originator_org=$(echo "$single_prefix_data" | cut -d '|' -f 3)
+					if [ "$JSON_OUTPUT" = true ]; then
+						[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
+						json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"$prefix_originator_org\", \"is_announced\":true}"
+					elif [ "$IS_ASN_CHILD" = true ]; then
+						# skip colors, they will be added along with hyperlinks later
+						ipv4_inetnums+=$(printf "%-18s → announced by AS%s %s" "$prefix" "${prefix_originator_asn}" "${prefix_originator_org}")
+						ipv4_inetnums+="\n"
+					else
+						ipv4_inetnums+=$(printf "%-18s ${dim}→ announced by ${default}${red}AS%s ${default}${green}%s" "$prefix" "${prefix_originator_asn}" "${prefix_originator_org}")
+						ipv4_inetnums+="\n"
+					fi
 				fi
-			fi
-		done
+				((prefixcounter++))
+			done
+			# OLD WAY (one lookup per prefix)
+			# for prefix in $pwhois_unique_prefixes; do
+			# 	# found a new prefix in pWhois, check if it's announced by a different AS
+			# 	# (e.g. target AS has delegated announcements for this prefix to another AS)
+			# 	((prefixcounter++))
+			# 	StatusbarMessage "Identifying origin AS for additional IPv4 prefix $prefixcounter/$pwhois_unique_prefixes_count"
+			# 	LookupASNAndRouteFromIP "$prefix"
+			# 	prefix_originator_asn="$found_asn"
+			# 	if [ -z "$prefix_originator_asn" ] || [ "$prefix_originator_asn" = "$1" ]; then
+			# 		# prefix originator is same as target AS, or prefix not announced
+			# 		# add this prefix to the allocated IP resources for this AS
+			# 		ipv4_inetnums+="$prefix\n"
+			# 	else
+			# 		# this prefix is allocated to target AS, but is being announced by a different AS
+			# 		prefix_originator_org=$(docurl -m5 -s "https://stat.ripe.net/data/as-overview/data.json?resource=AS${found_asn}&sourceapp=nitefood-asn" | \
+			# 			jq -r 'select (.data.holder != null) | .data.holder' | \
+			# 			awk -F' - ' '{ if ( $2 ) {print $2} else {print} }' \
+			# 		)
+			# 		if [ "$JSON_OUTPUT" = true ]; then
+			# 			[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
+			# 			json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"$prefix_originator_org\"}"
+			# 		else
+			# 			ipv4_inetnums+="$prefix (announced by AS${prefix_originator_asn} - ${prefix_originator_org})\n"
+			# 		fi
+			# 	fi
+			# done
+		fi
 	fi
 
 	if [ -n "$ipv4_inetnums" ]; then
-		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -u)
+		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -iu)
 		if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
+			# HTML output
 			html=""
 			for inetnum in $ipv4_inetnums; do
 				if grep -q "announced by" <<<"$inetnum"; then
-					# handle special case "<prefix> (announced by AS<asn>)"
-					actual_inetnum=$(cut -d ' ' -f 1 <<<"$inetnum")
-					originator=$(cut -d ' ' -f 4 <<<"$inetnum")
-					rest_of_line=$(cut -d ' ' -f 5- <<<"$inetnum")
-					html+="<a href=\"/asn_lookup&$actual_inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$actual_inetnum</a> (announced by "
-					html+="<a href=\"/asn_lookup&$originator\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$originator</a> ${rest_of_line}\n"
+					# handle special case "<prefix> → announced by AS<asn>"
+					actual_inetnum=${inetnum:0:18}
+					originator=$(cut -d ' ' -f 7 <<<"$inetnum")
+					rest_of_line=$(cut -d ' ' -f 8- <<<"$inetnum")
+					html+="<a href=\"/asn_lookup&$actual_inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$actual_inetnum</a>"
+					html+="<span style=\"font-style: italic; color: $htmldarkgreen\"> → announced by </span>"
+					html+="<a href=\"/asn_lookup&$originator\" class=\"hidden_underline\" style=\"color: $htmlred;\">$originator</a> ${rest_of_line}\n"
+				elif grep -q "not announced" <<<"$inetnum"; then
+					# handle special case "<prefix> → not announced"
+					actual_inetnum=${inetnum:0:18}
+					html+="<a href=\"/asn_lookup&$actual_inetnum\" class=\"hidden_underline\" style=\"font-style: italic; color: $htmldarkgreen;\">$actual_inetnum</a>"
+					html+="<span style=\"font-style: italic; color: $htmldarkred\"> → not announced</span>\n"
 				else
 					html+="<a href=\"/asn_lookup&$inetnum\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$inetnum</a>\n"
 				fi
@@ -313,9 +384,6 @@ QueryRipestat(){
 			done
 			ipv6_inetnums="$html"
 		fi
-	fi
-	if [ -n "$ipv4_other_inetnums" ]; then
-		ipv4_other_inetnums=$(echo -e "$ipv4_other_inetnums" | sort -u)
 	fi
 	if [ "$JSON_OUTPUT" = true ]; then
 		json_ipv4_aggregated_inetnums=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$ipv4_inetnums")
@@ -631,17 +699,29 @@ LookupASNAndRouteFromIP(){
 				GetCAIDARank "$found_asn"
 			fi
 		else
-			# DNS query (faster) for IPv4 addresses
-			rev=$(echo "$1" | awk -F'.' '{printf $4 "." $3 "." $2 "." $1}')
-			output=$(host -t TXT "$rev.origin.asn.cymru.com" | awk -F'"' 'NR==1{print $2}' | sed 's/\ *|\ */|/g')
-			found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}' | cut -d ' ' -f 1) # final cut gets first origin AS only if cymru has multiple
-			if [ -n "$found_asn" ]; then
-				found_asname=$(host -t TXT "AS$found_asn.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
-				found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $2}')
+			# Query RIPEStat for IPv4 addresses
+			output=$(docurl -m5 -s "https://stat.ripe.net/data/prefix-overview/data.json?resource=$1&sourceapp=nitefood-asn")
+			if jq -r '.data.announced' <<<"$output" | grep -q "true"; then
+				found_asn=$(jq -r '.data.asns[0].asn' <<<"$output")
+				found_asname=$(jq -r '.data.asns[0].holder' <<<"$output")
+				# look up the country this ASN is located in
+				country=$(docurl -m5 -s "https://stat.ripe.net/data/rir-stats-country/data.json?resource=AS${found_asn}" | jq -r '.data.located_resources[0].location')
+				[[ "$country" != "null" ]] && found_asname="${found_asname}, ${country}"
+				found_route=$(jq -r '.data.resource' <<<"$output")
 				UNANNOUNCED_PREFIX=false
 			else
-				# Team Cymru has no data for this IPv4. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
-				UNANNOUNCED_PREFIX=true
+				# RIPEStat has no data for this IPv4. Fallback to Team Cymru DNS query (faster than whois)
+				rev=$(echo "$1" | cut -d '/' -f 1 | awk -F'.' '{printf $4 "." $3 "." $2 "." $1}')
+				output=$(host -t TXT "$rev.origin.asn.cymru.com" | awk -F'"' 'NR==1{print $2}' | sed 's/\ *|\ */|/g')
+				found_asn=$(echo "$output" | awk -F'[|]' 'NR==1{print $1}' | cut -d ' ' -f 1) # final cut gets first origin AS only if cymru has multiple
+				if [ -n "$found_asn" ]; then
+					found_asname=$(host -t TXT "AS$found_asn.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
+					found_route=$(echo "$output" | awk -F'[|]' 'NR==1{print $2}')
+					UNANNOUNCED_PREFIX=false
+				else
+				# Team Cymru has no data for this IPv4 either. Inform WhoisIP() that we will have to fall back to a generic whois lookup.
+					UNANNOUNCED_PREFIX=true
+				fi
 			fi
 		fi
 	else
@@ -689,7 +769,8 @@ PrintUsage(){
 			"\n  $script_name [${red}-v${default}] ${red}-l${default} [${red}SERVER OPTIONS${default}]" \
 			"\n\nOPTIONS:" \
 			"\n\n  ${green}-t    (enable trace)\n\t${default}Enable AS path trace to the ${blue}TARGET${default} (this is the default behavior)" \
-			"\n\n  ${green}-n    (no trace)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
+			"\n\n  ${green}-n    (no trace|no additional INETNUM lookups)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default} (for IP targets) or" \
+			"\n\tDisable additional (unannounced / announced by other AS) INETNUM lookups for the ${blue}TARGET${default} (for AS targets)" \
 			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
 			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
@@ -2543,11 +2624,16 @@ PwhoisListPrefixesForOrg(){
 	org="$1"
 	full_org_search_data=$(whois -h whois.pwhois.org "registry org-name=$org")
 	orgids=$(echo -e "$full_org_search_data" | grep -i -E -B1 "Org-Name: $org$" | grep "Org-ID" | cut -d ':' -f 2- | sed 's/^ //g')
+	# assemble bulk pWhois query
+	pwhois_bulk_query="begin\n"
 	for orgid in $orgids; do
-		for prefix in $(whois -h whois.pwhois.org "netblock org-id=${orgid}" | grep -E "^\*>"); do
-			iprange=$(echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ')
-			IpcalcDeaggregate "$iprange"
-		done
+		pwhois_bulk_query+="netblock org-id=${orgid}\n"
+	done
+	pwhois_bulk_query+="end"
+	# query pWhois
+	for prefix in $(echo -e "$pwhois_bulk_query" | ncat whois.pwhois.org 43 | grep -E "^\*>"); do
+		iprange=$(echo -e "$prefix" | cut -d '>' -f 2 | cut -d '|' -f 1 | tr -d ' ')
+		IpcalcDeaggregate "$iprange"
 	done
 }
 
@@ -3702,9 +3788,11 @@ htmlwhite="#cccccc"
 htmlblack="#1e1e1e"
 htmllightgray="#d5d5d5"
 htmlred="#ff5f5f"
+htmldarkred="#b74d4d"
 htmlblue="#00afd7"
 htmlyellow="#afaf00"
 htmlgreen="#00af5f"
+htmldarkgreen="#058505"
 htmlmagenta="#ff5fff"
 
 [[ "$TERM" = "dumb" ]] && IS_HEADLESS=true || IS_HEADLESS=false
