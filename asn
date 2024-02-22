@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.75.4"
+ASN_VERSION="0.76.0"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -294,7 +294,7 @@ QueryRipestat(){
 					# prefix not announced, add this prefix to the allocated IP resources for this AS with a "not announced" remark
 					if [ "$JSON_OUTPUT" = true ]; then
 						[[ -n "$json_ipv4_other_inetnums" ]] && json_ipv4_other_inetnums+=","
-						json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"$prefix_originator_asn\",\"origin_org\":\"\", \"is_announced\":false}"
+						json_ipv4_other_inetnums+="{\"prefix\":\"$prefix\",\"origin_asn\":\"\",\"origin_org\":\"\", \"is_announced\":false}"
 					elif [ "$IS_ASN_CHILD" = true ]; then
 						# skip colors, they will be added along with hyperlinks later
 						ipv4_inetnums+=$(printf "%-18s → not announced" "$prefix")
@@ -769,7 +769,8 @@ PrintUsage(){
 			"\n  $script_name [${red}-v${default}] ${red}-l${default} [${red}SERVER OPTIONS${default}]" \
 			"\n\nOPTIONS:" \
 			"\n\n  ${green}-t    (enable trace)\n\t${default}Enable AS path trace to the ${blue}TARGET${default} (this is the default behavior)" \
-			"\n\n  ${green}-n    (no trace)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default}" \
+			"\n\n  ${green}-n    (no trace|no additional INETNUM lookups)\n\t${default}Disable tracing the AS path to the ${blue}TARGET${default} (for IP targets) or" \
+			"\n\tDisable additional (unannounced / announced by other AS) INETNUM lookups for the ${blue}TARGET${default} (for AS targets)" \
 			"\n\n  ${green}-d    (detailed)\n\t${default}Output detailed hop info during the AS path trace to the ${blue}TARGET${default}" \
 			"\n\tThis option also enables RPKI validation/BGP hijacking detection for every hop" \
 			"\n\n  ${green}-a    (ASN Suggest)\n\t${default}Lookup AS names and numbers matching ${blue}TARGET${default}" \
