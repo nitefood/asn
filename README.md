@@ -11,6 +11,7 @@
 
 [![Debian](https://img.shields.io/badge/Debian-D70A53?style=for-the-badge&logo=debian&logoColor=white)](#installation)
 [![Ubuntu](https://img.shields.io/badge/Ubuntu-E95420?style=for-the-badge&logo=ubuntu&logoColor=white)](#installation)
+[![Kali](https://img.shields.io/badge/Kali-268BEE?style=for-the-badge&logo=kalilinux&logoColor=white)](#installation)
 [![Cent OS](https://img.shields.io/badge/cent%20os-002260?style=for-the-badge&logo=centos&logoColor=F0F0F0)](#installation)
 [![Red Hat](https://img.shields.io/badge/Red%20Hat-EE0000?style=for-the-badge&logo=redhat&logoColor=white)](#installation)
 [![Rocky Linux](https://img.shields.io/badge/-Rocky%20Linux-%2310B981?style=for-the-badge&logo=rockylinux&logoColor=white)](#installation)
@@ -352,7 +353,7 @@ Packaged versions of the tool are available for the following distributions:
 
 <details><summary><b>Distribution list</b></summary><p>
 
-* **Debian Sid / Ubuntu 24.04 (or newer):** *(thanks [Marcos Rodrigues de Carvalo](https://github.com/odaydebian))*
+* **Debian Sid / Ubuntu 24.04 (or newer) / Kali Linux (rolling):** *(thanks [Marcos Rodrigues de Carvalo](https://github.com/odaydebian))*
 
   ```
   sudo apt update && sudo apt install asn
@@ -448,6 +449,8 @@ Either way, `asn` will pick up your token on the next run (no need to restart th
 
 > ***Note:***
 > *IPQualityScore is not queried by default for every target, but only for targets that get flagged as BAD by StopForumSpam. It's possible to override this behavior (and force IQS lookup for every target) by setting the `IQS_ALWAYS_QUERY` parameter to `true` in the [preferences file](#preferences-file-homeasnrc). It is also possible to specify [custom query settings](https://www.ipqualityscore.com/documentation/proxy-detection/overview) through the `IQS_CUSTOM_SETTINGS` parameter.*
+
+- - -
 
 ## Usage
 
@@ -1198,6 +1201,8 @@ root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_jsonp&10.0.0.1"
   ]
 }
 ```
+
+- - -
 
 ## Thanks
 
