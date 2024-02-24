@@ -353,7 +353,7 @@ Packaged versions of the tool are available for the following distributions:
 
 <details><summary><b>Distribution list</b></summary><p>
 
-* **Debian Sid / Ubuntu 24.04 (or newer) / Kali Linux (rolling):** *(thanks [Marcos Rodrigues de Carvalo](https://github.com/odaydebian))*
+* **Debian Sid / Ubuntu 24.04 (or newer) / Kali Linux (rolling):** *(thanks [Marcos Rodrigues de Carvalho](https://github.com/odaydebian))*
 
   ```
   sudo apt update && sudo apt install asn
