@@ -333,7 +333,7 @@ Some packages are required for full functionality:
     Install Windows Subsystem for Linux (v2) by following Microsoft's [guide](https://docs.microsoft.com/en-us/windows/wsl/install-win10#manual-installation-steps). On step 6, choose one of the Linux distributions listed above (Ubuntu 20.04 LTS is recommended).
     Once your WSL2 system is up and running, open a Linux terminal and follow the prerequisite installation instructions above for your distribution of choice.
 
-    > *Note for Windows users: Check [this](https://devblogs.microsoft.com/commandline/systemd-support-is-now-available-in-wsl/) page for details on how to activate **systemd** if you plan to install the [asn service](#installing-the-asn-server-as-a-system-service).*
+    > *Note for WSL2 users: Check [this](https://devblogs.microsoft.com/commandline/systemd-support-is-now-available-in-wsl/) page for details on how to activate **systemd** if you plan to install the [asn service](#optional-installing-the-asn-server-as-a-system-service).*
 
   * **using [Cygwin](https://cygwin.com/index.html):**
     Most of the prerequisite packages listed above for *Debian 10 / Ubuntu 20.04 (or newer)* are obtainable directly with Cygwin's own Setup wizard (or through scripts like *apt-cyg*). You will still have to manually compile (or find a suitable third-party precompiled binary) the *mtr*, *grepcidr* and *aha* tools. Instructions on how to do so can be found directly on the respective projects homepages.
