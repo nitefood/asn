@@ -24,6 +24,7 @@
 [![Nix](https://img.shields.io/badge/NIX-5277C3.svg?style=for-the-badge&logo=NixOS&logoColor=white)](#installation)
 [![macOS](https://img.shields.io/badge/mac%20os-000000?style=for-the-badge&logo=macos&logoColor=F0F0F0)](#installation)
 [![Windows](https://img.shields.io/badge/Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white)](#installation)
+[![Raspberry Pi](https://img.shields.io/badge/-RaspberryPi-C51A4A?style=for-the-badge&logo=Raspberry-Pi)](#installation)
 
 ### Table of contents:
 
@@ -114,6 +115,7 @@ The script uses the following services for data retrieval:
 * [IP Quality Score](https://www.ipqualityscore.com)
 * [GreyNoise](https://greynoise.io)
 * [Shodan](https://www.shodan.io/)
+* [NIST National Vulnerability Database](https://nvd.nist.gov/)
 * [Incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
 * [RestCountries](https://restcountries.com/)
 * Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo
@@ -353,7 +355,11 @@ Packaged versions of the tool are available for the following distributions:
 
 <details><summary><b>Distribution list</b></summary><p>
 
-* **Debian Sid / Ubuntu 24.04 (or newer) / Kali Linux (rolling):** *(thanks [Marcos Rodrigues de Carvalho](https://github.com/odaydebian))*
+* **Debian-based:** *(thanks [Marcos Rodrigues de Carvalho](https://github.com/odaydebian))*
+  > *Debian 13 / Sid*\
+  > *Ubuntu 24.04 (or newer)*\
+  > *Kali (rolling)*\
+  > *Raspbian (testing)*
 
   ```
   sudo apt update && sudo apt install asn
@@ -470,51 +476,51 @@ where `TARGET` can be one of the following:
 
 <u>Options</u>:
 
-* `[-t]`
+* `-t`
 
   * enables lookup and path tracing for targets **(this is the default behavior)**
 
     >*.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)*
 
-* `[-d]`
+* `-d`
 
   * enables detailed trace mode (more info below)
 
     >*.asnrc option equivalent: `DETAILED_TRACE=true` (default: `false`)*
 
-* `[-n]`
+* `-n`
 
   * disables path tracing and only outputs lookup info _(for IP targets)_
   * disables additional INETNUM/origin lookups _(for AS targets)_
 
     >*.asnrc option equivalent: `MTR_TRACING=false` (default: `true`), `ADDITIONAL_INETNUM_LOOKUP=false` (default: `true`)*
 
-* `[-s]`
+* `-s`
 
   * Launch a Shodan InternetDB scan for the target(s). Supports multiple targets,
     mixed target types (IP/hostname/CIDR/URL) and piping from stdin.
 
-* `[-o]`
+* `-o`
 
   * forces a Search-By-Organization lookup and skip all target identification checks
 
-* `[-a]`
+* `-a`
 
   * enable *ASN suggestion mode*. This will search for all ASNs matching a given name.
 
-* `[-u]`
+* `-u`
 
   * enable *Transit/Upstream lookup mode*. This will inspect BGP updates and ASPATHs for the TARGET address/prefix and identify possible transit/upstream autonomous systems.
 
-* `[-c]`
+* `-c`
 
   * enable *Country CIDR mode*. This will output all IPv4/v6 CIDR blocks allocated to the specified country.
 
-* `[-g]`
+* `-g`
 
   * enable *Bulk Geolocation mode*. This will extract all IPv4/v6 addresses from the input, geolocate them and draw some stats.
 
-* `[-l]`
+* `-l`
 
   * Launch the script in *server mode*. See **Server Options** below
 
@@ -590,7 +596,7 @@ where `TARGET` can be one of the following:
 
   * The maximum number of simultaneous connections accepted by the server. 100 is the default.
 
-*Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
+>*Note: Every option in server mode (after* `-l`*) is passed directly to the ncat listener.* *Refer to* `man ncat` *for more details on the available commands.*
 *Unless specified, the default IP:PORT values of **127.0.0.1:49200** (for IPv4) or **[::1]:49200** (for IPv6) will be used (e.g.* `asn -l`*)*
 
 ##### *Default behavior:*
@@ -652,7 +658,7 @@ IQS_CUSTOM_SETTINGS=""
 
 * Organization data is taken from pWhois
 * IP reputation data is taken from StopForumSpam and IpQualityScore
-  * Reputation is also enriched with IP *noise* classification (addresses that have been observed scanning the Internet, and very likely to appear in your logs), taken from [GreyNoise](https://greynoise.io). This will also help identify known-good IPs (e.g. Google networks, CDNs, etc.) from aggressive, known-malicious scanners.
+  > Reputation is also enriched with IP *noise* classification (addresses that have been observed scanning the Internet, and very likely to appear in your logs), taken from [GreyNoise](https://greynoise.io). This will also help identify known-good IPs (e.g. Google networks, CDNs, etc.) from aggressive, known-malicious scanners.
 * IP fingerprinting data is retrieved from Shodan's [InternetDB API](https://internetdb.shodan.io/). Data includes open ports, [software/hardware information](https://en.wikipedia.org/wiki/Common_Platform_Enumeration) and [known vulnerabilities](https://en.wikipedia.org/wiki/Common_Vulnerabilities_and_Exposures) pertaining to the IP address.
 
 ##### *Geolocation*
@@ -720,21 +726,21 @@ Visit [this page](http://127.0.0.1:49200/asn_bookmarklet) in your browser and fo
 
 The bookmarklet is actually a small piece of Javascript code which will grab the hostname of the website you're currently visiting in the browser, and pass it to the server through a simple *HTTP GET* request. The server then proceeds to perform the lookup and traceroute (from its own viewpoint, just like it does when ran interactively from the command line), and feed the results to your browser through an HTML page, mimicking the effect of a scrolling terminal.
 
-The link you drag to the bookmarks bar is actually a *minified* (i.e.: compacted) version of the source javascript code, but for reference, here's the full source:
-
-```javascript
-javascript:(function () {
-    var asnserver = "localhost:49200";
-    var target = window.location.hostname;
-    var width = screen.width - screen.width / 7;
-    var height= screen.height - screen.height / 4;
-    var left = window.innerWidth / 2 - width / 2;
-    var top = window.innerHeight / 2 - height / 2;
-    window.open("http://" + asnserver + "/asn_lookup&" + target, "newWindow", "width=" + width + ",height=" + height + ",top=" + top + ",left=" + left);
-})();
-```
-
-If you want to "un-minify" the actual bookmarklet code, you can refer to [this site](https://unminify.com/).
+>*Note: The link you drag to the bookmarks bar is actually a *minified* (i.e.: compacted) version of the source javascript code, but for reference, here's the full source:*
+>
+>```javascript
+>javascript:(function () {
+>    var asnserver = "localhost:49200";
+>    var target = window.location.hostname;
+>    var width = screen.width - screen.width / 7;
+>    var height= screen.height - screen.height / 4;
+>    var left = window.innerWidth / 2 - width / 2;
+>    var top = window.innerHeight / 2 - height / 2;
+>    window.open("http://" + asnserver + "/asn_lookup&" + target, "newWindow", "width=" + width + ",height=" + height + ",top=" + top + ",left=" + left);
+>})();
+>```
+>
+>*If you want to "un-minify" the actual bookmarklet code, you can refer to [this site](https://unminify.com/)*
 
 Once the trace is finished, an option to share the output on [termbin](https://termbin.com/) is given to the user. This makes for quick sharing of the traceroute or lookup output with other people:
 
@@ -810,9 +816,9 @@ To contrast that, fortunately `ncat` implements a robust allow/deny logic (based
 
 The available options, and some usage examples, can be viewed by running `asn -h`.
 
-*Note: if you plan to run the server somewhere else than your local machine, remember to change the bookmarklet code and the custom search engine URL values to reflect the actual IP of the asn server. It is naturally possible to have multiple bookmarklets and search engine keywords to map to different ASN server instances.*
-
-*For the bookmarklet, you'll need to change this value at the very beginning:* `var asnserver="localhost:49200"` *and make it point to the new address:port pair. No further change is required in the remaining JS code.*
+>*Note: if you plan to run the server somewhere else than your local machine, remember to change the bookmarklet code and the custom search engine URL values to reflect the actual IP of the asn server. It is naturally possible to have multiple bookmarklets and search engine keywords to map to different ASN server instances.*
+>
+>*For the bookmarklet, you'll need to change this value at the very beginning:* `var asnserver="localhost:49200"` *and make it point to the new address:port pair. No further change is required in the remaining JS code.*
 
 ## Shodan scanning (Recon Mode)
 
