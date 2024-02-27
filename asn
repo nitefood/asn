@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.76.0"
+ASN_VERSION="0.76.1"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -969,7 +969,7 @@ TraceASPath(){
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
 
 	# start the mtr trace
-	DebugPrint "${yellow}mtr -> $host_to_trace ($MTR_ROUNDS rounds)${default}"
+	DebugPrint "${yellow}mtr → $host_to_trace ($MTR_ROUNDS rounds)${default}"
 	mtr_output=$(mtr -C -n -c"$MTR_ROUNDS" "$host_to_trace" | tail -n +2)
 	declare -a tracehops_array
 	declare -a aspath_array
@@ -1453,7 +1453,7 @@ ShowMenu(){ # show selection menu for search-by-company results
 	if [ "$HAVE_IPCALC" = true ]; then
 		IPCALC_WARNING=""
 	else
-		IPCALC_WARNING=$'\n'"${yellow}Warning: program ${red}ipcalc${yellow} not found."$'\n'"Install it to enable netblock->CIDR"$'\n'"prefix aggregation.${default}"$'\n'
+		IPCALC_WARNING=$'\n'"${yellow}Warning: program ${red}ipcalc${yellow} not found."$'\n'"Install it to enable netblock→CIDR"$'\n'"prefix aggregation.${default}"$'\n'
 	fi
 	PS3="${yellow}────────────────────────────────────────────────────${default}
 $ACTIVE_FILTERS_STRING
@@ -1784,7 +1784,7 @@ ShodanRecon(){
 			portnum=$(awk '{print $2}' <<<"$port")
 			portname=$(ResolveWellKnownPort "$portnum")
 			[[ -n "$portname" ]] && portname="(${portname})"
-			printf "%10s host(s) —> Port %5s %s\n" "$porthits" "$portnum" "$portname"
+			printf "%10s host(s) → Port %5s %s\n" "$porthits" "$portnum" "$portname"
 		done
 		echo -e "$default"
 	fi
@@ -1815,7 +1815,7 @@ ShodanRecon(){
 				;;
 			esac
 			[[ -n "$type" ]] && cpename="[$type] $cpefullname" || cpename="$cpefullname"
-			printf "%10s host(s) —> %s\n" "$cpehits" "$cpename"
+			printf "%10s host(s) → %s\n" "$cpehits" "$cpename"
 		done
 		echo -e "$default"
 	fi
@@ -1828,7 +1828,7 @@ ShodanRecon(){
 		for tag in $(echo -e "$taglist" | sort | grep -Ev '^$' | uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
 			taghits=$(awk '{print $1}' <<<"$tag")
 			tagname=$(awk '{print $2}' <<<"$tag")
-			printf "%10s host(s) —> %s\n" "$taghits" "$tagname"
+			printf "%10s host(s) → %s\n" "$taghits" "$tagname"
 		done
 		echo -e "$default"
 	fi
@@ -1844,7 +1844,7 @@ ShodanRecon(){
 		echo -e "$default"
 	fi
 	# top N vulnerabilities
-	echo -e "${red}[TOP ${SHODAN_SHOW_TOP_N} Vulnerabilities] \n"
+	echo -e "${red}[TOP ${SHODAN_SHOW_TOP_N} Vulnerabilities by number of occurrences] \n"
 	StatusbarMessage "Identifying CVE score and severity for vulnerable hosts"
 	cvestats_text=""
 	if [ -z "$vulnlist" ]; then
@@ -1854,11 +1854,41 @@ ShodanRecon(){
 		for cve in $(echo -e "$vulnlist" | sort | grep -Ev '^$' | uniq -c | sort -rn | head -n "${SHODAN_SHOW_TOP_N}"); do
 			vulnhits=$(awk '{print $1}' <<<"$cve")
 			cvenum=$(awk '{print $2}' <<<"$cve")
-			cvejsondata=$(docurl -s "https://services.nvd.nist.gov/rest/json/cve/1.0/$cvenum")
-			v3score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseScore | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
-			v3severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV3.cvssV3.baseSeverity | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
-			v2score=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.cvssV2.baseScore' <<<"$cvejsondata" 2>/dev/null)
-			v2severity=$(jq -r '.result.CVE_Items[0].impact.baseMetricV2.severity' <<<"$cvejsondata" 2>/dev/null)
+			cvejsondata=$(docurl -s "https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=$cvenum")
+			v3score=$(jq -r '.vulnerabilities[0].cve.metrics.cvssMetricV31[0].cvssData.baseScore | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
+			v3severity=$(jq -r '.vulnerabilities[0].cve.metrics.cvssMetricV31[0].cvssData.baseSeverity | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
+			v2score=$(jq -r '.vulnerabilities[0].cve.metrics.cvssMetricV2[0].cvssData.baseScore' <<<"$cvejsondata" 2>/dev/null)
+			v2severity=$(jq -r '.vulnerabilities[0].cve.metrics.cvssMetricV2[0].baseSeverity' <<<"$cvejsondata" 2>/dev/null)
+			cvename=$(jq -r '.vulnerabilities[0].cve.cisaVulnerabilityName | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
+			cvedesc=$(jq -r '.vulnerabilities[0].cve.descriptions[0].value | select(length>0)' <<<"$cvejsondata" 2>/dev/null)
+			# apply formatting to cvedesc to fit the terminal width
+			cvedesc_len=${#cvedesc}
+			available_width=$(( terminal_width - 58 ));
+			formatted_cvedesc=""
+			if [ "$cvedesc_len" -gt "$available_width" ]; then
+				# iterate over cvedesc until it fits in the terminal width, inserting newlines
+				while [ "$cvedesc_len" -gt 0 ]; do
+					wordbreak_pointer="$available_width"
+					if [ "$cvedesc_len" -gt "$available_width" ]; then
+						while [ "${cvedesc:$wordbreak_pointer:1}" != " "  ] && [ "$wordbreak_pointer" -gt 0 ]; do
+							((wordbreak_pointer--))
+						done
+						[[ "$wordbreak_pointer" -eq 0 ]] && wordbreak_pointer="$available_width"
+					fi
+					cvedesc_line=${cvedesc:0:$wordbreak_pointer}
+					if [ -n "$formatted_cvedesc" ]; then
+						formatted_cvedesc+="\n"
+						formatted_cvedesc+=$(printf "${default}${red}%49s        ${default}${dim}%s" "┆" "$cvedesc_line")
+					else
+						formatted_cvedesc="$cvedesc_line"
+					fi
+					((wordbreak_pointer++))
+					cvedesc=${cvedesc:$wordbreak_pointer}
+					cvedesc_len=${#cvedesc}
+				done
+			else
+				formatted_cvedesc="$cvedesc"
+			fi
 			cvescore=""
 			cveseverity=""
 			if [ -n "$v3score" ] && [ -n "$v3severity" ]; then
@@ -1893,8 +1923,13 @@ ShodanRecon(){
 				;;
 			esac
 
-			cvestats_text+=$(printf "${red}%10s host(s) —> %-15s %-14s • %s" "$vulnhits" "$cvetext" "$cvenum" "https://nvd.nist.gov/vuln/detail/$cvenum")
+			cvestats_text+=$(printf "${red}%10s host(s) → %-15s %-14s" "$vulnhits" "$cvetext" "$cvenum")
+			[[ -n "$cvename" ]] && cvestats_text+=" • ${dim}${cvename}${default}"
 			cvestats_text+="\n"
+			cvestats_text+=$(printf "${red}%49s Desc : ${default}${dim}%s${default}" "├" "$formatted_cvedesc")
+			cvestats_text+="\n"
+			cvestats_text+=$(printf "${red}%49s Info : ${blue}${dim}%s${default}" "└" "https://nvd.nist.gov/vuln/detail/$cvenum")
+			cvestats_text+="\n\n"
 		done
 	fi
 	StatusbarMessage

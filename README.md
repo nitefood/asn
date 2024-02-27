@@ -143,41 +143,41 @@ Requires Bash v4.2+. Tested on:
 
 * *IPv4 lookup with IP type detection (Anycast, Hosting/DC) and classification as good*
 
-![ipv4lookup](https://github.com/nitefood/asn/assets/24555810/81def31a-e080-4b01-9aa2-25b979062963)
+  ![ipv4lookup](https://github.com/nitefood/asn/assets/24555810/81def31a-e080-4b01-9aa2-25b979062963)
 
 * *IPv4 lookup (bad reputation IP) with threat analysis/scoring, CPE/CVE identification and open ports reporting*
 
-![ipv4badlookup](https://github.com/nitefood/asn/assets/24555810/302dc69f-7026-4f41-afe6-e24c4d0a514a)
+  ![ipv4badlookup](https://github.com/nitefood/asn/assets/24555810/302dc69f-7026-4f41-afe6-e24c4d0a514a)
 
 * *IP fingerprinting with advanced datacenter+region identification, known vulnerabilities affecting the target and honeypot identification according to Shodan data*
 
-![](https://user-images.githubusercontent.com/24555810/159185618-fa20f45c-91b4-45b4-ad82-02becc648fa5.png)
+  ![](https://user-images.githubusercontent.com/24555810/159185618-fa20f45c-91b4-45b4-ad82-02becc648fa5.png)
 
 * *IPv6 lookup*
 
-![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
+  ![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
 
 * *Autonomous system number lookup with AS ranking, operational region, BGP stats, peering and prefix informations*
 
-![asnlookup](https://github.com/nitefood/asn/assets/24555810/758890d8-7103-41f3-978e-ba5799213af6)
+  ![asnlookup](https://github.com/nitefood/asn/assets/24555810/758890d8-7103-41f3-978e-ba5799213af6)
 
 * *Hostname/URL lookup*
 
-![hostnamelookup](https://github.com/nitefood/asn/assets/24555810/f6c71594-d38a-4c7c-9142-5aa1e203f3fa)
+  ![hostnamelookup](https://github.com/nitefood/asn/assets/24555810/f6c71594-d38a-4c7c-9142-5aa1e203f3fa)
 
 ### AS Path tracing
 
 * *ASPath trace to www.github.com*
 
-![pathtrace](https://github.com/nitefood/asn/assets/24555810/8dfa68ba-de39-47f4-96d3-618210197e70)
+  ![pathtrace](https://github.com/nitefood/asn/assets/24555810/8dfa68ba-de39-47f4-96d3-618210197e70)
 
 * *ASPath trace traversing both an unannounced PNI prefix (FASTWEB->SWISSCOM at hop 11) and an IXP (SWISSCOM -> RCN through Equinix Ashburn at hop 16)*
 
-![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100301579-b4d00c00-2f98-11eb-82c5-047c190ffcd6.png)
+  ![pathtrace_pni_ixp](https://user-images.githubusercontent.com/24555810/100301579-b4d00c00-2f98-11eb-82c5-047c190ffcd6.png)
 
 * *Detailed ASPath trace to 8.8.8.8 traversing the Milan Internet Exchange (MIX) IXP peering LAN at hop 6*
 
-![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/117335188-28a50780-ae9b-11eb-98d9-cfd3bc2f1295.png)
+  ![detailed_pathtrace](https://user-images.githubusercontent.com/24555810/117335188-28a50780-ae9b-11eb-98d9-cfd3bc2f1295.png)
 
 ### Network search by organization
 
@@ -189,7 +189,7 @@ Requires Bash v4.2+. Tested on:
 
 * *Scanning for Shodan informations for a list of IPs*
 
-  ![shodanscan](https://user-images.githubusercontent.com/24555810/161406477-a9aa5446-554d-43a7-a371-1a044e919dfa.png)
+  ![shodanscan](https://github.com/nitefood/asn/assets/24555810/550d3004-9cbc-404e-b74c-9248a2d0bb0f)
 
 ### Country IPv4/IPv6 CIDR mapping
 
@@ -823,6 +823,9 @@ The available options, and some usage examples, can be viewed by running `asn -h
 ## Shodan scanning (Recon Mode)
 
 The tool can query Shodan's InternetDB API to look up informations regarding any type of targets when launched with the `-s` command line switch.
+
+If the scan identifies any vulnerabilities, the NIST NVD API is queried in order to provide descriptions, any well known names and a link to learn more about the top ones.
+
 Currently supported targets are:
 
 - **IP addresses**
