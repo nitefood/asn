@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.76.2-dev"
+ASN_VERSION="0.76.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -3771,7 +3771,7 @@ HandleNcatClientConnection() {
 			#  end the ncat client connection for this request ID
 			childretval="$?"
 			if [ "$childretval" -eq 0 ]; then
-				DebugPrint "Child process completed successfully with exit code $?"
+				DebugPrint "Child process completed successfully"
 				[[ -z "$OUTPUT_TYPE" ]] && echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
 				# log lookup request completed on server side
 				echo -e "[$(date +"%F %T")] ${greenbg}COMPLETED${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
