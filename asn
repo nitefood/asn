@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.76.1"
+ASN_VERSION="0.76.2"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -2298,45 +2298,56 @@ GetCAIDARank(){
 		# store the rank in the CAIDARANK_CACHED_AS_DATA array
 		CAIDARANK_CACHED_AS_DATA[$asn]="$caida_data"
 	fi
-	caida_asrank=$(jq -r '.data.asn.rank' <<<"$caida_data")
-	caida_rir=$(jq -r '.data.asn.source' <<<"$caida_data")
-	case "${caida_rir}" in
-		"AFRINIC")
-			caida_rir="AFRINIC ${dim}(Africa)${default}"
-		;;
-		"APNIC")
-			caida_rir="APNIC ${dim}(Asia Pacific)${default}"
-		;;
-		"ARIN")
-			caida_rir="ARIN ${dim}(USA, Canada, many Caribbean and North Atlantic islands)${default}"
-		;;
-		"LACNIC")
-			caida_rir="LACNIC ${dim}(Latin America and the Caribbean)${default}"
-		;;
-		"RIPE")
-			caida_rir="RIPE ${dim}(Europe, the Middle East and parts of Central Asia)${default}"
-		;;
-	esac
-
-	caida_customercone=$(jq -r '.data.asn.cone.numberAsns' <<<"$caida_data")
-	caida_degree_total=$(jq -r '.data.asn.asnDegree.total' <<<"$caida_data")
-	caida_degree_customer=$(jq -r '.data.asn.asnDegree.customer' <<<"$caida_data")
-	caida_degree_peer=$(jq -r '.data.asn.asnDegree.peer' <<<"$caida_data")
-	caida_degree_provider=$(jq -r '.data.asn.asnDegree.provider' <<<"$caida_data")
-	# caida_asrank_color="${dim}"
 	caida_asrank_text=""
-	if (( caida_asrank <= 10 )); then
-		caida_asrank_text=" ${lightgreybg} TOP 10 AS ${default}"
-	elif (( caida_asrank <= 35 )); then
-		caida_asrank_text=" ${lightgreybg} TOP 35 AS ${default}"
-	elif (( caida_asrank <= 100 )); then
-		caida_asrank_text=" ${lightgreybg} TOP 100 AS ${default}"
-	elif (( caida_asrank <= 500)); then
-		caida_asrank_text=" ${lightgreybg} TOP 500 AS ${default}"
-	elif (( caida_asrank <= 1000)); then
-		caida_asrank_text=" ${lightgreybg} TOP 1000 AS ${default}"
+	caida_asrank=$(jq -r '.data.asn.rank' <<<"$caida_data")
+	if [ "$caida_asrank" != "null" ]; then
+		caida_rir=$(jq -r '.data.asn.source' <<<"$caida_data")
+		case "${caida_rir}" in
+			"AFRINIC")
+				caida_rir="AFRINIC ${dim}(Africa)${default}"
+			;;
+			"APNIC")
+				caida_rir="APNIC ${dim}(Asia Pacific)${default}"
+			;;
+			"ARIN")
+				caida_rir="ARIN ${dim}(USA, Canada, many Caribbean and North Atlantic islands)${default}"
+			;;
+			"LACNIC")
+				caida_rir="LACNIC ${dim}(Latin America and the Caribbean)${default}"
+			;;
+			"RIPE")
+				caida_rir="RIPE ${dim}(Europe, the Middle East and parts of Central Asia)${default}"
+			;;
+		esac
+
+		caida_customercone=$(jq -r '.data.asn.cone.numberAsns' <<<"$caida_data")
+		caida_degree_total=$(jq -r '.data.asn.asnDegree.total' <<<"$caida_data")
+		caida_degree_customer=$(jq -r '.data.asn.asnDegree.customer' <<<"$caida_data")
+		caida_degree_peer=$(jq -r '.data.asn.asnDegree.peer' <<<"$caida_data")
+		caida_degree_provider=$(jq -r '.data.asn.asnDegree.provider' <<<"$caida_data")
+		if (( caida_asrank <= 10 )); then
+			caida_asrank_text=" ${lightgreybg} TOP 10 AS ${default}"
+		elif (( caida_asrank <= 35 )); then
+			caida_asrank_text=" ${lightgreybg} TOP 35 AS ${default}"
+		elif (( caida_asrank <= 100 )); then
+			caida_asrank_text=" ${lightgreybg} TOP 100 AS ${default}"
+		elif (( caida_asrank <= 500)); then
+			caida_asrank_text=" ${lightgreybg} TOP 500 AS ${default}"
+		elif (( caida_asrank <= 1000)); then
+			caida_asrank_text=" ${lightgreybg} TOP 1000 AS ${default}"
+		fi
+		caida_asrank_recap="${dim}#${white}${caida_asrank}${caida_asrank_text}"
+	else
+		caida_asrank="N/A"
+		caida_customercone="N/A"
+		caida_rir="N/A"
+		caida_customercone="N/A"
+		caida_degree_total="N/A"
+		caida_degree_provider="N/A"
+		caida_degree_peer="N/A"
+		caida_degree_customer="N/A"
+		caida_asrank_recap="${dim}N/A"
 	fi
-	caida_asrank_recap="${dim}#${white}${caida_asrank}${caida_asrank_text}"
 }
 
 IPGeoRepLookup(){
@@ -2701,6 +2712,7 @@ BGPUpstreamLookup(){
 	yellow_upstreams_count=0
 	white_upstreams_count=0
 	dim_upstreams_count=0
+	[[ "$caida_asrank" = "N/A" ]] && caida_asrank=99999
 	if (( caida_asrank < 100 )) || (( total_upstreams_count > 50 )); then
 		# origin AS is in the top 100, therefore less likely to need transits (given its large customer cone),
 		# or the prefix is widely announced (likely also by well-connected IXP RS peers).
@@ -2740,12 +2752,13 @@ BGPUpstreamLookup(){
 		is_tier1=false
 		count=$(awk '{print $1}' <<<"$line")
 		asn=$(awk '{print $2}' <<<"$line")
+		# TODO use bulk Team Cymru query to lookup asnames
 		asname=$(host -t TXT "AS${asn}.asn.cymru.com" | grep -v "NXDOMAIN" | awk -F'|' 'NR==1{print substr($NF,2,length($NF)-2)}')
 		integer_probability=$(( count*100/tot ))
 		probability=$(jq -n "$count*100/$tot")
 		if grep -qw "$asn" <<<"${static_transits_array[@]}" && (( caida_asrank > 35 )); then
-			# static transit list does not apply to most top ASNs (CAIDA ranked < 35).
-			# These large networks are more likely to arrange SFI relationships with other Tier-1 networks,
+			# apply static transit list to this AS only if it's not among the top 35 ASNs (per CAIDA rankings).
+			# Larger networks (ranked < 35) are more likely to arrange SFI relationships with other Tier-1 networks,
 			# rather than pay for transit
 			is_tier1=true
 			probability_color="${red}"
@@ -3758,7 +3771,7 @@ HandleNcatClientConnection() {
 			#  end the ncat client connection for this request ID
 			childretval="$?"
 			if [ "$childretval" -eq 0 ]; then
-				DebugPrint "Child process completed successfully with exit code $?"
+				DebugPrint "Child process completed successfully"
 				[[ -z "$OUTPUT_TYPE" ]] && echo -e "<script>top.document.title='ASN Lookup for $host completed'</script>"
 				# log lookup request completed on server side
 				echo -e "[$(date +"%F %T")] ${greenbg}COMPLETED${default} Lookup request by client ${yellow}$NCAT_REMOTE_ADDR${default} for target ${magenta}$host${default} (Request ID: ${blue}$reqid${default})" >&2
