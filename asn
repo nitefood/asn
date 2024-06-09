@@ -169,9 +169,9 @@ QueryRipestat(){
 	json_ipv6_other_inetnums=""
 	ripe_prefixes=$(docurl -m10 -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
 	json_ripe_prefixes=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | {v4:map(select(contains(":")|not)), v6:map(select(contains(":")))}' <<<"$ripe_prefixes")
-	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
+	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^$" | sort)
 	ipv4_ripe_prefixes_count=$(wc -l <<<"$ipv4_ripe_prefixes")
-	ipv6_ripe_prefixes=$(grep ":" <<<"$ripe_prefixes" | grep -Ev "^\n" | sort)
+	ipv6_ripe_prefixes=$(grep ":" <<<"$ripe_prefixes" | grep -Ev "^$" | sort)
 	ipv6_ripe_prefixes_count=$(wc -l <<<"$ipv6_ripe_prefixes")
 
 	# open persistent tcp connection to RIPE whois server
