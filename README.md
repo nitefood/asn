@@ -32,6 +32,7 @@
 * [Screenshots](#screenshots)
 * [Running the script from a container](#running-the-script-from-a-container)
 * [Installation](#installation)
+  * _Optional: adding your [API tokens](#api-tokens) to improve functionalities_
 * [Usage (as a command line tool)](#usage)
 * [Usage (as a lookup & traceroute server)](#running-lookups-from-the-browser)
 * [Usage (as a lookup API with JSON output)](#json-output-and-api-mode)
@@ -108,6 +109,7 @@ The script uses the following services for data retrieval:
 * [CAIDA ASRank](https://asrank.caida.org/)
 * [ifconfig.co](https://ifconfig.co/)
 * [ipify](https://www.ipify.org/)
+* [ipinfo.io](https://ipinfo.io)
 * [RIPEStat](https://stat.ripe.net/)
 * [RIPE IPmap](https://ipmap.ripe.net/)
 * [ip-api](https://ip-api.com/)
@@ -125,7 +127,7 @@ It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode
 * [HE.net](https://bgp.he.net)
 * [BGPView](https://bgpview.io)
 * [BGPTools](https://bgp.tools)
-* [IPInfo.io](https://ipinfo.io)
+* [ipinfo.io](https://ipinfo.io)
 * [Host.io](https://host.io)
 
 Requires Bash v4.2+. Tested on:
@@ -428,7 +430,44 @@ WantedBy=multi-user.target
    * To start the service automatically on boot: `systemctl enable asn`
    * To disable automatic start on boot: `systemctl disable asn`
 
+## API tokens
+
+The script can be configured to make use of your API tokens to enhance its functionalities.
+
+The currently supported API tokens are:
+
+### Geolocation API token
+
+<details><summary><b>Geolocation API token details</b></summary><p>
+
+The geolocation provider of choice for single lookups (i.e. when not running bulk geolocation queries with the `-g` option) is **ipinfo.io**.
+
+By default, the script uses the free (no API key) tier that supports up to **1,000** geolocation requests per day. In order to boost this limit (for free) to **50,000** requests per month, an API key token is required.
+
+In order to obtain an API token, after [signing up](https://ipinfo.io/signup), the API token can be found in the [token section](https://ipinfo.io/account/token) of your reserved area. Once copied, the token should be written to one of the following files (parsed in that order):
+
+`$HOME/.asn/ipinfo_token` or
+`/etc/asn/ipinfo_token`
+
+The `/etc`-based file should be used when running asn in **server mode**. The `$HOME`-based file takes precedence if both files exist, and is ideal for **user mode** (that is, running `asn` interactively from the command line).
+
+In order to do so, you can use the following command:
+
+***User mode:***
+
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/ipinfo_token" && chmod -R 600 "$HOME/.asn/"`
+
+***Server mode:***
+
+`TOKEN="<your_token_here>"; mkdir "/etc/asn/" && echo "$TOKEN" > "/etc/asn/ipinfo_token" && chmod -R 700 "/etc/asn/" && chown -R nobody /etc/asn/`
+
+Either way, `asn` will pick up your token on the next run (no need to restart the service if running in server mode), and use it to query the ipinfo.io API.
+
+</p></details>
+
 ### IP reputation API token
+
+<details><summary><b>IP reputation API token details</b></summary><p>
 
 The script will perform first-level IPv4/v6 reputation lookups using [StopForumSpam](https://www.stopforumspam.com/), and in case of a match it will perform a second-level, in-depth threat analysis for targets and trace hops using the [IPQualityScore](https://www.ipqualityscore.com/) API. The StopForumSpam API is free and requires no sign-up, and the service aggregates a [huge](https://www.stopforumspam.com/contributors) amount of blacklist feeds.
 
@@ -455,6 +494,8 @@ Either way, `asn` will pick up your token on the next run (no need to restart th
 
 > ***Note:***
 > *IPQualityScore is not queried by default for every target, but only for targets that get flagged as BAD by StopForumSpam. It's possible to override this behavior (and force IQS lookup for every target) by setting the `IQS_ALWAYS_QUERY` parameter to `true` in the [preferences file](#preferences-file-homeasnrc). It is also possible to specify [custom query settings](https://www.ipqualityscore.com/documentation/proxy-detection/overview) through the `IQS_CUSTOM_SETTINGS` parameter.*
+
+</p></details>
 
 - - -
 
@@ -544,7 +585,7 @@ where `TARGET` can be one of the following:
 
 * `-v`
 
-  * Enable debug messages (will display all URLs being queried to help identify external API slowdowns)
+  * Enable debug messages (will display all URLs being queried to help identify external API slowdowns). In client mode, `asn` will log all output (external calls and their response data) to the location defined by `$ASN_LOGFILE` _(by default the logfile can be found at `$HOME/asndebug.log`)_.
 
     >*.asnrc option equivalent: `ASN_DEBUG=true` (default: `false`)*
 
@@ -610,6 +651,7 @@ Options defaults can be overridden by creating a file called `.asnrc` in the use
 The following values are the defaults. Any (or all) of them can be specified in the settings file and adjusted to the user's preference:
 
 ```shell
+ASN_LOGFILE="$HOME/asndebug.log"
 MTR_TRACING=true
 ADDITIONAL_INETNUM_LOOKUP=true
 DETAILED_TRACE=false
@@ -665,13 +707,13 @@ IQS_CUSTOM_SETTINGS=""
 
 The script will perform IP and trace hop geolocation with this logic:
 
-1. Using the [RIPE IPmap](https://ipmap.ripe.net/) service as a primary source of geolocation data. It offers extremely precise latency-based geolocation data and is extremely reliable
+1. Using the [ipinfo.io](https://ipinfo.io/) service as a primary source of geolocation data. It offers extremely precise geolocation data based on a proprietary network of geographically distributed probes, and is extremely reliable
 2. Using the [ip-api](https://ip-api.com/) service as a fallback source of geolocation data
 3. Using the [Prefix Whois](https://pwhois.org/) service as a last-resort source of geolocation data
 
 ##### *IP Classification*
 
-The script will use the ip-api, incolumitas.com, RIPE IPmap and PeeringDB services to classify target IPs and trace hops into these categories:
+The script will use the ip-api, incolumitas.com, ipinfo.io and PeeringDB services to classify target IPs and trace hops into these categories:
 
 * [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
 * Mobile network

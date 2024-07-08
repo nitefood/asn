@@ -12,7 +12,8 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.76.2"
+ASN_VERSION="0.77.0"
+ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -23,8 +24,14 @@ docurl(){
 	if [ "$ASN_DEBUG" = true ]; then
 		parm="$@"
 		DebugPrint "${yellow}curl $parm${default}"
+		curloutput=$(curl "$@")
+		echo "$curloutput"
+		curloutput_jsonp=$(jq -C '.' <<<"$curloutput" 2>/dev/null)
+		[[ -n "$curloutput_jsonp" ]] && echo -e "$curloutput_jsonp" >> "$ASN_LOGFILE" || echo "$curloutput" >> "$ASN_LOGFILE"
+		echo "" >> "$ASN_LOGFILE"
+	else
+		curl "$@"
 	fi
-	curl "$@"
 }
 
 WhoisASN(){
@@ -63,7 +70,7 @@ QueryRipestat(){
 	fi
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
-	ripestat_neighbours_data=$(docurl -m5 -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_neighbours_data=$(docurl -m10 -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
 	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
 	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
@@ -784,7 +791,8 @@ PrintUsage(){
 			"\n\t'asn -s < iplist' or 'echo 1.1.1.0/24 google.com | asn -s'" \
 			"\n\n  ${green}-o    (organization search)\n\t${default}Force ${blue}TARGET${default} to be treated as an Organization Name" \
 			"\n\n  ${green}-m    (monochrome output)\n\t${default}Disable colored output" \
-			"\n\n  ${green}-v    (verbose)\n\t${default}Enable debug messages (URLs being queried and variable names being assigned)${default}" \
+			"\n\n  ${green}-v    (verbose)\n\t${default}Enable (and log to \$HOME/asndebug.log) debug messages (URLs being queried and variable names being assigned)." \
+			"\n\tAPI call response data (i.e. the JSON output) is logged to the logfile.${default}" \
 			"\n\n  ${green}-j    (compact JSON output)\n\t${default}Set output to compact JSON mode (ideal for machine parsing)" \
 			"\n\n  ${green}-J    (pretty-printed JSON output)\n\t${default}Set output to pretty-printed JSON mode" \
 			"\n\n  ${green}-h    (help)\n\t${default}Show this help screen" \
@@ -1955,6 +1963,7 @@ BulkGeolocate(){
 
 	BoxHeader "Geolocation lookup for $userinput"
 
+	# TODO switch to ipinfo.io for bulk geolocation lookups when a token is present (free tier does not support batch queries)
 	geolocation_json_output=""
 	countrylist=""
 	firstip=1
@@ -2226,7 +2235,7 @@ IsIXP() {
 			fi
 			peeringdb_dataset="$peeringdb_ipv6_dataset"
 		fi
-		ixp_prefixes=$(jq -r '.data[].prefix' <<<"$peeringdb_dataset")
+		ixp_prefixes=$(jq -r '.data[].prefix' <<<"$peeringdb_dataset" 2>/dev/null)
 		# search for input prefix through PeeringDB IXP prefix list
 		for prefix in $ixp_prefixes; do
 			if echo "$1" | grepcidr -f <(echo "$prefix") &>/dev/null; then
@@ -2245,8 +2254,10 @@ IsIXP() {
 				ixp_data=$(jq -r '.data[0].name, .data[0].name_long' <<<"$ixp_full_ix_data" | paste -sd '|' - | awk -F'|' '{print $1 " (" $2 ")"}')
 				ixp_geo=$(jq -r '.data[0].org.city' <<<"$ixp_full_ix_data")
 				ixp_state=$(jq -r '.data[0].org.state' <<<"$ixp_full_ix_data")
+				ixp_country=$(jq -r '.data[0].org.country' <<<"$ixp_full_ix_data")
 				ip_type_data=" ${lightgreybg} IXP ${default}"
-				[[ -n "$ixp_state" ]] && ixp_geo+=" ($ixp_state)"
+				[[ -n "$ixp_state" ]] && ixp_geo+=", $ixp_state"
+				[[ -n "$ixp_country" ]] && ixp_geo+=" ($ixp_country)"
 				[[ "$IS_ASN_CHILD" = true ]] && ixp_data="<a href=\"https://www.peeringdb.com/ix/$ixlan_id\" target=\"_blank\" class=\"hidden_underline\" style=\"color: $htmlblue;\">$ixp_data</a>"
 				break
 			fi
@@ -2362,23 +2373,27 @@ IPGeoRepLookup(){
 	geo_region_json_output=""
 	geo_country_json_output=""
 	geo_cc_json_output=""
-	local ipmap_city
-	local ipmap_region
-	local ipmap_cc
-	local ipmap_country_name
+	# local ipmap_city
+	# local ipmap_region
+	# local ipmap_cc
+	# local ipmap_country_name
+	# local ipmap_location_data
+	local ipinfo_city
+	local ipinfo_region
+	local ipinfo_cc
+	local ipinfo_countryname
 	local ipapi_city
 	local ipapi_region
 	local ipapi_cc
 	local ipapi_countryname
-	local ipmap_location_data
 	local ipapi_output
 	local ipapi_status
 	local ipapi_errmsg
 
 	StatusbarMessage "Collecting geolocation and classification data"
 
-	# fetch preferred geolocation and anycast data from RIPE IPmap
-	ipmap_output=$(docurl -m4 -s "https://ipmap.ripe.net/api/v1/locate/$1/best")
+	# fetch preferred geolocation and anycast data from ipinfo.io (pass token regardless of whether IPINFO_TOKEN is set, ipinfo API does not complain for an empty token)
+	ipinfo_output=$(docurl -m4 -s "https://ipinfo.io/$1?token=${IPINFO_TOKEN}")
 
 	# fetch fallback geolocation and ip type (is mobile?) data from ip-api.com
 	# Note: the free IP-API tier only supports unencrypted HTTP, not HTTPS
@@ -2394,39 +2409,32 @@ IPGeoRepLookup(){
 	fi
 
 	IS_ANYCAST=""
-	if [[ -z $(jq 'select (.error != null) | .error' <<<"$ipmap_output") ]]; then
-		IS_ANYCAST=$(jq '.metadata.service.contributions."'"$1"'".engines[] | select (.engine=="latency") | .metadata.anycast' <<<"$ipmap_output")
+	if jq '.anycast' <<<"$ipinfo_output" | grep -q true; then
+		IS_ANYCAST=true
 	fi
 
-	ipmap_location_data=$(jq 'select (.location != null) | .location' <<<"$ipmap_output")
-	if [ -n "$ipmap_location_data" ]; then
-		# RIPE IPmap has (at least some) geo data about this address, check city/region
-		ipmap_city=$(jq -r 'select (.cityNameAscii != null) | .cityNameAscii' <<<"$ipmap_location_data")
-		ipmap_region=$(jq -r 'select (.stateName != null) | .stateName' <<<"$ipmap_location_data")
-	fi
+	# ipmap_location_data=$(jq 'select (.location != null) | .location' <<<"$ipmap_output")
+	# if [ -n "$ipmap_location_data" ]; then
+	# 	# RIPE IPmap has (at least some) geo data about this address, check city/region
+	# 	ipmap_city=$(jq -r 'select (.cityNameAscii != null) | .cityNameAscii' <<<"$ipmap_location_data")
+	# 	ipmap_region=$(jq -r 'select (.stateName != null) | .stateName' <<<"$ipmap_location_data")
+	# fi
+	ipinfo_city=$(jq -r 'select (.city != null) | .city' <<<"$ipinfo_output")
+	ipinfo_region=$(jq -r 'select (.region != null) | .region' <<<"$ipinfo_output")
+	ipinfo_cc=$(jq -r 'select (.country != null) | .country' <<<"$ipinfo_output")
+	ipinfo_countryname=$(jq -r ".${ipinfo_cc}" <<<"$COUNTRY_MAP_CACHE")
 	flag_icon_cc="" # will be used in HTML reports served over HTTP
-	if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ]; then
-		# RIPE IPmap has full geo data, continue
-		ipmap_cc=$(jq -r '.countryCodeAlpha2' <<<"$ipmap_location_data")
-		ipmap_country_name=$(jq -r '.countryName' <<<"$ipmap_location_data")
-		# populate json output fields from ipmap output
-		geo_city_json_output="$ipmap_city"
-		geo_region_json_output="$ipmap_region"
-		geo_country_json_output="$ipmap_country_name"
-		geo_cc_json_output="$ipmap_cc"
-		if [ -n "$ipmap_city" ] && [ -n "$ipmap_region" ] && [ -n "$ipmap_cc" ]; then
-			ip_geo_data="$ipmap_city, $ipmap_region ($ipmap_cc)"
-			flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipmap_cc")
-			ip_geo_countryname="$ipmap_country_name"
-		elif [ -n "$ipmap_region" ] && [ -n "$ipmap_country_name" ]; then
-			ip_geo_data="$ipmap_region ($ipmap_country_name)"
-			ip_geo_countryname="$ipmap_country_name"
-		elif [ -n "$ipmap_country_name" ]; then
-			ip_geo_data="$ipmap_country_name"
-			ip_geo_countryname="$ipmap_country_name"
-		fi
+	if [ -n "$ipinfo_city" ]; then
+		# populate json output fields from ipinfo output
+		geo_city_json_output="$ipinfo_city"
+		geo_region_json_output="$ipinfo_region"
+		geo_country_json_output="$ipinfo_countryname"
+		geo_cc_json_output="$ipinfo_cc"
+		ip_geo_data="$ipinfo_city, $ipinfo_region ($ipinfo_cc)"
+		flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipinfo_cc")
+		ip_geo_countryname="$ipinfo_countryname"
 	elif [ "$ipapi_status" = "success" ]; then
-		# IPmap has incomplete/no data about this address, fallback to ip-api.com
+		# ipinfo has no data about this address, fallback to ip-api.com
 		ipapi_city=$(jq -r '.city' <<<"$ipapi_output")
 		ipapi_region=$(jq -r '.regionName' <<<"$ipapi_output")
 		ipapi_cc=$(jq -r '.countryCode' <<<"$ipapi_output")
@@ -3177,31 +3185,75 @@ CheckPrerequisites() {
 	fi
 
 	IQS_TOKEN=""
-	# Read ipqualityscore.com token from possible config files on disk
+	IPINFO_TOKEN=""
+
 	IFS=$'\n'
+	# Read tokens token from possible config files on disk
 	for asn_config_file in $(tr ':' '\n' <<<"$IQS_TOKEN_FILES"); do
 		if [ -r "$asn_config_file" ]; then
 			IQS_TOKEN=$(tr -d ' \n\r\t' < "$asn_config_file")
 			break
 		fi
 	done
-	if [ -z "$IQS_TOKEN" ] && [ "$JSON_OUTPUT" = false ]; then
-		# warn the user about the absence of in-depth IP reputation API token
-		if [ "$IS_HEADLESS" = true ]; then
-			line="------------------------------------------------------------"
-			echo -e "\n${line}\nWARNING: No IpQualityScore token found, disabling in-depth\nthreat analysis. Check" \
-				"\nhttps://github.com/nitefood/asn#ip-reputation-api-token for\ninstructions on how to enable it." \
-				"\n${line}" >&2
-		else
-			line="────────────────────────────────────────────────────────────"
-			echo -en "\n${yellow}${line}\n\t\t\tWARNING${default}" \
-				"\n\n${white}No IPQualityScore token found, so disabling in-depth threat" \
-				"\nanalysis and IP reputation lookups. Please visit" \
-				"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
-				"\nfor instructions on how to enable it." \
-				"\n${yellow}${line}${default}\n" >&2
+	for asn_config_file in $(tr ':' '\n' <<<"$IPINFO_TOKEN_FILES"); do
+		if [ -r "$asn_config_file" ]; then
+			IPINFO_TOKEN=$(tr -d ' \n\r\t' < "$asn_config_file")
+			break
+		fi
+	done
+
+	if [ "$JSON_OUTPUT" = false ]; then
+		if 	[ -z "$IQS_TOKEN" ] || [ -z "$IPINFO_TOKEN" ]; then
+			# warn the user about the absence of external API token(s)
+			if [ "$IS_HEADLESS" = true ]; then
+				line="------------------------------------------------------------"
+				echo -e "\n${line}\nWARNING: At least one external (free) API token is missing." \
+					"\nCheck https://github.com/nitefood/asn#api-tokens for\ninstructions on how to enable them." \
+					"\n${line}" >&2
+			else
+				line="────────────────────────────────────────────────────"
+				echo -e "\n${dim}${yellow}${line}" \
+					"\nWarning: ${dim}${yellow}At least one external API token is missing." \
+					"\nTo enable full script functionalities, please visit" \
+					"\n${blue}https://github.com/nitefood/asn#api-tokens" >&2
+				echo -e "${yellow}${line}${default}" >&2
+			fi
+		fi
+		if [ "$ASN_DEBUG" = true ]; then
+			echo ""
+			for token in "IQS_TOKEN" "IPINFO_TOKEN"; do
+				if [ -z "${!token}" ]; then
+					DebugPrint "${dim}${white}[$token: ${red}❌ NOT FOUND${white}]"
+				else
+					DebugPrint "${dim}${white}[$token: ${green}✓ OK${white}]"
+				fi
+			done
 		fi
 	fi
+	# if [ -z "$IQS_TOKEN" ] && [ "$JSON_OUTPUT" = false ]; then
+	# 	# warn the user about the absence of in-depth IP reputation API token
+	# 	if [ "$IS_HEADLESS" = true ]; then
+	# 		line="------------------------------------------------------------"
+	# 		echo -e "\n${line}\nWARNING: No IpQualityScore token found, disabling in-depth\nthreat analysis. Check" \
+	# 			"\nhttps://github.com/nitefood/asn#ip-reputation-api-token for\ninstructions on how to enable it." \
+	# 			"\n${line}" >&2
+	# 	else
+	# 		line="────────────────────────────────────────────────────────────"
+	# 		echo -en "\n${yellow}${line}\n\t\t\tWARNING${default}" \
+	# 			"\n\n${white}No IPQualityScore token found, so disabling in-depth threat" \
+	# 			"\nanalysis and IP reputation lookups. Please visit" \
+	# 			"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
+	# 			"\nfor instructions on how to enable it." \
+	# 			"\n${yellow}${line}${default}\n" >&2
+	# 	fi
+	# fi
+
+	# # API tokens presence check
+	# if [ "$IS_HEADLESS" = false ] && [ -z "$IPINFO_TOKEN" ]; then
+	# 	echo ""
+	# 	echo -e "${dim}${blue}[INFO]${white} No IQS token found, disabling in-depth threat analysis (${underline}https://github.com/nitefood/asn#ip-reputation-api-token${default}${dim}${white})${default}"
+	# 	echo -e "${dim}${blue}[INFO]${white} No IPINFO token found, add one (for free) to raise request limit to 50k/month (${underline}http://github.com/nitefood/asn/ipinfo-token${default}${dim}${white})${default}"
+	# fi
 
 	CoreutilsFixup
 
@@ -3209,13 +3261,15 @@ CheckPrerequisites() {
 }
 
 DebugPrint(){
-	# Debug print helper function. will display debug string in terminal mode, or full client debug info in headless mode
+	# Debug print helper function. will display debug string in terminal mode, or full client debug info in headless mode. Will append output to $ASN_LOGFILE logfile
 	if [ "$ASN_DEBUG" = true ]; then
 		# strip CRLFs
 		dbgstring=$(echo -e "$1" | tr -d '\r\n')
 		if [ "$IS_HEADLESS" = false ]; then
 			# command line tool mode
 			echo -e "${default}[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring" >&2
+			echo -e "\n────────────────────────────────────────────────────────────────────────────────────────────────────────" \
+					"\n>>>> ${default}[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring" >> "$ASN_LOGFILE"
 		else
 			# server mode
 			if [ -z "$host" ]; then
@@ -3228,7 +3282,10 @@ DebugPrint(){
 			else
 				requestid="$reqid"
 			fi
-			echo -e "${default}[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring [CLIENT: ${yellow}$NCAT_REMOTE_ADDR${default}, TARGET: ${magenta}$target${default}, REQID: ${blue}$requestid${default}]" >&2
+			echo -e "${default}[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring [CLIENT: ${yellow}$NCAT_REMOTE_ADDR${default}, " \
+					"TARGET: ${magenta}$target${default}, REQID: ${blue}$requestid${default}]" >&2 \
+			echo -e "${default}[$(date +'%F %T')] ${lightgreybg}  DEBUG  ${default} $dbgstring [CLIENT: ${yellow}$NCAT_REMOTE_ADDR${default}, " \
+					"TARGET: ${magenta}$target${default}, REQID: ${blue}$requestid${default}]" >> "$ASN_LOGFILE"
 		fi
 	fi
 }
@@ -3876,9 +3933,11 @@ else
 	IS_ASN_CONNHANDLER=false
 fi
 
-# External API token for ipqualityscore.com (IP reputation & threat analisys lookup)
+# External API tokens for ipqualityscore.com (IP reputation & threat analisys lookup)
+# and ipinfo.io (IP geolocation lookup)
 # Files will be parsed in the order they are declared (first path found takes precedence)
 IQS_TOKEN_FILES="$HOME/.asn/iqs_token:/etc/asn/iqs_token"
+IPINFO_TOKEN_FILES="$HOME/.asn/ipinfo_token:/etc/asn/ipinfo_token"
 
 # SIGINT trapping
 NO_ERROR_ON_INTERRUPT=false
@@ -3910,6 +3969,35 @@ IQS_CUSTOM_SETTINGS="" # e.g. "strictness=1&allow_public_access_points=false" - 
 declare -A PEERINGDB_CACHED_DATASETS
 declare -A PEERINGDB_CACHED_IXP_DATA
 declare -A CAIDARANK_CACHED_AS_DATA
+# to build the CC->CountryName mapping cache:
+# COUNTRY_MAP_CACHE=$(docurl -m4 -s "https://restcountries.com/v3.1/all?fields=name,cca2" | jq -c 'map({(.cca2): .name.common}) | add | to_entries | sort_by(.key) | from_entries')
+COUNTRY_MAP_CACHE='{"AD":"Andorra","AE":"United Arab Emirates","AF":"Afghanistan","AG":"Antigua and Barbuda","AI":"Anguilla","AL":"Albania","AM":"Armenia","AO":"Angola",
+"AQ":"Antarctica","AR":"Argentina","AS":"American Samoa","AT":"Austria","AU":"Australia","AW":"Aruba","AX":"Åland Islands","AZ":"Azerbaijan","BA":"Bosnia and Herzegovina",
+"BB":"Barbados","BD":"Bangladesh","BE":"Belgium","BF":"Burkina Faso","BG":"Bulgaria","BH":"Bahrain","BI":"Burundi","BJ":"Benin","BL":"Saint Barthélemy","BM":"Bermuda",
+"BN":"Brunei","BO":"Bolivia","BQ":"Caribbean Netherlands","BR":"Brazil","BS":"Bahamas","BT":"Bhutan","BV":"Bouvet Island","BW":"Botswana","BY":"Belarus","BZ":"Belize","CA":"Canada",
+"CC":"Cocos (Keeling) Islands","CD":"DR Congo","CF":"Central African Republic","CG":"Republic of the Congo","CH":"Switzerland","CI":"Ivory Coast","CK":"Cook Islands","CL":"Chile",
+"CM":"Cameroon","CN":"China","CO":"Colombia","CR":"Costa Rica","CU":"Cuba","CV":"Cape Verde","CW":"Curaçao","CX":"Christmas Island","CY":"Cyprus","CZ":"Czechia","DE":"Germany",
+"DJ":"Djibouti","DK":"Denmark","DM":"Dominica","DO":"Dominican Republic","DZ":"Algeria","EC":"Ecuador","EE":"Estonia","EG":"Egypt","EH":"Western Sahara","ER":"Eritrea","ES":"Spain",
+"ET":"Ethiopia","FI":"Finland","FJ":"Fiji","FK":"Falkland Islands","FM":"Micronesia","FO":"Faroe Islands","FR":"France","GA":"Gabon","GB":"United Kingdom","GD":"Grenada",
+"GE":"Georgia","GF":"French Guiana","GG":"Guernsey","GH":"Ghana","GI":"Gibraltar","GL":"Greenland","GM":"Gambia","GN":"Guinea","GP":"Guadeloupe","GQ":"Equatorial Guinea",
+"GR":"Greece","GS":"South Georgia","GT":"Guatemala","GU":"Guam","GW":"Guinea-Bissau","GY":"Guyana","HK":"Hong Kong","HM":"Heard Island and McDonald Islands","HN":"Honduras",
+"HR":"Croatia","HT":"Haiti","HU":"Hungary","ID":"Indonesia","IE":"Ireland","IL":"Israel","IM":"Isle of Man","IN":"India","IO":"British Indian Ocean Territory","IQ":"Iraq",
+"IR":"Iran","IS":"Iceland","IT":"Italy","JE":"Jersey","JM":"Jamaica","JO":"Jordan","JP":"Japan","KE":"Kenya","KG":"Kyrgyzstan","KH":"Cambodia","KI":"Kiribati","KM":"Comoros",
+"KN":"Saint Kitts and Nevis","KP":"North Korea","KR":"South Korea","KW":"Kuwait","KY":"Cayman Islands","KZ":"Kazakhstan","LA":"Laos","LB":"Lebanon","LC":"Saint Lucia",
+"LI":"Liechtenstein","LK":"Sri Lanka","LR":"Liberia","LS":"Lesotho","LT":"Lithuania","LU":"Luxembourg","LV":"Latvia","LY":"Libya","MA":"Morocco","MC":"Monaco","MD":"Moldova",
+"ME":"Montenegro","MF":"Saint Martin","MG":"Madagascar","MH":"Marshall Islands","MK":"North Macedonia","ML":"Mali","MM":"Myanmar","MN":"Mongolia","MO":"Macau",
+"MP":"Northern Mariana Islands","MQ":"Martinique","MR":"Mauritania","MS":"Montserrat","MT":"Malta","MU":"Mauritius","MV":"Maldives","MW":"Malawi","MX":"Mexico","MY":"Malaysia",
+"MZ":"Mozambique","NA":"Namibia","NC":"New Caledonia","NE":"Niger","NF":"Norfolk Island","NG":"Nigeria","NI":"Nicaragua","NL":"Netherlands","NO":"Norway","NP":"Nepal","NR":"Nauru",
+"NU":"Niue","NZ":"New Zealand","OM":"Oman","PA":"Panama","PE":"Peru","PF":"French Polynesia","PG":"Papua New Guinea","PH":"Philippines","PK":"Pakistan","PL":"Poland",
+"PM":"Saint Pierre and Miquelon","PN":"Pitcairn Islands","PR":"Puerto Rico","PS":"Palestine","PT":"Portugal","PW":"Palau","PY":"Paraguay","QA":"Qatar","RE":"Réunion","RO":"Romania",
+"RS":"Serbia","RU":"Russia","RW":"Rwanda","SA":"Saudi Arabia","SB":"Solomon Islands","SC":"Seychelles","SD":"Sudan","SE":"Sweden","SG":"Singapore",
+"SH":"Saint Helena, Ascension and Tristan da Cunha","SI":"Slovenia","SJ":"Svalbard and Jan Mayen","SK":"Slovakia","SL":"Sierra Leone","SM":"San Marino","SN":"Senegal","SO":"Somalia",
+"SR":"Suriname","SS":"South Sudan","ST":"São Tomé and Príncipe","SV":"El Salvador","SX":"Sint Maarten","SY":"Syria","SZ":"Eswatini","TC":"Turks and Caicos Islands","TD":"Chad",
+"TF":"French Southern and Antarctic Lands","TG":"Togo","TH":"Thailand","TJ":"Tajikistan","TK":"Tokelau","TL":"Timor-Leste","TM":"Turkmenistan","TN":"Tunisia","TO":"Tonga",
+"TR":"Turkey","TT":"Trinidad and Tobago","TV":"Tuvalu","TW":"Taiwan","TZ":"Tanzania","UA":"Ukraine","UG":"Uganda","UM":"United States Minor Outlying Islands","US":"United States",
+"UY":"Uruguay","UZ":"Uzbekistan","VA":"Vatican City","VC":"Saint Vincent and the Grenadines","VE":"Venezuela","VG":"British Virgin Islands","VI":"United States Virgin Islands",
+"VN":"Vietnam","VU":"Vanuatu","WF":"Wallis and Futuna","WS":"Samoa","XK":"Kosovo","YE":"Yemen","YT":"Mayotte","ZA":"South Africa","ZM":"Zambia","ZW":"Zimbabwe"}'
+
 
 #*
 #* Parse command line options
@@ -4086,6 +4174,7 @@ while getopts "$optspec" optchar; do {
 			;;
 		"v")
 			ASN_DEBUG=true
+			rm -f "$ASN_LOGFILE" 2>/dev/null
 			;;
 		*)
 			if [ "$OPTERR" = 1 ] && [ -t 0 ]; then
@@ -4280,6 +4369,7 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 fi
 
 BoxHeader "ASN lookup for $userinput"
+DebugPrint "ASN v$ASN_VERSION started with target: '$userinput'"
 
 if [ "$FORCE_ORGSEARCH" = true ]; then
 	# user passed the "-o" switch
