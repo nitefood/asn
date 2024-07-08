@@ -70,7 +70,7 @@ QueryRipestat(){
 	fi
 	# BGP neighbours list
 	StatusbarMessage "Retrieving peering data for AS$1 ($found_asname)"
-	ripestat_neighbours_data=$(docurl -m5 -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ripestat_neighbours_data=$(docurl -m10 -s "https://stat.ripe.net/data/asn-neighbours/data.json?resource=AS$1&sourceapp=nitefood-asn")
 	upstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="left") | .asn' <<<"$ripestat_neighbours_data")
 	downstream_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="right") | .asn' <<<"$ripestat_neighbours_data")
 	uncertain_peers=$(jq -r '.data.neighbours | sort_by(.power) | reverse[] | select (.type=="uncertain") | .asn' <<<"$ripestat_neighbours_data")
