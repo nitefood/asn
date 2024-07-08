@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.77.0-rc"
+ASN_VERSION="0.77.0"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
