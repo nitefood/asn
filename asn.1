@@ -1,0 +1,203 @@
+.TH ASN 1 "July 2024" "0.77" "User Commands"
+.SH NAME
+asn \- ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool
+.SH SYNOPSIS
+.B asn
+[\fIOPTIONS\fR] [\fITARGET\fR]
+.br
+.B asn
+[\fB-v\fR] \fB-l\fR [\fISERVER OPTIONS\fR]
+.SH DESCRIPTION
+ASN is a tool for performing various lookup operations related to ASN (Autonomous System Number), RPKI validity, BGP statistics, IPv4/v6 addresses, prefixes, ASPaths, organizations, and IP reputations.
+.SH OPTIONS
+.TP
+\fB-t\fR
+.B (enable trace)
+.br
+Enable AS path trace to the
+.B TARGET
+(this is the default behavior)
+.TP
+\fB-n\fR
+.B (no trace|no additional INETNUM lookups)
+.br
+Disable tracing the AS path to the
+.B TARGET
+(for IP targets) or
+.br
+Disable additional (unannounced / announced by other AS) INETNUM lookups for the
+.B TARGET
+(for AS targets)
+.TP
+\fB-d\fR
+.B (detailed)
+Output detailed hop info during the AS path trace to the
+.B TARGET
+.br
+This option also enables RPKI validation/BGP hijacking detection for every hop
+.TP
+\fB-a\fR
+.B (ASN Suggest)
+.br
+Lookup AS names and numbers matching
+.B TARGET
+.TP
+\fB-u\fR
+.B (Transit/Upstream lookup)
+.br
+Inspect BGP updates and ASPATHs for the
+.B TARGET
+address/prefix and identify possible transit/upstream autonomous systems
+.TP
+\fB-c\fR
+.B (Country CIDR)
+.br
+Lookup all IPv4/v6 CIDR blocks allocated to the
+.B TARGET
+country
+.TP
+\fB-g\fR
+.B (Bulk Geolocate)
+.br
+Geolocate all IPv4/v6 addresses passed as
+.B TARGET
+.br
+This mode supports multiple targets, stdin input and IP extraction from input, e.g.
+.br
+.B asn -g < /var/log/apache2/error.log
+or
+.B echo 1.1.1.1 2.2.2.2 | asn -g
+.TP
+\fB-s\fR
+.B (Shodan scan)
+.br
+Query Shodan's InternetDB for CVE/CPE/Tags/Ports/Hostnames data about TARGET
+.br
+This mode supports multiple targets and stdin input, e.g.
+.br
+.B asn -s < iplist
+or
+.B echo 1.1.1.0/24 google.com | asn -s
+.TP
+\fB-o\fR
+.B (organization search)
+.br
+Force
+.B TARGET
+to be treated as an Organization Name
+.TP
+\fB-m\fR
+.B (monochrome output)
+.br
+Disable colored output
+.TP
+\fB-v\fR
+.B (verbose)
+.br
+Enable (and log to $HOME/asndebug.log) debug messages (URLs being queried and variable names being assigned)
+.br
+API call response data (i.e. the JSON output) is logged to the logfile.
+.TP
+\fB-j\fR
+.B (compact JSON output)
+.br
+Set output to compact JSON mode (ideal for machine parsing)
+.TP
+\fB-J\fR
+.B (pretty-printed JSON output)
+.br
+Set output to pretty-printed JSON mode
+.TP
+\fB-h\fR
+.B (help)
+.br
+Show this help screen
+.TP
+\fB-l\fR
+.B (lookup server)
+.br
+Launch the script in server mode. See
+.B SERVER OPTIONS
+below
+.SH TARGET
+.TP
+\fB<AS Number>\fR
+Lookup matching ASN and BGP announcements/neighbours data.
+.TP
+\fB<IPv4/IPv6>\fR
+Lookup matching route(4/6), IP reputation, and ASN data.
+.TP
+\fB<Prefix>\fR
+Lookup matching ASN data.
+.TP
+\fB<host.name.tld>\fR
+Lookup matching IP, route, and ASN data. Supports multiple IPs - e.g. DNS RR.
+.TP
+\fB<URL>\fR
+Extract hostname/IP from the URL and lookup relative data. Supports any protocol prefix, non-standard ports, and prepended credentials.
+.TP
+\fB<Organization Name>\fR
+Search by company name and lookup network ranges exported by (or related to) the company.
+.SH SERVER OPTIONS
+.TP
+\fB\&BIND_ADDRESS\fR
+IP address (v4/v6) to bind the listening server to (e.g., 'asn -l 0.0.0.0').
+.br
+Default value:
+.B 127.0.0.1 (IPv4) or ::1 (IPv6).
+.TP
+\fB\&BIND_PORT\fR
+TCP Port to bind the listening server to (e.g., 'asn -l 12345').
+.br
+Default value:
+.B 49200.
+.TP
+\fB\&BIND_ADDRESS BIND_PORT\fR
+IP address and port to bind the listening server to (e.g., 'asn -l ::1 12345').
+.TP
+.B \fB-v\fR
+.B (verbose)
+.br
+Enable verbose output and debug messages in server mode.
+.TP
+.B \fB--allow\fR host[,host,...]
+Allow only given hosts to connect to the server.
+.TP
+.B \fB--allowfile\fR file
+A file of hosts allowed to connect to the server.
+.TP
+.B \fB--deny\fR host[,host,...]
+Deny given hosts from connecting to the server.
+.TP
+.B \fB--denyfile\fR file
+A file of hosts denied from connecting to the server.
+.TP
+.B \fB-m\fR, \fB--max-conns\fR <n>
+The maximum number of simultaneous connections accepted by the server. 100 is the default.
+.SH NOTES
+Every option in server mode (after -l) is passed directly to the ncat listener. Refer to
+.B man ncat
+for more details on the available commands. Unless specified, the default IP:PORT values of 127.0.0.1:49200 (for IPv4) or [::1]:49200 (for IPv6) will be used (e.g., 'asn -l').
+.SH EXAMPLES
+Example server usage:
+.PP
+.B asn -l
+(starts server on default IP(v4/v6):PORT)
+.PP
+.B asn -l 0.0.0.0 --allow 192.168.0.0/24,192.168.1.0/24,192.168.2.245
+(binds to all available IPv4 interfaces on the default port, allowing only connections from the three specified subnets)
+.PP
+.B asn -l :: 2222 --allow 2001:DB8::/32
+(binds to all available IPv6 interfaces on port 2222, allowing only connections from the specified prefix)
+.PP
+.B asn -v -l 0.0.0.0 --allowfile "~/goodips.txt" -m 5
+(verbose mode, bind to all IPv4 interfaces, use an allowfile with allowed addresses, accept a maximum of 5 concurrent connections)
+.SH "SEE ALSO"
+To file a bug report or feature request, please open an issue on the project homepage:
+.B https://github.com/nitefood/asn
+.SH "AUTHOR"
+Project author: nitefood
+.B <nitefood0@gmail.com>
+.PP
+This manpage was created by Marcos Rodrigues de Carvalho (aka oday)
+.B <marcosrcarvalho42@gmail.com>
