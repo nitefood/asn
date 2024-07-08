@@ -1,4 +1,4 @@
-.TH ASN 1 "February 2024" "0.76.1" "User Commands"
+.TH ASN 1 "July 2024" "0.77" "User Commands"
 .SH NAME
 asn \- ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool
 .SH SYNOPSIS
@@ -94,7 +94,9 @@ Disable colored output
 \fB-v\fR
 .B (verbose)
 .br
-Enable debug messages (URLs being queried and variable names being assigned)
+Enable (and log to $HOME/asndebug.log) debug messages (URLs being queried and variable names being assigned)
+.br
+API call response data (i.e. the JSON output) is logged to the logfile.
 .TP
 \fB-j\fR
 .B (compact JSON output)
@@ -191,8 +193,11 @@ Example server usage:
 .B asn -v -l 0.0.0.0 --allowfile "~/goodips.txt" -m 5
 (verbose mode, bind to all IPv4 interfaces, use an allowfile with allowed addresses, accept a maximum of 5 concurrent connections)
 .SH "SEE ALSO"
-Project homepage:
+To file a bug report or feature request, please open an issue on the project homepage:
 .B https://github.com/nitefood/asn
 .SH "AUTHOR"
-Marcos Rodrigues de Carvalho (aka oday)
+Project author: nitefood
+.B <nitefood0@gmail.com>
+.PP
+This manpage was created by Marcos Rodrigues de Carvalho (aka oday)
 .B <marcosrcarvalho42@gmail.com>
