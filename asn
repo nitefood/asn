@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.77.0"
+ASN_VERSION="0.78.0"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -897,9 +897,16 @@ AbuseLookupForPrefix(){
 	abuselist=""
 	for abusecontact in $(echo -e "$whoisdata" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
 		if ! grep -q '@' <<<"$abusecontact"; then
+			# the currently parsed abuse contact, found in whois data, is not an email (but likely a NIC handle), fall back to RIPE API
 			resolvedabuse=$(docurl -m5 -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
+			if ! grep -q '@' <<<"$resolvedabuse"; then
+				# RIPE API didn't give back an email, second and last fall back to DSHIELD API
+				dshield_abuse_contact=$(docurl -m15 -s --user-agent "nitefood/asn" https://isc.sans.edu/api/ip/$2?json | jq -r 'select (.ip.asabusecontact != null) | .ip.asabusecontact')
+				if grep -q '@' <<<"$dshield_abuse_contact"; then
+					resolvedabuse="$dshield_abuse_contact"
+				fi
+			fi
 			[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
-
 		fi
 		[[ -n "$abuselist" ]] && abuselist+="\n"
 		abuselist+="$abusecontact"
@@ -2132,6 +2139,11 @@ PrintJsonOutput(){
 	json_to_print+="\"version\":\"$ASN_VERSION\","
 	json_to_print+="\"request_time\":\"$json_request_time\","
 	json_to_print+="\"request_duration\":$runtime,"
+	json_to_print+="\"api_tokens\":{"
+	json_to_print+="\"ipqualityscore\":$json_IQS_TOKEN,"
+	json_to_print+="\"ipinfo\":$json_IPINFO_TOKEN,"
+	json_to_print+="\"cloudflare\":$json_CLOUDFLARE_TOKEN"
+	json_to_print+="},"
 	json_to_print+="\"result_count\":$json_resultcount,"
 	if [ "$RECON_MODE" = true ] || [ "$BGP_UPSTREAM_MODE" = true ]; then
 		# we already have an array as a final json output, append it as-is
@@ -2359,6 +2371,76 @@ GetCAIDARank(){
 		caida_degree_customer="N/A"
 		caida_asrank_recap="${dim}N/A"
 	fi
+}
+
+GetCloudflareHijacksAndLeaks(){
+	# query Cloudflare Radar API for BGP hijacks or route leaks involving the target ASN in the past 12 months
+	asn="$1"
+	cf_hijacks_text="${dim}${red}N/A${default}${dim} [Cloudflare query timed out or API error]"
+	cf_leaks_text="${dim}${red}N/A${default}${dim} [Cloudflare query timed out or API error]"
+	cf_hijack_query_success=false
+	cf_leak_query_success=false
+
+	if [ -z "$CLOUDFLARE_TOKEN" ]; then
+		cf_hijacks_text="${dim}${red}N/A${default}${dim} [Cloudflare API token missing]${default}"
+		cf_leaks_text="${dim}${red}N/A${default}${dim} [Cloudflare API token missing]${default}"
+		return
+	fi
+
+	StatusbarMessage "Retrieving BGP hijacks and leaks history for AS${asn} (${target_asname})"
+	cf_hijacks_json_output=$(docurl -m 10 -s -H "Authorization: Bearer $CLOUDFLARE_TOKEN" "https://api.cloudflare.com/client/v4/radar/bgp/hijacks/events?dateRange=52w&involvedAsn=$asn")
+	cf_leaks_json_output=$(docurl -m 10 -s -H "Authorization: Bearer $CLOUDFLARE_TOKEN" "https://api.cloudflare.com/client/v4/radar/bgp/leaks/events?dateRange=52w&involvedAsn=$asn")
+	if [ -n "$cf_hijacks_json_output" ]; then
+		cf_hijacks_count=$(jq -r '.result_info.total_count' <<<"$cf_hijacks_json_output" 2>/dev/null)
+		if [ -z "$cf_hijacks_count" ]; then
+			StatusbarMessage
+			return
+		fi
+		cf_hijacks_as_hijacker_count=$(jq -r ".result.events | map(select (.hijacker_asn == $asn)) | length" <<<"$cf_hijacks_json_output" 2>/dev/null)
+		if [ -z "$cf_hijacks_as_hijacker_count" ]; then
+			StatusbarMessage
+			return
+		fi
+		cf_hijacks_as_victim_count=$((cf_hijacks_count - cf_hijacks_as_hijacker_count))
+		if [ "$cf_hijacks_count" -gt 0 ]; then
+			# at least one hijack incident involving this AS
+			[[ "$cf_hijacks_count" -gt 1 ]] && s="s" || s=""
+			cf_hijacks_text="${white}Involved in ${magenta}$cf_hijacks_count${white} BGP hijack incident${s}"
+			if [ "$cf_hijacks_as_hijacker_count" -gt 0 ] && [ "$cf_hijacks_as_victim_count" -gt 0 ]; then
+				# mixed situations involving this AS (both hijacker and victim)
+				cf_hijacks_text="${cf_hijacks_text} (of which ${red}$cf_hijacks_as_hijacker_count${white} as a hijacker and ${green}$cf_hijacks_as_victim_count${white} as a victim)${default}"
+			elif [ "$cf_hijacks_as_hijacker_count" -gt 0 ]; then
+				# this AS was always a hijacker
+				cf_hijacks_text="${cf_hijacks_text} ${red}(always as a hijacker)${default}"
+			else
+				# this AS was always a victim
+				cf_hijacks_text="${cf_hijacks_text} ${green}(always as a victim)${default}"
+			fi
+		else
+			# no hijack incidents involving this AS
+			cf_hijacks_text="${green}None${default}"
+		fi
+	fi
+	cf_hijack_query_success=true
+
+	if [ -n "$cf_leaks_json_output" ]; then
+		cf_leaks_count=$(jq -r '.result_info.total_count' <<<"$cf_leaks_json_output" 2>/dev/null)
+		if [ -z "$cf_leaks_count" ]; then
+			StatusbarMessage
+			return
+		fi
+		if [ "$cf_leaks_count" -gt 0 ]; then
+			# at least one route leak incident involving this AS
+			[[ "$cf_leaks_count" -gt 1 ]] && s="s" || s=""
+			cf_leaks_text="${white}Involved in ${yellow}$cf_leaks_count${white} BGP route leak incident${s}${default}"
+		else
+			# no route leak incidents involving this AS
+			cf_leaks_text="${green}None${default}"
+		fi
+	fi
+	cf_leak_query_success=true
+
+	StatusbarMessage
 }
 
 IPGeoRepLookup(){
@@ -2883,11 +2965,16 @@ AsnServerListener(){
 	else
 		DISPLAY_ASN_SRV_BINDADDR="${ASN_SRV_BINDADDR}"
 	fi
+	# prepare API tokens status line
+	[[ "$json_IQS_TOKEN" = true ]] && API_TOKENS_STATUS="${green}✓ IQS${default}" || API_TOKENS_STATUS="${red}❌ IQS${default}"
+	[[ "$json_IPINFO_TOKEN" = true ]] && API_TOKENS_STATUS+=" • ${green}✓ IPINFO${default}" || API_TOKENS_STATUS+=" • ${red}❌ IPINFO${default}"
+	[[ "$json_CLOUDFLARE_TOKEN" = true ]] && API_TOKENS_STATUS+=" • ${green}✓ CLOUDFLARE${default}" || API_TOKENS_STATUS+=" • ${red}❌ CLOUDFLARE${default}"
 	echo -e "\n- Server ext. IP  : ${blue}${local_wanip}${default}" \
 			"\n- Server Country  : ${blue}${server_country}${default}" \
 			"\n- Server ASN      : ${red}[AS${found_asn}]${default} ${green}$found_asname${default}" \
 			"\n- Server has IPv6 : ${ipv6_mark}" \
 			"\n- Running on GCP  : ${CLOUD_SHELL_MARK}" \
+			"\n- API Tokens      : ${API_TOKENS_STATUS}" \
 			"\n- Bookmarklet URL : ${BOOKMARKLET_URL}" \
 			"\n\n[$(date +"%F %T")] ${bluebg}  INFO   ${default} ASN Lookup Server listening on ${white}${DISPLAY_ASN_SRV_BINDADDR}:${ASN_SRV_BINDPORT}${default}"
 
@@ -2954,12 +3041,8 @@ BoxHeader() { # cheers https://unix.stackexchange.com/a/70616
 }
 
 StatusbarMessage() { # invoke without parameters to delete the status bar message
-	# suppress output for headless runs
-	[[ "$IS_HEADLESS" = true ]] && return
-
-	if [ "$ASN_DEBUG" = true ]; then
-		# [[ -n "$1" ]] && statusdbgstring="$1" || statusdbgstring="[remove last statusbar message]"
-		# echo -e "${default}[$(date +'%F %T')] ${lightgreybg}  STATUS ${default} ${statusdbgstring}${default}"
+	# suppress status bar displaying for headless, json or debug runs
+	if [ "$IS_HEADLESS" = true ] || [ "$JSON_OUTPUT" = true ] || [ "$ASN_DEBUG" = true ]; then
 		return
 	fi
 
@@ -3184,26 +3267,36 @@ CheckPrerequisites() {
 		fi
 	fi
 
-	IQS_TOKEN=""
-	IPINFO_TOKEN=""
+	IQS_TOKEN=""		; json_IQS_TOKEN="false"
+	IPINFO_TOKEN=""		; json_IPINFO_TOKEN="false"
+	CLOUDFLARE_TOKEN=""	; json_CLOUDFLARE_TOKEN="false"
 
 	IFS=$'\n'
 	# Read tokens token from possible config files on disk
 	for asn_config_file in $(tr ':' '\n' <<<"$IQS_TOKEN_FILES"); do
 		if [ -r "$asn_config_file" ]; then
 			IQS_TOKEN=$(tr -d ' \n\r\t' < "$asn_config_file")
+			json_IQS_TOKEN="true"
 			break
 		fi
 	done
 	for asn_config_file in $(tr ':' '\n' <<<"$IPINFO_TOKEN_FILES"); do
 		if [ -r "$asn_config_file" ]; then
 			IPINFO_TOKEN=$(tr -d ' \n\r\t' < "$asn_config_file")
+			json_IPINFO_TOKEN="true"
+			break
+		fi
+	done
+	for asn_config_file in $(tr ':' '\n' <<<"$CLOUDFLARE_TOKEN_FILES"); do
+		if [ -r "$asn_config_file" ]; then
+			CLOUDFLARE_TOKEN=$(tr -d ' \n\r\t' < "$asn_config_file")
+			json_CLOUDFLARE_TOKEN="true"
 			break
 		fi
 	done
 
 	if [ "$JSON_OUTPUT" = false ]; then
-		if 	[ -z "$IQS_TOKEN" ] || [ -z "$IPINFO_TOKEN" ]; then
+		if 	[ -z "$IQS_TOKEN" ] || [ -z "$IPINFO_TOKEN" ] || [ -z "$CLOUDFLARE_TOKEN" ]; then
 			# warn the user about the absence of external API token(s)
 			if [ "$IS_HEADLESS" = true ]; then
 				line="------------------------------------------------------------"
@@ -3221,40 +3314,15 @@ CheckPrerequisites() {
 		fi
 		if [ "$ASN_DEBUG" = true ]; then
 			echo ""
-			for token in "IQS_TOKEN" "IPINFO_TOKEN"; do
+			for token in "IQS_TOKEN" "IPINFO_TOKEN" "CLOUDFLARE_TOKEN"; do
 				if [ -z "${!token}" ]; then
-					DebugPrint "${dim}${white}[$token: ${red}❌ NOT FOUND${white}]"
+					DebugPrint "${dim}${white}$token: ${red}❌ NOT FOUND${white}"
 				else
-					DebugPrint "${dim}${white}[$token: ${green}✓ OK${white}]"
+					DebugPrint "${dim}${white}$token: ${green}✓ OK${white}"
 				fi
 			done
 		fi
 	fi
-	# if [ -z "$IQS_TOKEN" ] && [ "$JSON_OUTPUT" = false ]; then
-	# 	# warn the user about the absence of in-depth IP reputation API token
-	# 	if [ "$IS_HEADLESS" = true ]; then
-	# 		line="------------------------------------------------------------"
-	# 		echo -e "\n${line}\nWARNING: No IpQualityScore token found, disabling in-depth\nthreat analysis. Check" \
-	# 			"\nhttps://github.com/nitefood/asn#ip-reputation-api-token for\ninstructions on how to enable it." \
-	# 			"\n${line}" >&2
-	# 	else
-	# 		line="────────────────────────────────────────────────────────────"
-	# 		echo -en "\n${yellow}${line}\n\t\t\tWARNING${default}" \
-	# 			"\n\n${white}No IPQualityScore token found, so disabling in-depth threat" \
-	# 			"\nanalysis and IP reputation lookups. Please visit" \
-	# 			"\n${blue}https://github.com/nitefood/asn#ip-reputation-api-token${white}" \
-	# 			"\nfor instructions on how to enable it." \
-	# 			"\n${yellow}${line}${default}\n" >&2
-	# 	fi
-	# fi
-
-	# # API tokens presence check
-	# if [ "$IS_HEADLESS" = false ] && [ -z "$IPINFO_TOKEN" ]; then
-	# 	echo ""
-	# 	echo -e "${dim}${blue}[INFO]${white} No IQS token found, disabling in-depth threat analysis (${underline}https://github.com/nitefood/asn#ip-reputation-api-token${default}${dim}${white})${default}"
-	# 	echo -e "${dim}${blue}[INFO]${white} No IPINFO token found, add one (for free) to raise request limit to 50k/month (${underline}http://github.com/nitefood/asn/ipinfo-token${default}${dim}${white})${default}"
-	# fi
-
 	CoreutilsFixup
 
 	IFS="$saveIFS"
@@ -3933,11 +4001,12 @@ else
 	IS_ASN_CONNHANDLER=false
 fi
 
-# External API tokens for ipqualityscore.com (IP reputation & threat analisys lookup)
-# and ipinfo.io (IP geolocation lookup)
+# External API tokens for ipqualityscore.com (IP reputation & threat analisys lookup),
+# ipinfo.io (IP geolocation lookup) and Cloudflare Radar (BGP hijacks and route leaks historical data)
 # Files will be parsed in the order they are declared (first path found takes precedence)
 IQS_TOKEN_FILES="$HOME/.asn/iqs_token:/etc/asn/iqs_token"
 IPINFO_TOKEN_FILES="$HOME/.asn/ipinfo_token:/etc/asn/ipinfo_token"
+CLOUDFLARE_TOKEN_FILES="$HOME/.asn/cloudflare_token:/etc/asn/cloudflare_token"
 
 # SIGINT trapping
 NO_ERROR_ON_INTERRUPT=false
@@ -4514,6 +4583,7 @@ if [ -z "$input" ]; then
 			# JSON output
 			GetIXPresence "$asn"
 			QueryRipestat "$asn"
+			GetCloudflareHijacksAndLeaks "$asn"
 			final_json_output+="{"
 			final_json_output+="\"asn\":\"${asn}\""
 			final_json_output+=",\"asname\":\"${target_asname//\"/\\\"}\""
@@ -4528,6 +4598,17 @@ if [ -z "$input" ]; then
 				final_json_output+=",\"prefix_count_v4\":${ripestat_ipv4}"
 				final_json_output+=",\"prefix_count_v6\":${ripestat_ipv6}"
 				final_json_output+=",\"bgp_peer_count\":${ripestat_bgp}"
+			fi
+			# BGP incident (hijacks/leaks) summary
+			if [ "$cf_hijack_query_success" = true ]; then
+				final_json_output+=",\"bgp_hijack_incidents\":{\"total\":${cf_hijacks_count}"
+				final_json_output+=",\"as_hijacker\":${cf_hijacks_as_hijacker_count}"
+				final_json_output+=",\"as_victim\":${cf_hijacks_as_victim_count}"
+				final_json_output+="}"
+			fi
+			if [ "$cf_leak_query_success" = true ]; then
+				final_json_output+=",\"bgp_leak_incidents\":{\"total\":${cf_leaks_count}"
+				final_json_output+="}"
 			fi
 			# peer list
 			if [ -n "$ripestat_neighbours_data" ]; then
@@ -4576,9 +4657,15 @@ if [ -z "$input" ]; then
 			GetIXPresence "$asn"
 			echo ""
 			BoxHeader "BGP informations for AS${asn} (${target_asname})"
+			GetCloudflareHijacksAndLeaks "$asn"
 			echo ""
-			echo -e "${bluebg} BGP Neighbors  ────>${default} ${green}${caida_degree_total}${default} ${dim}(${default}${caida_degree_provider}${dim} Transits • ${default}${caida_degree_peer}${dim} Peers • ${default}${caida_degree_customer}${dim} Customers)${default}"
-			echo -e "${bluebg} Customer cone  ────>${default} ${green}${caida_customercone} ${default}${dim}(# of ASNs observed in the customer cone for this AS)${default}"
+			echo -e "${bluebg} BGP Neighbors           ────>${default} ${green}${caida_degree_total}${default} ${dim}(${default}${caida_degree_provider}${dim} Transits • ${default}${caida_degree_peer}${dim} Peers • ${default}${caida_degree_customer}${dim} Customers)${default}"
+			echo -e "${bluebg} Customer cone           ────>${default} ${green}${caida_customercone} ${default}${dim}(# of ASNs observed in the customer cone for this AS)${default}"
+			echo -e "${bluebg} BGP Hijacks (past 1y)   ────>${default} $cf_hijacks_text"
+			echo -e "${bluebg} BGP Route leaks (past 1y) ──>${default} $cf_leaks_text"
+			radar_href="https://radar.cloudflare.com/routing/as$asn?dateRange=52w"
+			[[ "$IS_ASN_CHILD" = true ]] && radar_href="<a href=\"$radar_href\" target=\"_blank\" style=\"color: $htmlblue; font-style: italic;\">View on Cloudflare Radar</a>🔗"
+			echo -e "${bluebg} In-depth BGP incident info ─>${default} ${dim}${blue}➜ ${radar_href}${default}"
 			echo ""
 			BoxHeader "Prefix informations for AS${asn} (${target_asname})"
 			echo ""

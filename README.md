@@ -60,6 +60,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
   * **IXP Presence** (*Internet Exchange facilities where the AS is present*)
   * **Global AS rank** (*derived from the size of its customer cone, number of peering relationships and more*)
   * **BGP statistics** (*neighbours count, originated v4/v6 prefix count*)
+  * **BGP incident history** (number of *BGP hijacks* and *route leaks* involving the target AS in the past 12 months, as a **victim** or a **hijacker**)
   * **Peering relationships** separated by type (*upstream/downstream/uncertain*), and sorted by observed *path count*, to give more reliable results (so for instance, the first few upstream peers are most likely to be transits). Furthermore, a recap of *transits/peers/customers* amount (per latest CAIDA data) is displayed.
   * **Announced prefixes** aggregated to the most relevant less-specific `INET(6)NUM` object (actual [LIR allocation](https://www.ripe.net/manage-ips-and-asns/db/support/documentation/ripe-database-documentation/rpsl-object-types/4-2-descriptions-of-primary-objects/4-2-4-description-of-the-inetnum-object)).
 
@@ -115,6 +116,8 @@ The script uses the following services for data retrieval:
 * [ip-api](https://ip-api.com/)
 * [StopForumSpam](https://www.stopforumspam.com/)
 * [IP Quality Score](https://www.ipqualityscore.com)
+* [Cloudflare Radar](https://radar.cloudflare.com/)
+* [ISC DSHIELD](https://isc.sans.edu/)
 * [GreyNoise](https://greynoise.io)
 * [Shodan](https://www.shodan.io/)
 * [NIST National Vulnerability Database](https://nvd.nist.gov/)
@@ -129,6 +132,7 @@ It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode
 * [BGPTools](https://bgp.tools)
 * [ipinfo.io](https://ipinfo.io)
 * [Host.io](https://host.io)
+* [Cloudflare Radar](https://radar.cloudflare.com/)
 
 Requires Bash v4.2+. Tested on:
 
@@ -159,9 +163,9 @@ Requires Bash v4.2+. Tested on:
 
   ![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
 
-* *Autonomous system number lookup with AS ranking, operational region, BGP stats, peering and prefix informations*
+* *Autonomous system number lookup with AS ranking, operational region, BGP stats and incident history, peering and prefix informations*
 
-  ![asnlookup](https://github.com/nitefood/asn/assets/24555810/758890d8-7103-41f3-978e-ba5799213af6)
+  ![asnlookup](https://github.com/user-attachments/assets/6afdd2cf-a454-4607-ac17-b62fe78ba816)
 
 * *Hostname/URL lookup*
 
@@ -234,12 +238,13 @@ To run the script without installing it locally, you have the following options:
 
 * **Docker** _(thanks [Gianni Stubbe](https://github.com/33Fraise33), [anarcat](https://github.com/anarcat), [Francesco Colista](https://github.com/fcolista), [arbal](https://github.com/arbal))_
 
-  _Note: the Docker image runs by default in server mode, if no parameters are given. This is equivalent to running the tool as `asn -l 0.0.0.0` (run server, bind to all IPv4 interfaces - this is necessary to expose the server port to the host machine). You can run the server with different [options](#syntax) by explicitly passing `-l [options]`. It's also possible to pass an [IpQualityScore token](#ip-reputation-api-token) (both client and server runs) by setting the `IQS_TOKEN` environment variable (example below) in the container._
+  _Note: the Docker image runs by default in server mode, if no parameters are given. This is equivalent to running the tool as `asn -l 0.0.0.0` (run server, bind to all IPv4 interfaces - this is necessary to expose the server port to the host machine). You can run the server with different [options](#syntax) by explicitly passing `-l [options]`. It's also possible to pass an [IpQualityScore](#ip-reputation-api-token-ipqualityscore), [ipinfo.io](#geolocation-api-token-ipinfoio) and/or [Cloudflare](#bgp-hijack-and-route-leak-incidents-cloudflare-radar) API token (both client and server runs) by setting, respectively, the `IQS_TOKEN`, `IPINFO_TOKEN` and `CLOUDFLARE_TOKEN` environment variables (examples below) in the container._
 
   Usage examples:
   - Start server: `docker run -it -p 49200:49200 nitefood/asn`
   - Client mode: `docker run -it nitefood/asn 1.1.1.1`
-  - Supply an IQS token: `docker run -it -e IQS_TOKEN="<your_token_here>" nitefood/asn [...]`
+  - Supply an IQS token: `docker run -it -e IQS_TOKEN="xxx" nitefood/asn [...]`
+  - Supply multiple tokens: `docker run -it -e IQS_TOKEN="xxx" -e IPINFO_TOKEN="yyy" -e CLOUDFLARE_TOKEN="zzz" nitefood/asn [...]`
 
 * **Google Cloud Shell**
 
@@ -251,7 +256,7 @@ To run the script without installing it locally, you have the following options:
 
   **2.** Prepare the GCP environment by launching `./cloudshell_bootstrap.sh`
 
-  **3.** _(OPTIONAL)_ Input your [IpQualityScore token](#ip-reputation-api-token) when requested to enable in-depth threat analisys and scoring
+  **3.** _(OPTIONAL)_ Input your [API tokens](#api-tokens) when requested to enable full script features
 
 - - -
 
@@ -436,7 +441,7 @@ The script can be configured to make use of your API tokens to enhance its funct
 
 The currently supported API tokens are:
 
-### Geolocation API token
+### Geolocation API token (ipinfo.io)
 
 <details><summary><b>Geolocation API token details</b></summary><p>
 
@@ -465,7 +470,7 @@ Either way, `asn` will pick up your token on the next run (no need to restart th
 
 </p></details>
 
-### IP reputation API token
+### IP reputation API token (IPQualityScore)
 
 <details><summary><b>IP reputation API token details</b></summary><p>
 
@@ -494,6 +499,44 @@ Either way, `asn` will pick up your token on the next run (no need to restart th
 
 > ***Note:***
 > *IPQualityScore is not queried by default for every target, but only for targets that get flagged as BAD by StopForumSpam. It's possible to override this behavior (and force IQS lookup for every target) by setting the `IQS_ALWAYS_QUERY` parameter to `true` in the [preferences file](#preferences-file-homeasnrc). It is also possible to specify [custom query settings](https://www.ipqualityscore.com/documentation/proxy-detection/overview) through the `IQS_CUSTOM_SETTINGS` parameter.*
+
+</p></details>
+
+### BGP hijack and route leak incidents (Cloudflare Radar)
+
+<details><summary><b>Cloudflare token details</b></summary><p>
+
+When this token is available, an additional lookup will be enabled for **autonomous system** targets, in order to enumerate the BGP incidents (both **BGP hijacks** and **BGP route leaks**) involving the target ASN.
+
+The script will use the [Cloudfare Radar](https://radar.cloudflare.com/) API to retrieve the amount of incidents involving the target ASN in the past 12 months. Additionally, it will report how many incidents saw the target ASN as a **hijacker** or as a **victim**.
+
+The Cloudflare Radar API is **free** to use, but requires a registration. The steps are:
+
+1. [Sign up](https://dash.cloudflare.com/sign-up) for a free Cloudflare account and **validate your email**
+2. From the [Cloudflare dashboard](https://dash.cloudflare.com/profile/api-tokens/), go to **My Profile > API Tokens**.
+3. Select **Create Token**
+4. Choose the "*Read Cloudflare Radar data*" template
+5. Click **Continue to summary** (the default values are fine)
+6. Click **Create token**
+
+Once obtained, the api token should be written to one of the following files (parsed in that order):
+
+`$HOME/.asn/cloudflare_token` or
+`/etc/asn/cloudflare_token`
+
+The `/etc`-based file should be used when running asn in **server mode**. The `$HOME`-based file takes precedence if both files exist, and is ideal for **user mode** (that is, running `asn` interactively from the command line).
+
+In order to do so, you can use the following command:
+
+***User mode:***
+
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/cloudflare_token" && chmod -R 600 "$HOME/.asn/"`
+
+***Server mode:***
+
+`TOKEN="<your_token_here>"; mkdir "/etc/asn/" && echo "$TOKEN" > "/etc/asn/cloudflare_token" && chmod -R 700 "/etc/asn/" && chown -R nobody /etc/asn/`
+
+Either way, `asn` will pick up your token on the next run (no need to restart the service if running in server mode), and use it to query the Cloudflare Radar API.
 
 </p></details>
 
@@ -948,9 +991,14 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
   "target_type": "ipv4",
   "result": "ok",
   "reason": "success",
-  "version": "0.72.1",
-  "request_time": "2022-03-28T22:42:34",
-  "request_duration": 3,
+  "version": "0.78.0",
+  "request_time": "2024-08-20T02:50:28",
+  "request_duration": 5,
+  "api_tokens": {
+    "ipqualityscore": true,
+    "ipinfo": true,
+    "cloudflare": true
+  },
   "result_count": 1,
   "results": [
     {
@@ -958,16 +1006,18 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
       "ip_version": "4",
       "reverse": "dns.google",
       "org_name": "Google LLC",
+      "net_range": "8.8.8.0/24",
+      "net_name": "GOGL",
       "abuse_contacts": [
-        "abuse@level3.com",
         "network-abuse@google.com"
       ],
       "routing": {
         "is_announced": true,
         "as_number": "15169",
         "as_name": "GOOGLE, US",
-        "net_range": "8.8.8.0/24",
-        "net_name": "LVLT-GOGL-8-8-8",
+        "as_rank": "1788",
+        "route": "8.8.8.0/24",
+        "route_name": "",
         "roa_count": "1",
         "roa_validity": "valid"
       },
@@ -978,13 +1028,13 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
         "is_proxy": false,
         "is_dc": true,
         "dc_details": {
-          "dc_name": "Google Cloud"
+          "dc_name": "Google LLC"
         },
         "is_ixp": false
       },
       "geolocation": {
-        "city": "Washington, D.C.",
-        "region": "Washington, D.C.",
+        "city": "Mountain View",
+        "region": "California",
         "country": "United States",
         "cc": "US"
       },
@@ -1018,15 +1068,20 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
   "target_type": "asn",
   "result": "ok",
   "reason": "success",
-  "version": "0.76.0",
-  "request_time": "2024-02-22T00:11:41",
-  "request_duration": 10,
+  "version": "0.78.0",
+  "request_time": "2024-08-20T02:50:46",
+  "request_duration": 17,
+  "api_tokens": {
+    "ipqualityscore": true,
+    "ipinfo": true,
+    "cloudflare": true
+  },
   "result_count": 1,
   "results": [
     {
       "asn": "5505",
       "asname": "VADAVO, ES",
-      "asrank": 3779,
+      "asrank": 4448,
       "org": "VDV-VLC-RED06 VDV-VLC-RED06 - CLIENTES TELECOM",
       "holder": "VADAVO SOLUCIONES SL",
       "abuse_contacts": [
@@ -1035,31 +1090,41 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
       "registration_date": "2016-12-13T08:28:07",
       "ixp_presence": [
         "DE-CIX Madrid: DE-CIX Madrid Peering LAN",
-        "ESPANIX Madrid Lower LAN"
+        "ESpanix Madrid Lower LAN"
       ],
       "prefix_count_v4": 8,
       "prefix_count_v6": 1,
       "bgp_peer_count": 36,
+      "bgp_hijack_incidents": {
+        "total": 0,
+        "as_hijacker": 0,
+        "as_victim": 0
+      },
+      "bgp_leak_incidents": {
+        "total": 0
+      },
       "bgp_peers": {
         "upstream": [
           "1299",
           "6939",
           "59432",
           "174",
+          "34549",
           "25091",
+          "35625",
           "33891",
+          "48348",
+          "13030",
           "8218",
           "41327",
-          "48348",
-          "35280",
-          "35625",
-          "4455",
-          "13030",
-          "202766",
           "3303",
+          "4455",
+          "6424",
           "6057",
-          "137409",
-          "15830"
+          "34927",
+          "9498",
+          "35280",
+          "1239"
         ],
         "downstream": [
           "48952",
@@ -1068,32 +1133,30 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
           "202054"
         ],
         "uncertain": [
-          "47787",
+          "24482",
+          "51185",
+          "41047",
+          "29680",
+          "212483",
+          "198150",
+          "14840",
+          "49544",
           "39384",
           "37721",
           "36236",
-          "25160",
-          "24482",
-          "51185",
-          "49544",
-          "41047",
-          "29680",
-          "29049",
-          "212483",
-          "14840",
-          "34927"
+          "25160"
         ]
       },
       "announced_prefixes": {
         "v4": [
-          "185.123.204.0/24",
-          "185.123.207.0/24",
+          "185.210.225.0/24",
           "188.130.247.0/24",
-          "185.210.226.0/24",
           "185.210.227.0/24",
           "185.123.205.0/24",
-          "185.210.225.0/24",
-          "185.123.206.0/24"
+          "185.123.207.0/24",
+          "185.210.226.0/24",
+          "185.123.206.0/24",
+          "185.123.204.0/24"
         ],
         "v6": [
           "2a03:9320::/32"
@@ -1169,16 +1232,21 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
   "target_type": "ipv4",
   "result": "ok",
   "reason": "success",
-  "version": "0.76.0",
-  "request_time": "2024-02-22T00:15:25",
-  "request_duration": 3,
+  "version": "0.78.0",
+  "request_time": "2024-08-20T02:54:03",
+  "request_duration": 4,
+  "api_tokens": {
+    "ipqualityscore": true,
+    "ipinfo": true,
+    "cloudflare": true
+  },
   "result_count": 1,
   "results": [
     {
       "prefix": "72.17.0.0/17",
       "origin_as": "33363",
       "origin_as_name": "BHN-33363, US",
-      "origin_as_rank": 435,
+      "origin_as_rank": 441,
       "upstreams_count": 1,
       "upstreams": [
         {
@@ -1205,6 +1273,23 @@ The tool can be instructed to output lookup results in JSON mode by using the `-
 
 ```
 188.130.254.0/24
+```
+
+</p></details>
+<details><summary><i>Example 7 - enumerating the amount of BGP hijacking incidents involving a given AS</i></summary><p>
+
+##### Command:
+
+`asn -j AS8860 | jq '.results[].bgp_hijack_incidents'`
+
+##### Output:
+
+```
+{
+  "total": 18,
+  "as_hijacker": 11,
+  "as_victim": 7
+}
 ```
 
 </p></details>

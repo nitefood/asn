@@ -1,18 +1,22 @@
-FROM alpine:3.18.5
+FROM alpine:3.20.2
 
 ENV IQS_TOKEN ""
+ENV IPINFO_TOKEN ""
+ENV CLOUDFLARE_TOKEN ""
 
 # - Prepare the config directory
-# - Create the entrypoint script that writes the IQS token to the config file
+# - Create the entrypoint script that writes the API tokens to the config files
 # - Install prerequisite packages
 RUN mkdir -p /etc/asn && \
-    touch /etc/asn/iqs_token && \
-    chown nobody:nobody /etc/asn/iqs_token && \
-    echo -e "#!/bin/sh\nif [ -n \"\$IQS_TOKEN\" ]; then echo \"\$IQS_TOKEN\" > /etc/asn/iqs_token; fi\nexec \"\$@\"" > /entrypoint.sh && \
+	chown nobody:nobody /etc/asn/ && \
+    printf '%s\n' '#!/usr/bin/env bash' \
+    '[[ -n "$IQS_TOKEN" ]] 			&& echo "$IQS_TOKEN" > /etc/asn/iqs_token' \
+	'[[ -n "$IPINFO_TOKEN" ]] 		&& echo "$IPINFO_TOKEN" > /etc/asn/ipinfo_token' \
+	'[[ -n "$CLOUDFLARE_TOKEN" ]] 	&& echo "$CLOUDFLARE_TOKEN" > /etc/asn/cloudflare_token' \
+    'exec "$@"' > /entrypoint.sh && \
     chmod +x /entrypoint.sh && \
     apk update && \
-    apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community grepcidr3 && \
-    apk add --no-cache aha bash bind-tools coreutils curl ipcalc jq mtr ncurses nmap nmap-ncat whois
+    apk add --no-cache aha bash bind-tools coreutils curl grepcidr3 ipcalc jq mtr ncurses nmap nmap-ncat whois
 
 COPY asn /bin/asn
 RUN chmod 0755 /bin/asn
