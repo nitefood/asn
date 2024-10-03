@@ -165,7 +165,7 @@ Requires Bash v4.2+. Tested on:
 
 * *Autonomous system number lookup with AS ranking, operational region, BGP stats and incident history, peering and prefix informations*
 
-  ![asnlookup](https://github.com/user-attachments/assets/6afdd2cf-a454-4607-ac17-b62fe78ba816)
+  ![asnlookup](https://github.com/user-attachments/assets/9ae33fe8-6069-48e6-a4a3-ea74d2f351e1)
 
 * *Hostname/URL lookup*
 
@@ -385,7 +385,7 @@ Packaged versions of the tool are available for the following distributions:
 
 * **NixOS** *(thanks [devhell](https://github.com/devhell))*
 
-  * Package [here](https://github.com/NixOS/nixpkgs/tree/master/pkgs/applications/networking/asn)
+  * Package [here](https://github.com/NixOS/nixpkgs/tree/master/pkgs/by-name/as/asn)
 
 * **MacOS** *(using [Homebrew](https://formulae.brew.sh/formula/asn), thanks [filippovitale](https://github.com/filippovitale))*
 
