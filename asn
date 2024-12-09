@@ -2559,7 +2559,7 @@ IPGeoRepLookup(){
 	else
 		ip_type_json_output+=",\"is_proxy\":false"
 	fi
-	# fetch detailed DC informations (incolumitas.com Datacenter IP Address API)
+	# fetch detailed DC information (incolumitas.com Datacenter IP Address API)
 	incolumitas_dcdata=$(docurl -m2 -s "https://api.incolumitas.com/datacenter?ip=$1")
 	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$incolumitas_dcdata" 2>/dev/null)
 	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$incolumitas_dcdata" 2>/dev/null)
@@ -2581,7 +2581,7 @@ IPGeoRepLookup(){
 	else
 		ip_type_json_output+=",\"is_dc\":false"
 	fi
-	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analisys (ipqualityscore.com)
+	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analysis (ipqualityscore.com)
 	ip_rep_data="${green}✓ NONE${default}"
 	json_rep="none"
 	json_iqs_threat_score=""
@@ -2988,7 +2988,7 @@ AsnServerListener(){
 
 	#* Assemble the ncat listener command. Also pass on MONOCHROME/DEBUG preferences
 	#* to the listener child (which will output to stderr on server's console)
-	#* and print informations about client requests (1 child spawned per client connected)
+	#* and print information about client requests (1 child spawned per client connected)
 	read -r -d '' ncat_cmd <<- END_OF_NCAT_CMD
 	ncat -k -l $ASN_SRV_BINDADDR $ASN_SRV_BINDPORT $userinput --sh-exec "
 				export NCAT_REMOTE_ADDR; \
@@ -3146,7 +3146,7 @@ CoreutilsFixup() {
 }
 
 IpcalcVersionCheck() {
-	# check for ipcalc version to accomodate both v1.0.0+ (CentOS/RHEL/Rocky 9) and v0.41+ (Debian derivatives)
+	# check for ipcalc version to accommodate both v1.0.0+ (CentOS/RHEL/Rocky 9) and v0.41+ (Debian derivatives)
 	IPCALC_FLAG=""
 	if [ "$HAVE_IPCALC" = true ]; then
 		ipcalc_version=$(ipcalc -v | sed 's/ipcalc //')
@@ -4001,7 +4001,7 @@ else
 	IS_ASN_CONNHANDLER=false
 fi
 
-# External API tokens for ipqualityscore.com (IP reputation & threat analisys lookup),
+# External API tokens for ipqualityscore.com (IP reputation & threat analysis lookup),
 # ipinfo.io (IP geolocation lookup) and Cloudflare Radar (BGP hijacks and route leaks historical data)
 # Files will be parsed in the order they are declared (first path found takes precedence)
 IQS_TOKEN_FILES="$HOME/.asn/iqs_token:/etc/asn/iqs_token"
@@ -4193,7 +4193,7 @@ while getopts "$optspec" optchar; do {
 			SERVER_MODE=true
 			argcount=1
 			for option in "${@:$OPTIND}"; do
-				# one ore more parameters were passed to -l, check if
+				# one or more parameters were passed to -l, check if
 				# is an IP, PORT or "IP PORT" pair.
 				# pass the rest of the command line as direct
 				# ncat arguments.
@@ -4656,7 +4656,7 @@ if [ -z "$input" ]; then
 			echo -en "${bluebg} Peering @IXPs ──>${default} "
 			GetIXPresence "$asn"
 			echo ""
-			BoxHeader "BGP informations for AS${asn} (${target_asname})"
+			BoxHeader "BGP information for AS${asn} (${target_asname})"
 			GetCloudflareHijacksAndLeaks "$asn"
 			echo ""
 			echo -e "${bluebg} BGP Neighbors           ────>${default} ${green}${caida_degree_total}${default} ${dim}(${default}${caida_degree_provider}${dim} Transits • ${default}${caida_degree_peer}${dim} Peers • ${default}${caida_degree_customer}${dim} Customers)${default}"
@@ -4667,7 +4667,7 @@ if [ -z "$input" ]; then
 			[[ "$IS_ASN_CHILD" = true ]] && radar_href="<a href=\"$radar_href\" target=\"_blank\" style=\"color: $htmlblue; font-style: italic;\">View on Cloudflare Radar</a>🔗"
 			echo -e "${bluebg} In-depth BGP incident info ─>${default} ${dim}${blue}➜ ${radar_href}${default}"
 			echo ""
-			BoxHeader "Prefix informations for AS${asn} (${target_asname})"
+			BoxHeader "Prefix information for AS${asn} (${target_asname})"
 			echo ""
 			QueryRipestat "${asn}"
 			if [ -n "$ripestat_routing_data" ]; then
@@ -4679,7 +4679,7 @@ if [ -z "$input" ]; then
 				[[ -n "$downstream_peers" ]] && downstream_peers=$(echo -e "$downstream_peers") || downstream_peers="${redbg} NONE ${default}"
 				[[ -n "$uncertain_peers" ]] && uncertain_peers=$(echo -e "$uncertain_peers") || uncertain_peers="${redbg} NONE ${default}"
 				echo ""
-				BoxHeader "Peering informations for AS${asn} (${target_asname})"
+				BoxHeader "Peering information for AS${asn} (${target_asname})"
 				echo -e "\n${green}──────────────── Upstream Peers ────────────────${default}\n\n${upstream_peers}"
 				echo -e "\n${yellow}─────────────── Downstream Peers ───────────────${default}\n\n${downstream_peers}"
 				echo -e "\n${white}─────────────── Uncertain  Peers ───────────────${default}\n\n${uncertain_peers}"
