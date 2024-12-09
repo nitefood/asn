@@ -72,7 +72,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
 * It will perform **RPKI validity** lookups for every possible IP. Data is validated using the [RIPEStat RPKI validation API](https://stat.ripe.net/docs/data_api#rpki-validation). For path traces, the tool will match each hop's ASN/Prefix pair (retrieved from the Prefix Whois public server) with relevant published RPKI ROAs. In case of origin AS mismatch or unallowed more-specific prefixes, it will warn the user of a potential **route leak / BGP hijack** along with the offending AS in the path (requires `-d` option, see below for usage info).
 
-  * *Read more about BGP hijkacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
+  * *Read more about BGP hijacking [here](https://en.wikipedia.org/wiki/BGP_hijacking).*
   * *Read more about RPKI [here](https://en.wikipedia.org/wiki/Resource_Public_Key_Infrastructure), [here](https://blog.cloudflare.com/rpki/), or [here](https://www.ripe.net/manage-ips-and-asns/resource-management/certification).*
 
 * It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
@@ -84,7 +84,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
 * It will perform **IP fingerprinting** using Shodan's [InternetDB API](%5Bhttps://internetdb.shodan.io/%5D(https://internetdb.shodan.io/)) and report any known **vulnerabilities**, **open ports** and **services/operating system/hardware** pertaining to target IPs and individual trace hops (detailed traces only).
 
-  * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More informations [here](#shodan-scanning-recon-mode) about how to use the script as a recon tool.
+  * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More information [here](#shodan-scanning-recon-mode) about how to use the script as a recon tool.
 
 * It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
 
@@ -163,7 +163,7 @@ Requires Bash v4.2+. Tested on:
 
   ![ipv6lookup](https://user-images.githubusercontent.com/24555810/159185780-44a1af6e-7aa9-4f52-b04c-55a314b2a5e3.png)
 
-* *Autonomous system number lookup with AS ranking, operational region, BGP stats and incident history, peering and prefix informations*
+* *Autonomous system number lookup with AS ranking, operational region, BGP stats and incident history, peering and prefix information*
 
   ![asnlookup](https://github.com/user-attachments/assets/9ae33fe8-6069-48e6-a4a3-ea74d2f351e1)
 
@@ -193,7 +193,7 @@ Requires Bash v4.2+. Tested on:
 
 ### Shodan scanning
 
-* *Scanning for Shodan informations for a list of IPs*
+* *Scanning for Shodan information for a list of IPs*
 
   ![shodanscan](https://github.com/nitefood/asn/assets/24555810/550d3004-9cbc-404e-b74c-9248a2d0bb0f)
 
@@ -728,7 +728,7 @@ IQS_CUSTOM_SETTINGS=""
 
 ##### *Upstream/transit identification (`-u`)*
 
-* The script will inspect BGP updates for the given IP (v4/v6) and identify the likelyhood of the upstream autonomous system(s) being transit(s) for the origin AS. A probability of the upstreams being transits will be inferred by the amount of times the upstream AS appears in the observed ASPATHs towards the target IP, in comparison to other BGP peers. The script will also inform the user if the prefix is being simultaneously announced to multiple upstreams (e.g. in case of BGP multihoming, tier-1 prefixes, anycast addresses, etc.). JSON mode is supported.
+* The script will inspect BGP updates for the given IP (v4/v6) and identify the likelihood of the upstream autonomous system(s) being transit(s) for the origin AS. A probability of the upstreams being transits will be inferred by the amount of times the upstream AS appears in the observed ASPATHs towards the target IP, in comparison to other BGP peers. The script will also inform the user if the prefix is being simultaneously announced to multiple upstreams (e.g. in case of BGP multihoming, tier-1 prefixes, anycast addresses, etc.). JSON mode is supported.
 
 ##### *Server mode (`-l`)*
 
@@ -868,7 +868,7 @@ Afterwards, you will be able to run queries and traceroutes by simply entering, 
 
    ![searchsetup_chrome_3](https://user-images.githubusercontent.com/24555810/102162218-16451580-3e89-11eb-85d1-a4d24c980d7d.png)
 
-As usual, the keyword is entierly customizable to your preference.
+As usual, the keyword is entirely customizable to your preference.
 
 ***Other browsers:***
 
@@ -907,7 +907,7 @@ The available options, and some usage examples, can be viewed by running `asn -h
 
 ## Shodan scanning (Recon Mode)
 
-The tool can query Shodan's InternetDB API to look up informations regarding any type of targets when launched with the `-s` command line switch.
+The tool can query Shodan's InternetDB API to look up information regarding any type of targets when launched with the `-s` command line switch.
 
 If the scan identifies any vulnerabilities, the NIST NVD API is queried in order to provide descriptions, any well known names and a link to learn more about the top ones.
 
