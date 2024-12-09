@@ -1724,7 +1724,7 @@ ShodanRecon(){
 				-e 's,cpe:/a:getbootstrap:bootstrap,Bootstrap,g' \
 				-e 's,cpe:/a:pureftpd:pure-ftpd,Pure-FTPd,g' \
 				-e 's,cpe:/a:postfix:postfix,Postfix,g' \
-				-e 's,cpe:/a:openssl:openssl,Postfix,g' \
+				-e 's,cpe:/a:openssl:openssl,OpenSSL,g' \
 				-e 's,cpe:/a:mysql:mysql,MySQL,g' \
 			)
 		cpelist+=$(echo -e "\n$ip_cpes" | tr ' ' '\n')
@@ -3882,7 +3882,7 @@ HandleNcatClientConnection() {
 								"<br /><br /><span id='share-container'><button id='termbinShareButton' class='sharebutton' onclick='termbinshare()'>Share Results</button></span>" \
 								"<div id='share-output-container' class='textoutput hidden'> </div>" \
 								"<a href='#' onclick=\"document.getElementById('help-container').classList.toggle('hidden');return false;\" style='color: darkgray; font-size: 0.7em;'>What is that?</a>" \
-								"\n<span id='help-container' class='textoutput hidden' style='color: $htmlgreen;'>This report will be shared on <a href='https://termbin.com' target='_blank'>Termbin</a> (a Pastebin-like sharing service for terminal data).\nTermbin pastes have a lifespan of 1 month.</span>" \
+								"\n<span id='help-container' class='textoutput hidden' style='color: $htmlgreen;'>This report will be shared on <a href='https://termbin.com' target='_blank'>Termbin</a> (a Pastebin-like sharing service for terminal data).\nTermbin pastes have a lifespan of 1 week.</span>" \
 							"</div>" \
 							"</pre>"
 
