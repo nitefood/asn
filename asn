@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.0"
+ASN_VERSION="0.78.1"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -2455,6 +2455,9 @@ IPGeoRepLookup(){
 	geo_region_json_output=""
 	geo_country_json_output=""
 	geo_cc_json_output=""
+	ipinfo_city=""
+	flag_icon_cc="" # will be used in HTML reports served over HTTP
+	IS_ANYCAST=""
 	# local ipmap_city
 	# local ipmap_region
 	# local ipmap_cc
@@ -2490,22 +2493,24 @@ IPGeoRepLookup(){
 		IS_HOSTING=$(jq -r '.hosting' <<<"$ipapi_output")
 	fi
 
-	IS_ANYCAST=""
-	if jq '.anycast' <<<"$ipinfo_output" | grep -q true; then
-		IS_ANYCAST=true
-	fi
-
 	# ipmap_location_data=$(jq 'select (.location != null) | .location' <<<"$ipmap_output")
 	# if [ -n "$ipmap_location_data" ]; then
 	# 	# RIPE IPmap has (at least some) geo data about this address, check city/region
 	# 	ipmap_city=$(jq -r 'select (.cityNameAscii != null) | .cityNameAscii' <<<"$ipmap_location_data")
 	# 	ipmap_region=$(jq -r 'select (.stateName != null) | .stateName' <<<"$ipmap_location_data")
 	# fi
-	ipinfo_city=$(jq -r 'select (.city != null) | .city' <<<"$ipinfo_output")
-	ipinfo_region=$(jq -r 'select (.region != null) | .region' <<<"$ipinfo_output")
-	ipinfo_cc=$(jq -r 'select (.country != null) | .country' <<<"$ipinfo_output")
-	ipinfo_countryname=$(jq -r ".${ipinfo_cc}" <<<"$COUNTRY_MAP_CACHE")
-	flag_icon_cc="" # will be used in HTML reports served over HTTP
+
+	# check if ipinfo.io returned valid JSON
+	if jq type <<<"$ipinfo_output" &>/dev/null; then
+		if jq '.anycast' <<<"$ipinfo_output" | grep -q true; then
+			IS_ANYCAST=true
+		fi
+		ipinfo_city=$(jq -r 'select (.city != null) | .city' <<<"$ipinfo_output")
+		ipinfo_region=$(jq -r 'select (.region != null) | .region' <<<"$ipinfo_output")
+		ipinfo_cc=$(jq -r 'select (.country != null) | .country' <<<"$ipinfo_output")
+		ipinfo_countryname=$(jq -r ".${ipinfo_cc}" <<<"$COUNTRY_MAP_CACHE")
+	fi
+
 	if [ -n "$ipinfo_city" ]; then
 		# populate json output fields from ipinfo output
 		geo_city_json_output="$ipinfo_city"
@@ -2516,7 +2521,7 @@ IPGeoRepLookup(){
 		flag_icon_cc=$(tr '[:upper:]' '[:lower:]' <<<"$ipinfo_cc")
 		ip_geo_countryname="$ipinfo_countryname"
 	elif [ "$ipapi_status" = "success" ]; then
-		# ipinfo has no data about this address, fallback to ip-api.com
+		# ipinfo has no data about this address or returned an invalid response, fallback to ip-api.com
 		ipapi_city=$(jq -r '.city' <<<"$ipapi_output")
 		ipapi_region=$(jq -r '.regionName' <<<"$ipapi_output")
 		ipapi_cc=$(jq -r '.countryCode' <<<"$ipapi_output")
