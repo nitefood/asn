@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.1"
+ASN_VERSION="0.78.2"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -638,9 +638,10 @@ IsBogon(){
 	bogon_tag=""
 	IS_BOGON=false
 	# Bogon regex patterns
+	# IPv4
 	localhostregex='(^127\.)' # RFC 1122 localhost
 	thisnetregex='(^0\.)' # RFC 1122 'this' network
-	privateregex='(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)|(^::1$)|(^[fF][cCdD])' # RFC 1918 private space - cheers https://stackoverflow.com/a/11327345/5377165
+	privateregex='(^192\.168\.)|(^10\.)|(^172\.1[6-9]\.)|(^172\.2[0-9]\.)|(^172\.3[0-1]\.)' # RFC 1918 private space - cheers https://stackoverflow.com/a/11327345/5377165
 	cgnregex='(^100\.6[4-9]\.)|(^100\.[7-9][0-9]\.)|(^100\.1[0-1][0-9]\.)|(^100\.12[0-7]\.)' # RFC 6598 Carrier grade nat space
 	llregex='(^169\.254\.)' # RFC 3927 link local
 	ietfprotoregex='(^192\.0\.0\.)' # IETF protocol assignments
@@ -649,33 +650,74 @@ IsBogon(){
 	sixtofouranycast='(^192\.88\.99\.)' # RFC 7526 6to4 anycast relay
 	multicastregex='(^22[4-9]\.)|(^23[0-9]\.)' # Multicast
 	reservedregex='(^24[0-9]\.)|(^25[0-5]\.)' # Reserved for future use/limited broadcast (255.255.255.255)
+	# IPv6
+	unspecifiedv6regex='(^::$)' # RFC 4291 Unspecified Address (::)
+	loopbackv6regex='(^::1$)' # RFC 4291 Loopback Address (::1)
+	ipv4mappedv6regex="^(:{1,2}|0:0:0:0:0:)ffff:((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$" # RFC 4291 IPv4-mapped IPv6 addresses (::ffff:0:0/96)
+	rtbhv6regex='(^100::)' # RFC 6666 Remotely triggered black hole addresses (100::/64)
+	orchidv6regex='(^2001:1[0-9a-f]:)' # RFC 4843 Overlay routable cryptographic hash identifiers (ORCHID) (2001:10::/28)
+	docv6regex='(^2001:db8:)' # RFC 3849 Documentation (2001:db8::/32)
+	docexpandedv6regex='(^3fff:)' # RFC 9637 Expanded IPv6 Documentation Space (3fff::/20)
+	ulav6regex='(^[f][cd])' # RFC 4193 Unique Local Address (fc00::/7)
+	llv6regex='(^fe8[0-9a-f]:)|(^fe9[0-9a-f]:)|(^fea[0-9a-f]:)|(^feb[0-9a-f]:)' # RFC 4291 Link-Local Addresses (fe80::/10)
+	multicastv6regex='(^ff0[0-9a-df])|(^ff[1-9a-f])|(^ff[bcdef])' # RFC 4291 Multicast Addresses (ff00::/8, except for ff0e::/16 which is defined in RFC7346 as IPv6 Multicast Global Scope and therefore should be routable)
 
-	if [[ "$1" =~ $localhostregex ]]; then
-		bogon_tag="rfc1122 (Localhost)"
-		MTR_TRACING=false
-	elif [[ "$1" =~ $thisnetregex ]]; then
-		bogon_tag="rfc1122 ('this' network)"
-		MTR_TRACING=false
-	elif [[ "$1" =~ $privateregex ]]; then
-		bogon_tag="rfc1918 (Private Space)"
-	elif [[ "$1" =~ $cgnregex ]]; then
-		bogon_tag="rfc6598 (CGN Space)"
-	elif [[ "$1" =~ $llregex ]]; then
-		bogon_tag="rfc3927 (Link-Local)"
-	elif [[ "$1" =~ $ietfprotoregex ]]; then
-		bogon_tag="(Reserved for IETF protocol assignments)"
-	elif [[ "$1" =~ $testnetregex ]]; then
-		bogon_tag="rfc5737 (Reserved for Test Networks)"
-	elif [[ "$1" =~ $benchmarkregex ]]; then
-		bogon_tag="rfc2544 (Reserved for Network device benchmark testing)"
-	elif [[ "$1" =~ $sixtofouranycast ]]; then
-		bogon_tag="rfc7526 (6to4 anycast relay)"
-	elif [[ "$1" =~ $multicastregex ]]; then
-		bogon_tag="(Multicast Address)"
-		MTR_TRACING=false
-	elif [[ "$1" =~ $reservedregex ]]; then
-		bogon_tag="(Reserved Address)"
-		MTR_TRACING=false
+	if grep -q ':' <<<"$1"; then
+		# perform IPv6 bogon checks
+		lowercaseipv6=$(tr '[:upper:]' '[:lower:]' <<<"$1")
+		if [[ "$lowercaseipv6" =~ $unspecifiedv6regex ]]; then
+			bogon_tag="rfc4291 (IPv6 Unspecified Address)"
+			MTR_TRACING=false
+		elif [[ "$lowercaseipv6" =~ $loopbackv6regex ]]; then
+			bogon_tag="rfc4291 (IPv6 Loopback Address)"
+			MTR_TRACING=false
+		elif [[ "$lowercaseipv6" =~ $ipv4mappedv6regex ]]; then
+			bogon_tag="rfc4291 (IPv4-mapped IPv6 addresses)"
+		elif [[ "$lowercaseipv6" =~ $rtbhv6regex ]]; then
+			bogon_tag="rfc6666 (Remotely triggered black hole IPv6 addresses)"
+		elif [[ "$lowercaseipv6" =~ $orchidv6regex ]]; then
+			bogon_tag="rfc4843 (ORCHID - Overlay routable cryptographic hash identifiers)"
+		elif [[ "$lowercaseipv6" =~ $docv6regex ]]; then
+			bogon_tag="rfc3849 (IPv6 Documentation Space)"
+		elif [[ "$lowercaseipv6" =~ $docexpandedv6regex ]]; then
+			bogon_tag="rfc9637 (Expanded IPv6 Documentation Space)"
+		elif [[ "$lowercaseipv6" =~ $ulav6regex ]]; then
+			bogon_tag="rfc4193 (IPv6 Unique Local Address)"
+		elif [[ "$lowercaseipv6" =~ $llv6regex ]]; then
+			bogon_tag="rfc4291 (IPv6 Link-Local Addresses)"
+		elif [[ "$lowercaseipv6" =~ $multicastv6regex ]]; then
+			bogon_tag="rfc4291 (IPv6 Multicast Addresses)"
+			MTR_TRACING=false
+		fi
+	else
+		# perform IPv4 bogon checks
+		if [[ "$1" =~ $localhostregex ]]; then
+			bogon_tag="rfc1122 (Localhost)"
+			MTR_TRACING=false
+		elif [[ "$1" =~ $thisnetregex ]]; then
+			bogon_tag="rfc1122 ('this' network)"
+			MTR_TRACING=false
+		elif [[ "$1" =~ $privateregex ]]; then
+			bogon_tag="rfc1918 (Private Space)"
+		elif [[ "$1" =~ $cgnregex ]]; then
+			bogon_tag="rfc6598 (CGN Space)"
+		elif [[ "$1" =~ $llregex ]]; then
+			bogon_tag="rfc3927 (Link-Local)"
+		elif [[ "$1" =~ $ietfprotoregex ]]; then
+			bogon_tag="(Reserved for IETF protocol assignments)"
+		elif [[ "$1" =~ $testnetregex ]]; then
+			bogon_tag="rfc5737 (Reserved for Test Networks)"
+		elif [[ "$1" =~ $benchmarkregex ]]; then
+			bogon_tag="rfc2544 (Reserved for Network device benchmark testing)"
+		elif [[ "$1" =~ $sixtofouranycast ]]; then
+			bogon_tag="rfc7526 (6to4 anycast relay)"
+		elif [[ "$1" =~ $multicastregex ]]; then
+			bogon_tag="(Multicast Address)"
+			MTR_TRACING=false
+		elif [[ "$1" =~ $reservedregex ]]; then
+			bogon_tag="(Reserved Address)"
+			MTR_TRACING=false
+		fi
 	fi
 	if [ -n "$bogon_tag" ]; then
 		IS_BOGON=true
