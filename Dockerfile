@@ -1,8 +1,8 @@
 FROM alpine:3.20.2
 
-ENV IQS_TOKEN ""
-ENV IPINFO_TOKEN ""
-ENV CLOUDFLARE_TOKEN ""
+ENV IQS_TOKEN=""
+ENV IPINFO_TOKEN=""
+ENV CLOUDFLARE_TOKEN=""
 
 # - Prepare the config directory
 # - Create the entrypoint script that writes the API tokens to the config files
@@ -25,4 +25,4 @@ RUN chmod 0755 /bin/asn
 USER nobody
 EXPOSE 49200/tcp
 ENTRYPOINT ["/entrypoint.sh", "/bin/asn"]
-CMD ["-l", "0.0.0.0"]
+CMD ["-l", "::"]
