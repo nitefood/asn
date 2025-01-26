@@ -238,7 +238,7 @@ To run the script without installing it locally, you have the following options:
 
 * **Docker** _(thanks [Gianni Stubbe](https://github.com/33Fraise33), [anarcat](https://github.com/anarcat), [Francesco Colista](https://github.com/fcolista), [arbal](https://github.com/arbal))_
 
-  _Note: the Docker image runs by default in server mode, if no parameters are given. This is equivalent to running the tool as `asn -l 0.0.0.0` (run server, bind to all IPv4 interfaces - this is necessary to expose the server port to the host machine). You can run the server with different [options](#syntax) by explicitly passing `-l [options]`. It's also possible to pass an [IpQualityScore](#ip-reputation-api-token-ipqualityscore), [ipinfo.io](#geolocation-api-token-ipinfoio) and/or [Cloudflare](#bgp-hijack-and-route-leak-incidents-cloudflare-radar) API token (both client and server runs) by setting, respectively, the `IQS_TOKEN`, `IPINFO_TOKEN` and `CLOUDFLARE_TOKEN` environment variables (examples below) in the container._
+  _Note: the Docker image runs by default in server mode, if no parameters are given. This is equivalent to running the tool as `asn -l ::` (run server, bind to all interfaces - this is necessary to expose the server port to the host machine). You can run the server with different [options](#syntax) by explicitly passing `-l [options]`. It's also possible to pass an [IpQualityScore](#ip-reputation-api-token-ipqualityscore), [ipinfo.io](#geolocation-api-token-ipinfoio) and/or [Cloudflare](#bgp-hijack-and-route-leak-incidents-cloudflare-radar) API token (both client and server runs) by setting, respectively, the `IQS_TOKEN`, `IPINFO_TOKEN` and `CLOUDFLARE_TOKEN` environment variables (examples below) in the container._
 
   Usage examples:
   - Start server: `docker run -it -p 49200:49200 nitefood/asn`
@@ -418,7 +418,7 @@ Type=simple
 Restart=always
 RestartSec=1
 User=nobody
-ExecStart=/usr/bin/asn -l 0.0.0.0
+ExecStart=/usr/bin/asn -l ::
 
 [Install]
 WantedBy=multi-user.target

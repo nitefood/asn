@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.2"
+ASN_VERSION="0.78.3"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -445,10 +445,11 @@ RIPESuggestASN(){
 WhoisIP(){
 	# $1: (mandatory) IP to lookup
 	# $2: (optional) if set to anything, only perform a generic whois lookup (skip pWhois/RPKI/IXP lookups)
+	local WHOIS_TIMEOUT=20
 	[[ "$JSON_OUTPUT" = true ]] && ((json_resultcount++))
 	GENERIC_WHOIS_LOOKUP_ONLY=false
 	[[ "$#" -gt 1 ]] && GENERIC_WHOIS_LOOKUP_ONLY=true
-	full_whois_data=$(timeout 5 whois "$1" 2>/dev/null)
+	full_whois_data=$(timeout $WHOIS_TIMEOUT whois "$1" 2>/dev/null)
 	network_whois_data=$(echo -e "$full_whois_data" | grep -i -E "^netname:|^orgname:|^org-name:|^owner:|^descr:|^country:")
 	# fetch whois inetnum and later compare to cymru prefix, in order to find smallest match (sometimes whois and cymru/pwhois prefix data diverge)
 	whois_inetnum=$(IpcalcDeaggregate "$(grep -E -m1 "inet[6]?num|NetRange"<<<"$full_whois_data" | awk '{print $2 $3 $4}')")
@@ -554,7 +555,7 @@ WhoisIP(){
 		if (( whois_prefixlen > foundroute_prefixlen )) 2>/dev/null; then
 			found_subprefix="$whois_inetnum"
 			# lookup route name (RIPE)
-			whois_routename=$(timeout 5 whois "$found_route" | grep -m1 -E "^descr:" | cut -d ':' -f 2 | sed 's/^ *//g')
+			whois_routename=$(timeout $WHOIS_TIMEOUT whois "$found_route" | grep -m1 -E "^descr:" | cut -d ':' -f 2 | sed 's/^ *//g')
 		fi
 	fi
 
@@ -805,6 +806,7 @@ PrintErrorAndExit(){
 		echo -e "\n${redbg}${1}${default}" >&2
 		tput sgr0
 	fi
+	tput cnorm # show cursor
 	exit 1
 }
 
@@ -2963,8 +2965,6 @@ AsnServerListener(){
 		echo -e "\n- ${yellow}[DBG]${default} Ncat options     : '${blue}${userinput}${default}'\n" >&2
 	fi
 
-	CLOUD_SHELL_MARK="${red}❌ NO${default}"
-
 	# fetch external IP and ASN to include in the HTML reports
 	StatusbarMessage "Detecting host external IP and ASN"
 	WhatIsMyIP
@@ -2983,13 +2983,11 @@ AsnServerListener(){
 	server_country=$(echo "${found_asname##*,}" | tr -d ' ')
 	[[ -z "$server_country" ]] && server_country="(Unknown)"
 
-	# prepare the server URL (for the JS bookmarklet)
-	if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ] || [ "$ASN_SRV_BINDADDR" = "::" ]; then
-		INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
-	else
-		INTERNAL_ASNSERVER_ADDRESS="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
-	fi
-	BOOKMARKLET_URL="http://${INTERNAL_ASNSERVER_ADDRESS}/asn_bookmarklet"
+	BOOKMARKLET_URL=""
+	INTERNAL_ASNSERVER_ADDRESS=""
+	DISPLAY_ASN_SRV_BINDADDR=""
+	CLOUD_SHELL_MARK="${red}❌ NO${default}"
+
 	# detect if we're running in Google Cloud Shell environment
 	if [ "$GOOGLE_CLOUD_SHELL" = true ] && [ -n "$WEB_HOST" ]; then
 		# on Google Cloud Shell, the $WEB_HOST environment variable contains the external hostname to reach the server
@@ -2999,6 +2997,35 @@ AsnServerListener(){
 		CLOUD_SHELL_MARK="${green}✓ YES${default}"
 	fi
 
+	# prepare the bookmarklet URL and the appropriate notation for the server's bind address:port
+	if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ]; then
+		# discover our IPv4 WAN IP if we already determined we're on an IPv6-capable host but the user wants to bind to 0.0.0.0
+		[[ "$HAVE_IPV6" = true ]] && WhatIsMyIP "true"
+		if grep -q ':' <<<"$local_wanip"; then
+			INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
+		else
+			INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
+		fi
+	elif [ "$ASN_SRV_BINDADDR" = "::" ]; then
+		if [ "$HAVE_IPV6" = true ]; then
+			INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
+			DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
+		else
+			# we're on an IPv4-only host, but the user wants to bind to [::] - fall back to 0.0.0.0 (INADDR_ANY)
+			# this is necessary to handle hosts where v6 sockets (and thus [::]) are only permitted to handle IPv6 traffic
+			# and do not map back to IPv4 (see https://sysctl-explorer.net/net/ipv6/bindv6only/).
+			# This also applies to default Docker container behavior (which will try to listen on [::] regardless of IPv6 availability)
+			ASN_SRV_BINDADDR="0.0.0.0"
+			INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
+		fi
+	elif grep -q ':' <<<"$ASN_SRV_BINDADDR"; then
+		INTERNAL_ASNSERVER_ADDRESS="[$ASN_SRV_BINDADDR]:$ASN_SRV_BINDPORT"
+		DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
+	else
+		INTERNAL_ASNSERVER_ADDRESS="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
+	fi
+	[[ -z "$BOOKMARKLET_URL" ]] && BOOKMARKLET_URL="http://${INTERNAL_ASNSERVER_ADDRESS}/asn_bookmarklet"
+	[[ -z "$DISPLAY_ASN_SRV_BINDADDR" ]] && DISPLAY_ASN_SRV_BINDADDR="$ASN_SRV_BINDADDR"
 	StatusbarMessage
 
 	if [ "$HAVE_IPV6" = true ]; then
@@ -3006,12 +3033,7 @@ AsnServerListener(){
 	else
 		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="NO" || ipv6_mark="${red}❌ NO${default}"
 	fi
-	# properly show [IP]:PORT notation in case of IPv6 binding
-	if grep -q ':' <<<"$ASN_SRV_BINDADDR"; then
-		DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
-	else
-		DISPLAY_ASN_SRV_BINDADDR="${ASN_SRV_BINDADDR}"
-	fi
+
 	# prepare API tokens status line
 	[[ "$json_IQS_TOKEN" = true ]] && API_TOKENS_STATUS="${green}✓ IQS${default}" || API_TOKENS_STATUS="${red}❌ IQS${default}"
 	[[ "$json_IPINFO_TOKEN" = true ]] && API_TOKENS_STATUS+=" • ${green}✓ IPINFO${default}" || API_TOKENS_STATUS+=" • ${red}❌ IPINFO${default}"
@@ -3063,6 +3085,7 @@ Ctrl_C() {
 	if [ "$NO_ERROR_ON_INTERRUPT" = true ]; then
 		StatusbarMessage
 		tput sgr0
+		tput cnorm # show cursor
 		ShowMenu
 	else
 		PrintErrorAndExit "Interrupted"
@@ -3097,6 +3120,7 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 		# delete previous status bar message
 		blank_line=$(printf "%.0s " $(seq "$terminal_width"))
 		printf "\r%s\r" "$blank_line" >&2
+		tput cnorm # show cursor
 	fi
 	if [ -n "$1" ]; then
 		statusbar_message="$1"
@@ -3108,17 +3132,23 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 		fi
 		statusbar_message+="${lightgreybg} (press CTRL-C to cancel)...${default}"
 		echo -en "$statusbar_message" >&2
+		tput civis # hide cursor
 	fi
 }
 
 WhatIsMyIP() {
-	# only lookup local WAN IP once
-	[[ -n "$local_wanip" ]] && return
-	# retrieve local WAN IP (v6 takes precedence) from ifconfig.co
-	local_wanip=$(docurl -s "https://ifconfig.co")
+	# if an argument was passed, force IPv4 lookup (and skip "only check once" check)
+	if [ -n "$1" ]; then
+		local_wanip=$(docurl -s -4 "https://ifconfig.co")
+	else
+		# only lookup local WAN IP once
+		[[ -n "$local_wanip" ]] && return
+		# retrieve local WAN IP (v6 takes precedence) from ifconfig.co
+		local_wanip=$(docurl -s "https://ifconfig.co")
+	fi
 	# handle ifconfig.co serving a captcha-type redirect page (e.g. when coming from some AWS networks)
 	grep -qE '^<!DOCTYPE html>' <<<"$local_wanip" && local_wanip=$(docurl -s "https://api64.ipify.org")
-	# check if we default to an IPv6 internet connection
+	# check if we default to an IPv6 internet connection (if we're forcing IPv4 on a dual-stack host, HAVE_IPV6 will be left untouched)
 	if echo "$local_wanip" | grep -q ':'; then
 		HAVE_IPV6=true
 	fi
