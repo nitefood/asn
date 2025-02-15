@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.3"
+ASN_VERSION="0.78.4"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -2986,7 +2986,7 @@ AsnServerListener(){
 	BOOKMARKLET_URL=""
 	INTERNAL_ASNSERVER_ADDRESS=""
 	DISPLAY_ASN_SRV_BINDADDR=""
-	CLOUD_SHELL_MARK="${red}❌ NO${default}"
+	CLOUD_SHELL_MARK="${red}❌${default}"
 
 	# detect if we're running in Google Cloud Shell environment
 	if [ "$GOOGLE_CLOUD_SHELL" = true ] && [ -n "$WEB_HOST" ]; then
@@ -2994,44 +2994,45 @@ AsnServerListener(){
 		# the format is https://<port>-<hostname> (cheers https://stackoverflow.com/a/70255668)
 		INTERNAL_ASNSERVER_ADDRESS="${ASN_SRV_BINDPORT}-${WEB_HOST}"
 		BOOKMARKLET_URL="https://${INTERNAL_ASNSERVER_ADDRESS}/asn_bookmarklet"
-		CLOUD_SHELL_MARK="${green}✓ YES${default}"
-	fi
-
-	# prepare the bookmarklet URL and the appropriate notation for the server's bind address:port
-	if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ]; then
-		# discover our IPv4 WAN IP if we already determined we're on an IPv6-capable host but the user wants to bind to 0.0.0.0
-		[[ "$HAVE_IPV6" = true ]] && WhatIsMyIP "true"
-		if grep -q ':' <<<"$local_wanip"; then
-			INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
-		else
-			INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
-		fi
-	elif [ "$ASN_SRV_BINDADDR" = "::" ]; then
-		if [ "$HAVE_IPV6" = true ]; then
-			INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
+		CLOUD_SHELL_MARK="${green}✓${default}"
+	else
+		# Handle all non-GCP cases
+		# prepare the bookmarklet URL and the appropriate notation for the server's bind address:port
+		if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ]; then
+			# discover our IPv4 WAN IP if we already determined we're on an IPv6-capable host but the user wants to bind to 0.0.0.0
+			[[ "$HAVE_IPV6" = true ]] && WhatIsMyIP "true"
+			if grep -q ':' <<<"$local_wanip"; then
+				INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
+			else
+				INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
+			fi
+		elif [ "$ASN_SRV_BINDADDR" = "::" ]; then
+			if [ "$HAVE_IPV6" = true ]; then
+				INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
+				DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
+			else
+				# we're on an IPv4-only host, but the user wants to bind to [::] - fall back to 0.0.0.0 (INADDR_ANY)
+				# this is necessary to handle hosts where v6 sockets (and thus [::]) are only permitted to handle IPv6 traffic
+				# and do not map back to IPv4 (see https://sysctl-explorer.net/net/ipv6/bindv6only/).
+				# This also applies to default Docker container behavior (which will try to listen on [::] regardless of IPv6 availability)
+				ASN_SRV_BINDADDR="0.0.0.0"
+				INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
+			fi
+		elif grep -q ':' <<<"$ASN_SRV_BINDADDR"; then
+			INTERNAL_ASNSERVER_ADDRESS="[$ASN_SRV_BINDADDR]:$ASN_SRV_BINDPORT"
 			DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
 		else
-			# we're on an IPv4-only host, but the user wants to bind to [::] - fall back to 0.0.0.0 (INADDR_ANY)
-			# this is necessary to handle hosts where v6 sockets (and thus [::]) are only permitted to handle IPv6 traffic
-			# and do not map back to IPv4 (see https://sysctl-explorer.net/net/ipv6/bindv6only/).
-			# This also applies to default Docker container behavior (which will try to listen on [::] regardless of IPv6 availability)
-			ASN_SRV_BINDADDR="0.0.0.0"
-			INTERNAL_ASNSERVER_ADDRESS="$local_wanip:$ASN_SRV_BINDPORT"
+			INTERNAL_ASNSERVER_ADDRESS="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
 		fi
-	elif grep -q ':' <<<"$ASN_SRV_BINDADDR"; then
-		INTERNAL_ASNSERVER_ADDRESS="[$ASN_SRV_BINDADDR]:$ASN_SRV_BINDPORT"
-		DISPLAY_ASN_SRV_BINDADDR="[${ASN_SRV_BINDADDR}]"
-	else
-		INTERNAL_ASNSERVER_ADDRESS="$ASN_SRV_BINDADDR:$ASN_SRV_BINDPORT"
 	fi
 	[[ -z "$BOOKMARKLET_URL" ]] && BOOKMARKLET_URL="http://${INTERNAL_ASNSERVER_ADDRESS}/asn_bookmarklet"
 	[[ -z "$DISPLAY_ASN_SRV_BINDADDR" ]] && DISPLAY_ASN_SRV_BINDADDR="$ASN_SRV_BINDADDR"
 	StatusbarMessage
 
 	if [ "$HAVE_IPV6" = true ]; then
-		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="YES" || ipv6_mark="${green}✓ YES${default}"
+		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="YES" || ipv6_mark="${green}✓${default}"
 	else
-		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="NO" || ipv6_mark="${red}❌ NO${default}"
+		[[ "$IS_HEADLESS" = true ]] && ipv6_mark="NO" || ipv6_mark="${red}❌${default}"
 	fi
 
 	# prepare API tokens status line
