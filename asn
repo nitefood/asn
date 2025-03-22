@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.4"
+ASN_VERSION="0.78.5"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -4334,7 +4334,7 @@ while getopts "$optspec" optchar; do {
 }
 done
 
-if [ -t 0 ] || [ "$IS_HEADLESS" = true ]; then
+if [ -t 0 ] || [ "$IS_HEADLESS" = true ] || [ -n "$PARALLEL_SEQ" ] || [ -n "$PARALLEL_PID" ]; then
 	# input is from the terminal (or this is a headless instance)
 	if [ "$OPTIONS_PRESENT" = false ]; then
 		# shellcheck disable=SC2124
