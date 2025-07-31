@@ -1342,7 +1342,7 @@ root@KRUSTY:~# curl -s "http://localhost:49200/asn_lookup_jsonp&10.0.0.1"
 
 ## Thanks
 
-An initial version of this script was featured in the **Security Trails** blog post "[*ASN Lookup Tools, Strategies and Techniques*](https://securitytrails.com/blog/asn-lookup#autonomous-system-lookup-script)". Thank you [Esteban](https://www.estebanborges.com/)!
+An initial version of this script was featured in the **Security Trails** blog post "[*ASN Lookup Tools, Strategies and Techniques*](https://web.archive.org/web/20250428214209/https://securitytrails.com/blog/asn-lookup)". Thank you [Esteban](https://www.estebanborges.com/)!
 
 Thanks [Massimo Candela](https://github.com/massimocandela/) for your support and excellent work on [IPmap](https://ipmap.ripe.net/), [BGPlay](https://github.com/massimocandela/BGPlay) and [TraceMON](https://github.com/RIPE-NCC/tracemon)!
 
