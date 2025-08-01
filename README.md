@@ -292,6 +292,18 @@ Some packages are required for full functionality:
   make install -C aha/
   ```
 
+* **Alpine 3.19 (or newer):**
+
+  ```
+  apk update && apk add bash ncurses nmap nmap-ncat mtr aha curl whois grepcidr3 coreutils ipcalc bind-tools jq
+  ```
+
+* **Alpine 3.18 (or older):**
+
+  ```
+  apk update && apk add bash ncurses nmap nmap-ncat mtr aha curl whois coreutils ipcalc bind-tools jq && apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community grepcidr3
+  ```
+
 * **CentOS / RHEL / Rocky Linux 9:**
 
   ```
@@ -377,10 +389,10 @@ Packaged versions of the tool are available for the following distributions:
   yay -S asn-git
   ```
 
-* **Alpine Linux 3.18 (or newer)** *(thanks [Francesco Colista](https://github.com/fcolista))*
+* **Alpine Linux:** *(thanks [Francesco Colista](https://github.com/fcolista))*
 
   ```
-  apk add -X https://dl-cdn.alpinelinux.org/alpine/v3.19/community asn
+  apk update && apk add asn
   ```
 
 * **NixOS** *(thanks [devhell](https://github.com/devhell))*
