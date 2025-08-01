@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.6"
+ASN_VERSION="0.78.7"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -22,7 +22,16 @@ ASN_LOGFILE="$HOME/asndebug.log"
 docurl(){
 	# shellcheck disable=SC2124
 	if [ "$ASN_DEBUG" = true ]; then
-		parm="$@"
+		sed_args=()
+		[ -n "$IPINFO_TOKEN" ] && sed_args+=("-e" "s/$IPINFO_TOKEN/######/g")
+		[ -n "$IQS_TOKEN" ] && sed_args+=("-e" "s/$IQS_TOKEN/######/g")
+		[ -n "$CLOUDFLARE_TOKEN" ] && sed_args+=("-e" "s/$CLOUDFLARE_TOKEN/######/g")
+		if [ "${#sed_args[@]}" -gt 0 ]; then
+			# mask API tokens in debug output to prevent accidental exposure
+			parm=$(sed "${sed_args[@]}" <<<"$@")
+		else
+			parm="$@"
+		fi
 		DebugPrint "${yellow}curl $parm${default}"
 		curloutput=$(curl "$@")
 		echo "$curloutput"
