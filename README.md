@@ -86,7 +86,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
   * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More information [here](#shodan-scanning-recon-mode) about how to use the script as a recon tool.
 
-* It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/Datacenter or hosting provider/IXP prefix*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region identification comes from [incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
+* It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/ISP/Government/Education/Datacenter or hosting provider/IXP prefix, and more*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region and org type identification comes from [Ipapi.is](https://ipapi.is/)
 
   * It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
 
@@ -121,7 +121,7 @@ The script uses the following services for data retrieval:
 * [GreyNoise](https://greynoise.io)
 * [Shodan](https://www.shodan.io/)
 * [NIST National Vulnerability Database](https://nvd.nist.gov/)
-* [Incolumitas.com](https://incolumitas.com/pages/Datacenter-IP-API/)
+* [Ipapi.is](https://ipapi.is/)
 * [RestCountries](https://restcountries.com/)
 * Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo
 
@@ -768,7 +768,7 @@ The script will perform IP and trace hop geolocation with this logic:
 
 ##### *IP Classification*
 
-The script will use the ip-api, incolumitas.com, ipinfo.io and PeeringDB services to classify target IPs and trace hops into these categories:
+The script will use the ip-api, ipapi.is, ipinfo.io and PeeringDB services to classify target IPs and trace hops into these categories:
 
 * [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
 * Mobile network

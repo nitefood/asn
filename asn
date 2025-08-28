@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.78.7"
+ASN_VERSION="0.79.0"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -473,7 +473,12 @@ WhoisIP(){
 		if [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
 			hostname=$(RdnsLookup "$1")
 			[[ -z "$hostname" ]] && hostname="-"
-			abuse_whois_data=$(echo -e "$full_whois_data" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:")
+			abuse_whois_data=$(
+				grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:|^E-Mail|abuse" <<<"$full_whois_data" |
+				grep -v "search-apnic-not-arin@apnic.net" |
+				awk '{print $NF}' |
+				tr -d \'
+			)
 			abusecontacts=$(AbuseLookupForPrefix "$abuse_whois_data" "$1")
 		fi
 		if [ "$UNANNOUNCED_PREFIX" = false ] && [ "$GENERIC_WHOIS_LOOKUP_ONLY" = false ]; then
@@ -945,25 +950,29 @@ AbuseLookupForPrefix(){
 		# skip abuse lookup for individual trace hops in non-detailed mode
 		return
 	fi
-	whoisdata="$1"
+	abuse_whois_data="$1"
 	prefix="$2"
 	abuselist=""
-	for abusecontact in $(echo -e "$whoisdata" | grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:" | awk '{print $NF}' | tr -d \'); do
-		if ! grep -q '@' <<<"$abusecontact"; then
-			# the currently parsed abuse contact, found in whois data, is not an email (but likely a NIC handle), fall back to RIPE API
-			resolvedabuse=$(docurl -m5 -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
-			if ! grep -q '@' <<<"$resolvedabuse"; then
-				# RIPE API didn't give back an email, second and last fall back to DSHIELD API
-				dshield_abuse_contact=$(docurl -m15 -s --user-agent "nitefood/asn" https://isc.sans.edu/api/ip/$2?json | jq -r 'select (.ip.asabusecontact != null) | .ip.asabusecontact')
-				if grep -q '@' <<<"$dshield_abuse_contact"; then
-					resolvedabuse="$dshield_abuse_contact"
-				fi
+	if grep -q '@' <<<"$abuse_whois_data"; then
+		# there's at least one email among the abuse contacts found in whois data
+		for abusecontact in $(echo -e "$abuse_whois_data"); do
+			if grep -q '@' <<<"$abusecontact"; then
+				[[ -n "$abuselist" ]] && abuselist+="\n"
+				abuselist+="$abusecontact"
 			fi
-			[[ -n "$resolvedabuse" ]] && abusecontact="$resolvedabuse"
+		done
+	else
+		# abuse contacts found in whois data do not contain any email (but likely NIC handles only), fall back to RIPE API
+		resolvedabuse=$(docurl -m5 -s "https://stat.ripe.net/data/abuse-contact-finder/data.json?resource=$2&sourceapp=nitefood-asn" | jq -r 'select (.data.abuse_contacts != null) | .data.abuse_contacts[]')
+		if ! grep -q '@' <<<"$resolvedabuse"; then
+			# RIPE API didn't give back an email, second and last fall back to DSHIELD API
+			dshield_abuse_contact=$(docurl -m15 -s --user-agent "nitefood/asn" "https://isc.sans.edu/api/ip/$2?json" | jq -r 'select (.ip.asabusecontact != null) | .ip.asabusecontact')
+			if grep -q '@' <<<"$dshield_abuse_contact"; then
+				resolvedabuse="$dshield_abuse_contact"
+			fi
 		fi
-		[[ -n "$abuselist" ]] && abuselist+="\n"
-		abuselist+="$abusecontact"
-	done
+		[[ -n "$resolvedabuse" ]] && abuselist="$resolvedabuse"
+	fi
 
 	if [ "$JSON_OUTPUT" = true ]; then
 		# json output
@@ -2617,12 +2626,12 @@ IPGeoRepLookup(){
 	else
 		ip_type_json_output+=",\"is_proxy\":false"
 	fi
-	# fetch detailed DC information (incolumitas.com Datacenter IP Address API)
-	incolumitas_dcdata=$(docurl -m2 -s "https://api.incolumitas.com/datacenter?ip=$1")
-	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$incolumitas_dcdata" 2>/dev/null)
-	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$incolumitas_dcdata" 2>/dev/null)
+	# fetch detailed DC information from ipapi.is (formerly incolumitas.com Datacenter IP Address API)
+	ipapiis_data=$(docurl -m2 -s "https://api.ipapi.is?q=$1")
+	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$ipapiis_data" 2>/dev/null)
+	dcregion=$(jq -r 'select (.datacenter.region != null) | .datacenter.region' <<<"$ipapiis_data" 2>/dev/null)
 	if [ -n "$dcname" ]; then
-		# incolumitas.com has details regarding this DC
+		# ipapi.is has details regarding this DC
 		ip_type_data+=" ${yellowbg} DC ${default}${yellow} $dcname"
 		ip_type_json_output+=",\"is_dc\":true"
 		ip_type_json_output+=",\"dc_details\":{\"dc_name\":\"$dcname\""
@@ -2637,7 +2646,18 @@ IPGeoRepLookup(){
 		ip_type_data+=" ${yellowbg} Hosting/DC ${default}"
 		ip_type_json_output+=",\"is_dc\":true"
 	else
+		# not a DC IP, fetch organization type and name from ipapi.is
 		ip_type_json_output+=",\"is_dc\":false"
+		orgtype=$(jq -r 'select (.company.type != null) | .company.type' <<<"$ipapiis_data" 2>/dev/null)
+		orgname=$(jq -r 'select (.company.name != null) | .company.name' <<<"$ipapiis_data" 2>/dev/null)
+		if [ -n "$orgname" ] && [ "$pwhois_org" != "$orgname" ]; then
+			# add ipapi.is to pWhois organization name
+			pwhois_org="$pwhois_org ($orgname)"
+		fi
+		if [ -n "$orgtype" ]; then
+			ip_type_data+=" ${yellowbg} $(tr '[:lower:]' '[:upper:]' <<<"${orgtype:0:1}")${orgtype:1} ${default}"
+			ip_type_json_output+=",\"org_type\":\"$orgtype\""
+		fi
 	fi
 	# Reputation lookup (stopforumspam.org), noise classification (greynoise.io) and threat analysis (ipqualityscore.com)
 	ip_rep_data="${green}✓ NONE${default}"
@@ -4230,40 +4250,49 @@ while getopts "$optspec" optchar; do {
 		"n")
 			MTR_TRACING=false
 			ADDITIONAL_INETNUM_LOOKUP=false
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"t")
 			MTR_TRACING=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"d")
 			MTR_TRACING=true
 			DETAILED_TRACE=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"o")
 			FORCE_ORGSEARCH=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"a")
 			SUGGEST_SEARCH=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"s")
 			MTR_TRACING=false
 			RECON_MODE=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"c")
 			COUNTRY_BLOCK_MODE=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"g")
 			GEOLOCATE_ONLY_MODE=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"u")
 			BGP_UPSTREAM_MODE=true
+			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;
 		"m")
