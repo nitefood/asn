@@ -578,6 +578,12 @@ where `TARGET` can be one of the following:
 
     >*.asnrc option equivalent: `MTR_TRACING=true` (default: `true`)*
 
+* `-4`
+
+  * forces IPv4-only connectivity during traces and in server mode (only useful on dual-stack hosts)
+
+    >*.asnrc option equivalent: `FORCE_IPV4=true` (default: `false`)*
+
 * `-d`
 
   * enables detailed trace mode (more info below)
@@ -711,6 +717,7 @@ MTR_TRACING=true
 ADDITIONAL_INETNUM_LOOKUP=true
 DETAILED_TRACE=false
 MTR_ROUNDS=5
+FORCE_IPV4=false
 MAX_CONCURRENT_SHODAN_REQUESTS=10
 SHODAN_SHOW_TOP_N=5
 MONOCHROME_MODE=false

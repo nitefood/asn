@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.79.0"
+ASN_VERSION="0.80.0"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -1039,8 +1039,12 @@ TraceASPath(){
 	BoxHeader "$headermsg"
 	# check if we're trying to trace an IPv6 from an IPv4-only box
 	echo "$host_to_trace" | grep -q ':' && is_ipv6=true || is_ipv6=false
-	if [ "$is_ipv6" = true ] && [ "$HAVE_IPV6" = false ]; then
-		PrintErrorAndExit "Error: cannot trace an IPv6 from this IPv4-only host!"
+	if [ "$is_ipv6" = true ]; then
+		if [ "$FORCE_IPV4" = true ]; then
+			PrintErrorAndExit "Error: cannot trace an IPv6 when FORCE_IPV4=true (hint: check .asnrc or don't pass the -4 option)"
+		elif [ "$HAVE_IPV6" = false ]; then
+			PrintErrorAndExit "Error: cannot trace an IPv6 from this IPv4-only host!"
+		fi
 	fi
 	echo ""
 	StatusbarMessage "Collecting trace data to ${bluebg}${host_to_trace}${lightgreybg}"
@@ -3028,8 +3032,9 @@ AsnServerListener(){
 		# Handle all non-GCP cases
 		# prepare the bookmarklet URL and the appropriate notation for the server's bind address:port
 		if [ "$ASN_SRV_BINDADDR" = "0.0.0.0" ]; then
+			FORCE_IPV4=true
 			# discover our IPv4 WAN IP if we already determined we're on an IPv6-capable host but the user wants to bind to 0.0.0.0
-			[[ "$HAVE_IPV6" = true ]] && WhatIsMyIP "true"
+			[[ "$HAVE_IPV6" = true ]] && WhatIsMyIP
 			if grep -q ':' <<<"$local_wanip"; then
 				INTERNAL_ASNSERVER_ADDRESS="[$local_wanip]:$ASN_SRV_BINDPORT"
 			else
@@ -3167,8 +3172,8 @@ StatusbarMessage() { # invoke without parameters to delete the status bar messag
 }
 
 WhatIsMyIP() {
-	# if an argument was passed, force IPv4 lookup (and skip "only check once" check)
-	if [ -n "$1" ]; then
+	# if FORCE_IPV4=true, force IPv4 lookup (and skip "only check once" check)
+	if [ "$FORCE_IPV4" = true ]; then
 		local_wanip=$(docurl -m10 -s -4 "https://ifconfig.co")
 	else
 		# only lookup local WAN IP once
@@ -3432,6 +3437,7 @@ CheckPrerequisites() {
 					DebugPrint "${dim}${white}$token: ${green}✓ OK${white}"
 				fi
 			done
+			[[ "$FORCE_IPV4" = true ]] && DebugPrint "${dim}${white}Forcing IPv4-only connectivity (FORCE_IPV4=true)"
 		fi
 	fi
 	CoreutilsFixup
@@ -4131,6 +4137,7 @@ peeringdb_ipv6_dataset=""
 [[ -r "/etc/services" ]] && WELL_KNOWN_PORTS=$(cat /etc/services) || WELL_KNOWN_PORTS=""
 
 # default options (configurable via $HOME/.asnrc)
+FORCE_IPV4=false
 MTR_TRACING=true
 ADDITIONAL_INETNUM_LOOKUP=true
 DETAILED_TRACE=false
@@ -4210,7 +4217,7 @@ json_resultcount=0
 # 	in this mode, getopts sets optchar to:
 # 	'?' -> unknown option
 # 	':' -> missing mandatory parameter to the option
-optspec=":hvmljJsgn:t:d:o:a:c:u:"
+optspec=":hvmljJsg4n:t:d:o:a:c:u:"
 
 FORCE_ORGSEARCH=false
 SUGGEST_SEARCH=false
@@ -4292,6 +4299,11 @@ while getopts "$optspec" optchar; do {
 			;;
 		"u")
 			BGP_UPSTREAM_MODE=true
+			#shellcheck disable=SC2218
+			GetFullParamsFromCurrentPosition "$@"
+			;;
+		"4")
+			FORCE_IPV4=true
 			#shellcheck disable=SC2218
 			GetFullParamsFromCurrentPosition "$@"
 			;;

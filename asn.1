@@ -1,4 +1,4 @@
-.TH ASN 1 "August 2025" "0.79.0" "User Commands"
+.TH ASN 1 "August 2025" "0.80.0" "User Commands"
 .SH NAME
 asn \- ASN / RPKI validity / BGP stats / IPv4v6 / Prefix / ASPath / Organization / IP reputation lookup tool
 .SH SYNOPSIS
@@ -17,6 +17,13 @@ ASN is a tool for performing various lookup operations related to ASN (Autonomou
 Enable AS path trace to the
 .B TARGET
 (this is the default behavior)
+.TP
+\fB-4\fR
+.B (force IPv4 connectivity)
+.br
+Force the tool to only utilize the IPv4 stack when tracing the
+.B TARGET
+or when running in server mode (only useful on dual-stack hosts)
 .TP
 \fB-n\fR
 .B (no trace|no additional INETNUM lookups)
