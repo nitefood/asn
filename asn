@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.80.1"
+ASN_VERSION="0.80.1-beta"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -65,6 +65,41 @@ WhoisASN(){
 		else
 			[[ -z "$pwhois_createdate" ]] && found_createdate="N/A" || found_createdate=$(date -d "$pwhois_createdate" "+%Y-%m-%d %H:%M:%S")
 		fi
+	fi
+}
+
+IsPrefixInList(){
+	# Helper function to check if a prefix is present in a list of (parent) prefixes
+	# $1 = <prefix>
+	# $2 = <list of parent prefixes>
+
+	if [ -z "$1" ] || [ -z "$2" ]; then
+		return 1
+	fi
+
+	# this counter will keep track of whether the hostmin, hostmax, or both can be found in the list.
+	# It's needed to work around grepcidr's buggy behavior (e.g. it will say that a /19 is WITHIN a /21,
+	# if both have the same host part).
+	# This way, if both hostmin and hostmax of this prefix are in the list, we can assume the whole prefix being
+	# checked is in the list.
+	PREFIX_HOSTS_IN_LIST=0
+
+	# exclude checked prefix from the list of parents
+	local prefix parent_prefixes prefix_hostrange host
+	prefix="$1"
+	parent_prefixes=$(echo -e "$2" | grep -v "$prefix")
+	prefix_hostrange=$(ipcalc "$prefix" | grep -E "^HostMin:|^HostMax:" | awk '{print $2}')
+	while read -r host; do
+    	if echo -e "$host" | grepcidr -f <(echo -e "$parent_prefixes") &>/dev/null; then
+			((PREFIX_HOSTS_IN_LIST++))
+    	fi
+	done <<< "$prefix_hostrange"
+
+	if [ "$PREFIX_HOSTS_IN_LIST" -eq 2 ]; then
+		# both HostMin and HostMax are within one of the parent CIDRs. This prefix is encompassed in the list.
+		return 0
+	else
+		return 1
 	fi
 }
 
@@ -180,6 +215,7 @@ QueryRipestat(){
 
 	StatusbarMessage "Retrieving prefix allocations and announcements for AS$1 ($found_asname)"
 	ipv4_inetnums=""
+	ipv4_inetnums_excluding_slashtwentyfour=""
 	ipv6_inetnums=""
 	json_ipv4_other_inetnums=""
 	json_ipv6_other_inetnums=""
@@ -223,10 +259,22 @@ QueryRipestat(){
 	done
 
 	prefixcounter=0
+	cacheHits=0
 	lookedup_parents_cache=""
+	# sort ipv4_ripe_prefixes so largest networks come first,
+	# then by IP address (version sort) for stable ordering
+	ipv4_ripe_prefixes=$(echo "$ipv4_ripe_prefixes" | sort -t'/' -k2,2n -k1,1V)
+
 	for prefix in $ipv4_ripe_prefixes; do
 		((prefixcounter++))
-		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
+		cacheHitPercentage=$((cacheHits * 100 / prefixcounter))
+		[ "$cacheHitPercentage" -gt 0 ] && cacheHitPercentage="[$cacheHitPercentage% cache hits]" || cacheHitPercentage=""
+		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count $cacheHitPercentage"
+		# check if our aggregated inetnums already include this prefix
+		if IsPrefixInList "$prefix" "$ipv4_inetnums_excluding_slashtwentyfour"; then
+			((cacheHits++))
+			continue
+		fi
 		# old way (one whois lookup per prefix)
 		# parent_inetnum=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
 		# 				grep -E -m1 "^inetnum" | awk '{print $2"-"$4}' | xargs ipcalc -r 2>/dev/null | grep -v "deaggregate")
@@ -244,39 +292,77 @@ QueryRipestat(){
 			IFS= read -r -u 6 whoisoutputline
 			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
 		done
-		parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
-		if [ -n "$parent_inetnum" ]; then
-			parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum")
-			parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
-			# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
-			# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
-			if ! grep -q "$parent_inetnum" <<<"$lookedup_parents_cache"; then
-				# this parent inetnum hasn't been looked up yet
-				lookedup_parents_cache+="$parent_inetnum\n"
-				LookupASNAndRouteFromIP "$parent_inetnum"
-				if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
-					# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
-					ipv4_inetnums+="$parent_inetnum\n"
-				else
-					# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
-					ipv4_inetnums+="$prefix\n"
+		parent_inetnums=$(echo -e "$whoisoutput" | grep -E "^inetnum:" | tac) # sort parent INETNUMs list from smallest to largest
+		FOUND_VALID_PARENT_INETNUM=false
+		if [ -n "$parent_inetnums" ]; then
+			while read -r parent_inetnum; do
+				parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum")
+				parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
+				# if the parent inetnum matches the prefix, skip it and continue to the next parent
+				[[ "$parent_inetnum" = "$prefix" ]] && continue
+				if ! grep -q "$parent_inetnum" <<<"$lookedup_parents_cache"; then
+					# this parent inetnum hasn't been looked up yet
+					lookedup_parents_cache+="$parent_inetnum\n"
+					LookupASNAndRouteFromIP "$parent_inetnum"
+					# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
+					# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
+					if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
+						# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
+						FOUND_VALID_PARENT_INETNUM=true
+						ipv4_inetnums+="$parent_inetnum\n"
+						if [[ "$parent_inetnum" != *"/24"* ]]; then
+							ipv4_inetnums_excluding_slashtwentyfour+="$parent_inetnum\n"
+						fi
+					else
+						# The larger inetnum is being announced by another AS
+						# this could be a special case where a reassignment is being made, but RIPE does not have any info about it.
+						# The parent ISP may have info regarding this reassignment stored as a referral whois record elswhere.
+						# In order to do so, strip the netmask part and delegate the lookup to built-in whois referral following.
+						# Uses "network:IP-Network:" as a matcher as defined in ARIN's documentation: https://www.arin.net/resources/registry/reassignments/rwhois/
+						rwhois_parent_assignment=$(timeout 20 whois "${prefix%%/*}" | grep "network:IP-Network:" | cut -d : -f3 | tr -d '[:space:]')
+						if [ -n "$rwhois_parent_assignment" ] && [ "$rwhois_parent_assignment" != "$parent_inetnum" ]; then
+							DebugPrint "found parent from RWHOIS reassignment $rwhois_parent_assignment"
+							# add the parent to the cache and to the inetnum list
+							lookedup_parents_cache+="$rwhois_parent_assignment\n"
+							FOUND_VALID_PARENT_INETNUM=true
+							ipv4_inetnums+="$rwhois_parent_assignment\n"
+							if [[ "$rwhois_parent_assignment" != *"/24"* ]]; then
+								ipv4_inetnums_excluding_slashtwentyfour+="$rwhois_parent_assignment\n"
+							fi
+						fi
+					fi
 				fi
-			else
-				# this parent inetnum has already been looked up
-				# if it's not present in the list of ipv4_inetnums, it means it's part of a larger supernet by some other AS.
-				# therefore we only add the announced (smaller) prefix to the list
-				if ! grep -q "$parent_inetnum" <<<"$ipv4_inetnums"; then
-					ipv4_inetnums+="$prefix\n"
-				fi
-			fi
-		else
+			done <<<"$parent_inetnums"
+		fi
+
+		if [ "$FOUND_VALID_PARENT_INETNUM" = false ]; then
+			# No valid parent INETNUM was found, unable to aggregate this prefix further.
+			# Add the prefix to the list of resources for this AS
 			ipv4_inetnums+="$prefix\n"
+			if [[ "$prefix" != *"/24"* ]]; then
+				ipv4_inetnums_excluding_slashtwentyfour+="$prefix\n"
+			fi
 		fi
 	done
 	# close persistent tcp connection to RIPE whois server
 	if { true >&6; } 2<> /dev/null; then
 		echo -e "-k" >&6
 	fi
+
+	# final cleanup of aggregated INETNUMs:
+	# if any of the found prefixes overlap (e.g. 1.0.0.0/23 and 1.0.0.0/22),
+	# remove the smaller (/23) and leave only the larger (/22)
+	prefixcounter=0
+	ipv4_inetnums_count=$(echo -e "$ipv4_inetnums" | wc -l)
+	while read -r prefix; do
+		((prefixcounter++))
+		StatusbarMessage "Cleaning up aggregated INETNUM $prefixcounter/$ipv4_inetnums_count"
+		if IsPrefixInList "$prefix" "$ipv4_inetnums_excluding_slashtwentyfour"; then
+			DebugPrint "CLEANUP: removing redundant prefix: $prefix"
+			ipv4_inetnums=$(echo -e "$ipv4_inetnums" | grep -v "$prefix")
+		fi
+	done < <(echo -e "$ipv4_inetnums")
+	StatusbarMessage
 
 	if [ "$ADDITIONAL_INETNUM_LOOKUP" = true ]; then
 		# fetch further inetnums allocated to this AS from pWhois
@@ -306,6 +392,9 @@ QueryRipestat(){
 				if [ "$prefix_originator_asn" = "$1" ]; then
 					# prefix originator is same as target AS, add this prefix to the allocated IP resources for this AS
 					ipv4_inetnums+="$prefix\n"
+					if [[ "$prefix" != *"/24"* ]]; then
+						ipv4_inetnums_excluding_slashtwentyfour+="$prefix\n"
+					fi
 				elif [ "$prefix_originator_asn" = "NA" ]; then
 					# prefix not announced, add this prefix to the allocated IP resources for this AS with a "not announced" remark
 					if [ "$JSON_OUTPUT" = true ]; then
@@ -769,7 +858,12 @@ LookupASNAndRouteFromIP(){
 				found_asn=$(jq -r '.data.asns[0].asn' <<<"$output")
 				found_asname=$(jq -r '.data.asns[0].holder' <<<"$output")
 				# look up the country this ASN is located in
-				country=$(docurl -m5 -s "https://stat.ripe.net/data/rir-stats-country/data.json?resource=AS${found_asn}" | jq -r '.data.located_resources[0].location')
+				if [ -n "${ASN_TO_COUNTRY_CACHE[$found_asn]}" ]; then
+					country="${ASN_TO_COUNTRY_CACHE[$found_asn]}"
+				else
+					country=$(docurl -m5 -s "https://stat.ripe.net/data/rir-stats-country/data.json?resource=AS${found_asn}" | jq -r '.data.located_resources[0].location')
+					[[ "$country" != "null" ]] && ASN_TO_COUNTRY_CACHE[$found_asn]="$country"
+				fi
 				[[ "$country" != "null" ]] && found_asname="${found_asname}, ${country}"
 				found_route=$(jq -r '.data.resource' <<<"$output")
 				UNANNOUNCED_PREFIX=false
@@ -4156,6 +4250,7 @@ IQS_CUSTOM_SETTINGS="" # e.g. "strictness=1&allow_public_access_points=false" - 
 declare -A PEERINGDB_CACHED_DATASETS
 declare -A PEERINGDB_CACHED_IXP_DATA
 declare -A CAIDARANK_CACHED_AS_DATA
+declare -A ASN_TO_COUNTRY_CACHE
 # to build the CC->CountryName mapping cache:
 # COUNTRY_MAP_CACHE=$(docurl -m4 -s "https://restcountries.com/v3.1/all?fields=name,cca2" | jq -c 'map({(.cca2): .name.common}) | add | to_entries | sort_by(.key) | from_entries')
 COUNTRY_MAP_CACHE='{"AD":"Andorra","AE":"United Arab Emirates","AF":"Afghanistan","AG":"Antigua and Barbuda","AI":"Anguilla","AL":"Albania","AM":"Armenia","AO":"Angola",
