@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.80.0"
+ASN_VERSION="0.80.1"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -2389,7 +2389,7 @@ GetCAIDARank(){
 	fi
 	caida_asrank_text=""
 	caida_asrank=$(jq -r '.data.asn.rank' <<<"$caida_data")
-	if [ "$caida_asrank" != "null" ]; then
+	if [ -n "$caida_asrank" ] && [ "$caida_asrank" != "null" ]; then
 		caida_rir=$(jq -r '.data.asn.source' <<<"$caida_data")
 		case "${caida_rir}" in
 			"AFRINIC")
@@ -4719,6 +4719,7 @@ if [ -z "$input" ]; then
 			final_json_output+="{"
 			final_json_output+="\"asn\":\"${asn}\""
 			final_json_output+=",\"asname\":\"${target_asname//\"/\\\"}\""
+			[[ "$caida_asrank" = "N/A" ]] && caida_asrank="null"
 			final_json_output+=",\"asrank\":${caida_asrank//\"/\\\"}"
 			final_json_output+=",\"org\":\"${found_org//\"/\\\"}\""
 			final_json_output+=",\"holder\":\"${found_holder//\"/\\\"}\""
