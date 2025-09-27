@@ -815,12 +815,13 @@ PrintErrorAndExit(){
 	elif [ "$IS_ASN_CHILD" = true ]; then
 		echo -e "\n${redbg}${1}${default}\n" # get the error in the html report
 		tput sgr0
+		tput cnorm # show cursor
 	else
 		# normal output
 		echo -e "\n${redbg}${1}${default}" >&2
 		tput sgr0
+		tput cnorm # show cursor
 	fi
-	tput cnorm # show cursor
 	exit 1
 }
 
