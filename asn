@@ -4526,11 +4526,15 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 	fi
 	# calculate total number of IPs allocated to the country
 	json_country_ipv4_ip_count=0
-	cidrlist=$(echo -e "$country_ipv4_blocks" | sed -e 's/^.*\///g' | sort | uniq -c | sort -nr)
-	for cidr in $cidrlist; do
-		cidr_total_ips=$(awk '{printf "%d", (2**(32-$2) * $1)}' <<<"$cidr")
-		json_country_ipv4_ip_count=$(( json_country_ipv4_ip_count + cidr_total_ips ))
-	done
+	if [ -n "$country_ipv4_blocks" ]; then
+		cidrlist=$(echo -e "$country_ipv4_blocks" | sed -e 's/^.*\///g' | sort | uniq -c | sort -nr)
+		for cidr in $cidrlist; do
+			cidr_total_ips=$(awk '{printf "%d", (2**(32-$2) * $1)}' <<<"$cidr")
+			json_country_ipv4_ip_count=$(( json_country_ipv4_ip_count + cidr_total_ips ))
+		done
+	else
+		json_country_ipv4_ip_count=0
+	fi
 	if (( population == 0 )); then
 		ips_per_capita=0
 	else
