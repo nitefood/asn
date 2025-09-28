@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.80.1-beta"
+ASN_VERSION="0.80.2-beta"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -125,7 +125,11 @@ QueryRipestat(){
 		json_downstream_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$downstream_peers")
 		json_uncertain_peers=$(jq -c --slurp --raw-input 'split("\n") | map(select(length > 0))' <<<"$uncertain_peers")
 	else
-		RESOLVE_COUNT=8
+		if [ "$ADDITIONAL_INETNUM_LOOKUP" = true ]; then
+			RESOLVE_COUNT=8
+		else
+			RESOLVE_COUNT=0
+		fi
 		OUTPUT_PEERS_PER_LINE=4
 
 		# resolve AS names of the first n upstreams
@@ -145,7 +149,7 @@ QueryRipestat(){
 		# and add the remaining ones as AS numbers only
 		unresolved_peercount=$(( upstream_peercount - RESOLVE_COUNT ))
 		if [ "$unresolved_peercount" -ge 1 ]; then
-			resolved_upstream_peers+="and more: "
+			[[ "$ADDITIONAL_INETNUM_LOOKUP" = true ]] && resolved_upstream_peers+="and more: "
 			for peer in $(echo -e "$upstream_peers" | tail -n $unresolved_peercount ); do
 				if [ "$IS_ASN_CHILD" = true ]; then
 					resolved_upstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlgreen;\">$peer</a>${default} "
@@ -173,7 +177,7 @@ QueryRipestat(){
 		# and add the remaining ones as AS numbers only
 		unresolved_peercount=$(( downstream_peercount - RESOLVE_COUNT ))
 		if [ "$unresolved_peercount" -ge 1 ]; then
-			resolved_downstream_peers+="and more: "
+			[[ "$ADDITIONAL_INETNUM_LOOKUP" = true ]] && resolved_downstream_peers+="and more: "
 			for peer in $(echo -e "$downstream_peers" | tail -n $unresolved_peercount ); do
 				if [ "$IS_ASN_CHILD" = true ]; then
 					resolved_downstream_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlyellow;\">$peer</a>${default} "
@@ -201,7 +205,7 @@ QueryRipestat(){
 		# and add the remaining ones as AS numbers only
 		unresolved_peercount=$(( uncertain_peercount - RESOLVE_COUNT ))
 		if [ "$unresolved_peercount" -ge 1 ]; then
-			resolved_uncertain_peers+="and more: "
+			[[ "$ADDITIONAL_INETNUM_LOOKUP" = true ]] && resolved_uncertain_peers+="and more: "
 			for peer in $(echo -e "$uncertain_peers" | tail -n $unresolved_peercount ); do
 				if [ "$IS_ASN_CHILD" = true ]; then
 					resolved_uncertain_peers+="<a href=\"/asn_lookup&AS$peer\" class=\"hidden_underline\" style=\"color: $htmlwhite;\">$peer</a>${default} "
@@ -303,25 +307,37 @@ QueryRipestat(){
 				if ! grep -q "$parent_inetnum" <<<"$lookedup_parents_cache"; then
 					# this parent inetnum hasn't been looked up yet
 					lookedup_parents_cache+="$parent_inetnum\n"
-					LookupASNAndRouteFromIP "$parent_inetnum"
 					# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
 					# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
-					if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
-						# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
+					parent_prefix_overview=$(docurl -m5 -s "https://stat.ripe.net/data/prefix-overview/data.json?resource=$parent_inetnum&sourceapp=nitefood-asn")
+					parent_asn=""
+					dbgstring="[${dim}$prefix${default}] Inspecting parent inetnum ${blue}$parent_inetnum${default}: "
+					if jq -r '.data.announced' <<<"$parent_prefix_overview" | grep -q "true"; then
+						parent_asn=$(jq -r '.data.asns[0].asn' <<<"$parent_prefix_overview")
+					else
+						dbgstring+="${red}❌ not announced${default}"
+					fi
+
+					if [ "$parent_asn" = "$1" ]; then
+						# the target AS is also announcing the larger inetnum. Consider it part of the target's resources
+						dbgstring+="${green}✓ announced by same AS ${default}(${magenta}${parent_asn}${default}) ${greenbg} PARENT INCLUDED ${default}"
 						FOUND_VALID_PARENT_INETNUM=true
 						ipv4_inetnums+="$parent_inetnum\n"
 						if [[ "$parent_inetnum" != *"/24"* ]]; then
 							ipv4_inetnums_excluding_slashtwentyfour+="$parent_inetnum\n"
 						fi
 					else
-						# The larger inetnum is being announced by another AS
+						# The larger inetnum is being announced by another AS (or is not being announced at all).
 						# this could be a special case where a reassignment is being made, but RIPE does not have any info about it.
 						# The parent ISP may have info regarding this reassignment stored as a referral whois record elswhere.
 						# In order to do so, strip the netmask part and delegate the lookup to built-in whois referral following.
 						# Uses "network:IP-Network:" as a matcher as defined in ARIN's documentation: https://www.arin.net/resources/registry/reassignments/rwhois/
+						if [ -n "$parent_asn" ] && [ "$parent_asn" != "null" ]; then
+							dbgstring+="${red}❌ announced by different AS (${magenta}${parent_asn}${red})"
+						fi
 						rwhois_parent_assignment=$(timeout 20 whois "${prefix%%/*}" | grep "network:IP-Network:" | cut -d : -f3 | tr -d '[:space:]')
 						if [ -n "$rwhois_parent_assignment" ] && [ "$rwhois_parent_assignment" != "$parent_inetnum" ]; then
-							DebugPrint "found parent from RWHOIS reassignment $rwhois_parent_assignment"
+							dbgstring+="${default}, ${green}✓ found rwhois record ${rwhois_parent_assignment}${default} ${greenbg} PARENT INCLUDED ${default}"
 							# add the parent to the cache and to the inetnum list
 							lookedup_parents_cache+="$rwhois_parent_assignment\n"
 							FOUND_VALID_PARENT_INETNUM=true
@@ -329,8 +345,48 @@ QueryRipestat(){
 							if [[ "$rwhois_parent_assignment" != *"/24"* ]]; then
 								ipv4_inetnums_excluding_slashtwentyfour+="$rwhois_parent_assignment\n"
 							fi
+						else
+							dbgstring+="${default}, ${red}❌ no rwhois record found${default}"
+							# if rwhois didn't bring us any reassignment info, do a prefix consistency check as a last resort.
+							# We want to see if the parent prefix contains any routes announced by an AS that is not our target.
+							# We'll use this as a heuristic indicator that the parent inetnum is not used exclusively by the target AS
+							prefix_routing_consistency_data=$( \
+								docurl -m10 -s "https://stat.ripe.net/data/prefix-routing-consistency/data.json?resource=$parent_inetnum&sourceapp=nitefood-asn" \
+							)
+							if [ -z "$prefix_routing_consistency_data" ]; then
+								dbgstring+="${default}, ${red}❌ RIPE API timeout ${redbg} PARENT SKIPPED ${default}"
+								continue
+							fi
+							other_origins_in_parent=$(jq -r '.data.routes[].origin' <<<"$prefix_routing_consistency_data" | grep -v "$1")
+							if [ -n "$other_origins_in_parent" ]; then
+								# Parent prefix contains routes announced by other AS
+								# check if there exists an IRR entry whose origin matches our target,
+								# (even if it's not in live RIS BGP feeds).
+								# If so, assume the inetnum has been suballocated by our target AS to its customers,
+								# and include it into target's resources anyway
+								dbgstring+="${default}, ${red}❌ parent includes subnets announced by other AS"
+								exact_parent_route_match=$(jq -r '.data.routes[] | select(.prefix == "'"${parent_inetnum}"'" and .origin == '"$1"')' <<<"$prefix_routing_consistency_data")
+								if [ -n "$exact_parent_route_match" ]; then
+									dbgstring+="${default}, ${green}✓ found exact route match announced by ${magenta}AS$1${green} (probably suballocations present)${default} ${greenbg} PARENT INCLUDED ${default}"
+									FOUND_VALID_PARENT_INETNUM=true
+									ipv4_inetnums+="$parent_inetnum\n"
+									if [[ "$parent_inetnum" != *"/24"* ]]; then
+										ipv4_inetnums_excluding_slashtwentyfour+="$parent_inetnum\n"
+									fi
+								else
+									dbgstring+="${default}, ${red}❌ no exact IRR match for ${magenta}AS$1${red} found ${redbg} PARENT SKIPPED ${default}"
+								fi
+							else
+								dbgstring+="${default}, ${green}✓ parent only includes subnets announced by ${magenta}AS$1${default} ${greenbg} PARENT INCLUDED ${default}"
+								FOUND_VALID_PARENT_INETNUM=true
+								ipv4_inetnums+="$parent_inetnum\n"
+								if [[ "$parent_inetnum" != *"/24"* ]]; then
+									ipv4_inetnums_excluding_slashtwentyfour+="$parent_inetnum\n"
+								fi
+							fi
 						fi
 					fi
+					DebugPrint "$dbgstring"
 				fi
 			done <<<"$parent_inetnums"
 		fi
@@ -2483,7 +2539,7 @@ GetCAIDARank(){
 	fi
 	caida_asrank_text=""
 	caida_asrank=$(jq -r '.data.asn.rank' <<<"$caida_data")
-	if [ "$caida_asrank" != "null" ]; then
+	if [ -n "$caida_asrank" ] && [ "$caida_asrank" != "null" ]; then
 		caida_rir=$(jq -r '.data.asn.source' <<<"$caida_data")
 		case "${caida_rir}" in
 			"AFRINIC")
@@ -4814,6 +4870,7 @@ if [ -z "$input" ]; then
 			final_json_output+="{"
 			final_json_output+="\"asn\":\"${asn}\""
 			final_json_output+=",\"asname\":\"${target_asname//\"/\\\"}\""
+			[[ "$caida_asrank" = "N/A" ]] && caida_asrank="null"
 			final_json_output+=",\"asrank\":${caida_asrank//\"/\\\"}"
 			final_json_output+=",\"org\":\"${found_org//\"/\\\"}\""
 			final_json_output+=",\"holder\":\"${found_holder//\"/\\\"}\""
