@@ -4531,7 +4531,11 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 		cidr_total_ips=$(awk '{printf "%d", (2**(32-$2) * $1)}' <<<"$cidr")
 		json_country_ipv4_ip_count=$(( json_country_ipv4_ip_count + cidr_total_ips ))
 	done
-	ips_per_capita=$(awk "BEGIN {printf \"%.2g\", $json_country_ipv4_ip_count/$population}")
+	if (( population == 0 )); then
+		ips_per_capita=0
+	else
+		ips_per_capita=$(awk "BEGIN {printf \"%.2g\", $json_country_ipv4_ip_count/$population}")
+	fi
 	country_ipv4_ip_count=$(printf "%'d" "$json_country_ipv4_ip_count")
 	population=$(printf "%'d" "$population")
 	if [ "$JSON_OUTPUT" = true ]; then
