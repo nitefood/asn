@@ -472,7 +472,7 @@ In order to do so, you can use the following command:
 
 ***User mode:***
 
-`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/ipinfo_token" && chmod -R 600 "$HOME/.asn/"`
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/ipinfo_token" && chmod -R 600 "$HOME/.asn/*"`
 
 ***Server mode:***
 
@@ -501,7 +501,7 @@ In order to do so, you can use the following command:
 
 ***User mode:***
 
-`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/iqs_token" && chmod -R 600 "$HOME/.asn/"`
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/iqs_token" && chmod -R 600 "$HOME/.asn/*"`
 
 ***Server mode:***
 
@@ -542,7 +542,7 @@ In order to do so, you can use the following command:
 
 ***User mode:***
 
-`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/cloudflare_token" && chmod -R 600 "$HOME/.asn/"`
+`TOKEN="<your_token_here>"; mkdir "$HOME/.asn/" && echo "$TOKEN" > "$HOME/.asn/cloudflare_token" && chmod -R 600 "$HOME/.asn/*"`
 
 ***Server mode:***
 
