@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.80.2"
+ASN_VERSION="0.80.3"
 ASN_LOGFILE="$HOME/asndebug.log"
 
 # ╭──────────────────╮
@@ -474,7 +474,7 @@ WhoisIP(){
 			hostname=$(RdnsLookup "$1")
 			[[ -z "$hostname" ]] && hostname="-"
 			abuse_whois_data=$(
-				grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:|^E-Mail|abuse" <<<"$full_whois_data" |
+				grep -E "^OrgAbuseEmail:|^abuse-c:|^% Abuse|^abuse-mailbox:|^E-Mail" <<<"$full_whois_data" |
 				grep -v "search-apnic-not-arin@apnic.net" |
 				awk '{print $NF}' |
 				tr -d \'
@@ -4775,10 +4775,9 @@ if [ -z "$input" ]; then
 			if [ "$IS_ASN_CHILD" = true ]; then
 				ripestat_link="<a href=\"https://stat.ripe.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">RIPEStat</a>"
 				he_link="<a href=\"https://bgp.he.net/AS$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">HE.NET</a>"
-				bgpview_link="<a href=\"https://bgpview.io/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPView</a>"
 				bgptools_link="<a href=\"https://bgp.tools/as/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">BGPTools</a>"
 				peeringdb_link="<a href=\"https://www.peeringdb.com/asn/$asn\" target=\"_blank\" style=\"color: $htmlred; font-style: italic;\">PeeringDB</a>"
-				echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgpview_link🔗 • $bgptools_link🔗 • $peeringdb_link🔗)</span>"
+				echo -en " <span style=\"font-size: 75%; color: $htmlred;\">($ripestat_link🔗 • $he_link🔗 • $bgptools_link🔗 • $peeringdb_link🔗)</span>"
 			fi
 			echo ""
 			echo -en "${bluebg} AS Name       ──>${default} ${green}${target_asname}"

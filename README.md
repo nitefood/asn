@@ -128,7 +128,6 @@ The script uses the following services for data retrieval:
 It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode) to the following external services when appropriate:
 
 * [HE.net](https://bgp.he.net)
-* [BGPView](https://bgpview.io)
 * [BGPTools](https://bgp.tools)
 * [ipinfo.io](https://ipinfo.io)
 * [Host.io](https://host.io)
