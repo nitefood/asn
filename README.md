@@ -78,7 +78,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 * It will perform **IP geolocation** lookups according to the logic described [below](#geolocation).
 
   * geolocation can be performed in **bulk mode**. See [here](#bulk-geolocation-mode) for more info.
-  * the script can also **map all IPv4/IPv6 CIDR blocks** allocated to any given country, by querying data from Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo. See [below](#mapping-the-ipv4v6-address-space-of-specific-countries) for more info.
+  * the script can also **map all IPv4/IPv6 CIDR blocks** allocated to any given country, by querying data from Marcel Bischoff's [country-ip-blocks](https://herrbischoff.com/code/me/country-ip-blocks) repo. See [below](#mapping-the-ipv4v6-address-space-of-specific-countries) for more info.
 
 * It will perform **IP reputation, noise classification** and in-depth **threat analysis** reporting (especially useful when investigating foreign IPs from log files).
 
@@ -123,7 +123,7 @@ The script uses the following services for data retrieval:
 * [NIST National Vulnerability Database](https://nvd.nist.gov/)
 * [Ipapi.is](https://ipapi.is/)
 * [RestCountries](https://restcountries.com/)
-* Marcel Bischoff's [country-ip-blocks](https://github.com/herrbischoff/country-ip-blocks) repo
+* Marcel Bischoff's [country-ip-blocks](https://herrbischoff.com/code/me/country-ip-blocks) repo
 
 It also provides hyperlinks (in [server](#running-lookups-from-the-browser) mode) to the following external services when appropriate:
 
