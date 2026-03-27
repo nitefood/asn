@@ -12,8 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.80.4"
-ASN_LOGFILE="$HOME/asndebug.log"
+ASN_VERSION="0.80.5"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -3433,12 +3432,14 @@ CheckPrerequisites() {
 			echo ""
 			for token in "IQS_TOKEN" "IPINFO_TOKEN" "CLOUDFLARE_TOKEN"; do
 				if [ -z "${!token}" ]; then
-					DebugPrint "${dim}${white}$token: ${red}❌ NOT FOUND${white}"
+					DebugPrint "${dim}${white}$token: ${red}❌ NOT FOUND${default}"
 				else
-					DebugPrint "${dim}${white}$token: ${green}✓ OK${white}"
+					DebugPrint "${dim}${white}$token: ${green}✓ OK${default}"
 				fi
 			done
-			[[ "$FORCE_IPV4" = true ]] && DebugPrint "${dim}${white}Forcing IPv4-only connectivity (FORCE_IPV4=true)"
+			[[ "$RUNNING_IN_DOCKER" = true ]] && dockerflag="${green}✓ YES${default}" || dockerflag="${red}❌ NO${default}"
+			DebugPrint "${dim}${white}Running in Docker: $dockerflag"
+			[[ "$FORCE_IPV4" = true ]] && DebugPrint "${dim}${white}Forcing IPv4-only connectivity (FORCE_IPV4=true)${default}"
 		fi
 	fi
 	CoreutilsFixup
@@ -4087,6 +4088,12 @@ htmldarkgreen="#058505"
 htmlmagenta="#ff5fff"
 
 [[ "$TERM" = "dumb" ]] && IS_HEADLESS=true || IS_HEADLESS=false
+# Determine if we're in a Docker container by checking if a /.dockerenv file exists (cheers https://unix.stackexchange.com/a/718920)
+if [ -f "/.dockerenv" ]; then
+	RUNNING_IN_DOCKER=true
+else
+	RUNNING_IN_DOCKER=false
+fi
 
 ipv4v6regex='[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}|(([0-9a-fA-F]{1,4}:){7,7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|'\
 '([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|'\
@@ -4138,6 +4145,7 @@ peeringdb_ipv6_dataset=""
 [[ -r "/etc/services" ]] && WELL_KNOWN_PORTS=$(cat /etc/services) || WELL_KNOWN_PORTS=""
 
 # default options (configurable via $HOME/.asnrc)
+[[ "$RUNNING_IN_DOCKER" = true ]] && ASN_LOGFILE="/dev/null" || ASN_LOGFILE="$HOME/asndebug.log"
 FORCE_IPV4=false
 MTR_TRACING=true
 ADDITIONAL_INETNUM_LOOKUP=true
@@ -4376,7 +4384,7 @@ while getopts "$optspec" optchar; do {
 			;;
 		"v")
 			ASN_DEBUG=true
-			rm -f "$ASN_LOGFILE" 2>/dev/null
+			[[ "$RUNNING_IN_DOCKER" = false ]] && rm -f "$ASN_LOGFILE" 2>/dev/null
 			;;
 		*)
 			if [ "$OPTERR" = 1 ] && [ -t 0 ]; then

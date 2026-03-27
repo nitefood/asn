@@ -1,8 +1,4 @@
-FROM alpine:3.20.2
-
-ENV IQS_TOKEN=""
-ENV IPINFO_TOKEN=""
-ENV CLOUDFLARE_TOKEN=""
+FROM alpine:3.23.3
 
 # - Prepare the config directory
 # - Create the entrypoint script that writes the API tokens to the config files
