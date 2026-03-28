@@ -18,6 +18,13 @@ ASN_VERSION="0.80.5"
 # │ Helper functions │
 # ╰──────────────────╯
 
+# Global connectivity check for Port 43 (WHOIS)
+if timeout 1 bash -c 'cat < /dev/null > /dev/tcp/whois.ripe.net/43' >/dev/null 2>&1; then
+	PORT43_ENABLED=true
+else
+	PORT43_ENABLED=false
+fi
+
 docurl(){
 	# shellcheck disable=SC2124
 	if [ "$ASN_DEBUG" = true ]; then
@@ -182,99 +189,88 @@ QueryRipestat(){
 	ipv6_inetnums=""
 	json_ipv4_other_inetnums=""
 	json_ipv6_other_inetnums=""
-	ripe_prefixes=$(docurl -m10 -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=$1&sourceapp=nitefood-asn" | jq -r '.data.prefixes[].prefix')
-	json_ripe_prefixes=$(jq -cM --slurp --raw-input 'split("\n") | map(select(length > 0)) | {v4:map(select(contains(":")|not)), v6:map(select(contains(":")))}' <<<"$ripe_prefixes")
-	ipv4_ripe_prefixes=$(grep -v ":" <<<"$ripe_prefixes" | grep -Ev "^$" | sort)
-	ipv4_ripe_prefixes_count=$(wc -l <<<"$ipv4_ripe_prefixes")
-	ipv6_ripe_prefixes=$(grep ":" <<<"$ripe_prefixes" | grep -Ev "^$" | sort)
-	ipv6_ripe_prefixes_count=$(wc -l <<<"$ipv6_ripe_prefixes")
 
-	# open persistent tcp connection to RIPE whois server
-	exec 6<>/dev/tcp/whois.ripe.net/43
+	# High Performance Bulk Retrieval (Bypass port 43 timeouts)
+	ripe_data=$(docurl -m15 -s "https://stat.ripe.net/data/announced-prefixes/data.json?resource=AS$1&sourceapp=nitefood-asn")
+	ipv4_ripe_prefixes=$(jq -r '.data.prefixes[] | select(.prefix | contains(":") | not) | .prefix' <<<"$ripe_data" | sort -u)
+	ipv6_ripe_prefixes=$(jq -r '.data.prefixes[] | select(.prefix | contains(":")) | .prefix' <<<"$ripe_data" | sort -u)
+	ipv4_ripe_prefixes_count=$(echo "$ipv4_ripe_prefixes" | grep -c "/")
+	ipv6_ripe_prefixes_count=$(echo "$ipv6_ripe_prefixes" | grep -c ":")
 
-	prefixcounter=0
-	for prefix in $ipv6_ripe_prefixes; do
-		((prefixcounter++))
-		StatusbarMessage "Retrieving information for IPv6 prefix $prefixcounter/$ipv6_ripe_prefixes_count"
-		# old way (one whois lookup per prefix)
-		# inet6nums=$(whois -h whois.ripe.net -- "-T inet6num -K -L --resource $prefix" | \
-		#				grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
-		# new way (direct tcp connection to whois server with persistent whois connection)
-		echo -e "-k -T inet6num -K -L --resource $prefix" >&6
-		whoisoutput=""
-		# read whois output from the tcp stream line by line
-		while IFS= read -r -u 6 whoisoutputline; do
-			if [ -n "$whoisoutputline" ]; then
-				whoisoutput+="$whoisoutputline\n"
-				continue
-			fi
-			# last line was empty, check if next line is empty too
-			# if we get two empty lines in a row, the whois output is finished
-			IFS= read -r -u 6 whoisoutputline
-			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
-		done
-		inet6nums=$(echo -e "$whoisoutput" | grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
-		for inet6num in $inet6nums; do
-			# exclude RIR supernets
-			prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
-			[[ "$prefix_size" -le 12 ]] && continue || ipv6_inetnums+="${inet6num}\n"
-		done
-	done
+	# High Performance Retrieval: Bypass all sequential loops if Port 43 is blocked
+	if [ "$PORT43_ENABLED" = false ]; then
+		ipv4_inetnums=$(echo -e "$ipv4_ripe_prefixes")
+		ipv6_inetnums=$(echo -e "$ipv6_ripe_prefixes")
+		PERSISTENT_WHOIS=false
+	else
+		# Port 43 is ENABLED: Original sequential/persistent WHOIS logic
+		if exec 6<>/dev/tcp/whois.ripe.net/43 2>/dev/null; then
+			PERSISTENT_WHOIS=true
+		else
+			PERSISTENT_WHOIS=false
+		fi
 
-	prefixcounter=0
-	lookedup_parents_cache=""
-	for prefix in $ipv4_ripe_prefixes; do
-		((prefixcounter++))
-		StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
-		# old way (one whois lookup per prefix)
-		# parent_inetnum=$(whois -h whois.ripe.net -- "-T inetnum -K -L --resource  $prefix" | \
-		# 				grep -E -m1 "^inetnum" | awk '{print $2"-"$4}' | xargs ipcalc -r 2>/dev/null | grep -v "deaggregate")
-		# new way (direct tcp connection to whois server with persistent whois connection)
-		echo -e "-k -T inetnum -K -L --resource $prefix" >&6
-		whoisoutput=""
-		# read whois output from the tcp stream line by line
-		while IFS= read -r -u 6 whoisoutputline; do
-			if [ -n "$whoisoutputline" ]; then
-				whoisoutput+="$whoisoutputline\n"
-				continue
-			fi
-			# last line was empty, check if next line is empty too
-			# if we get two empty lines in a row, the whois output is finished
-			IFS= read -r -u 6 whoisoutputline
-			[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
+		prefixcounter=0
+		for prefix in $ipv6_ripe_prefixes; do
+			((prefixcounter++))
+			StatusbarMessage "Retrieving information for IPv6 prefix $prefixcounter/$ipv6_ripe_prefixes_count"
+			echo -e "-k -T inet6num -K -L --resource $prefix" >&6
+			whoisoutput=""
+			while IFS= read -r -u 6 whoisoutputline; do
+				if [ -n "$whoisoutputline" ]; then
+					whoisoutput+="$whoisoutputline\n"
+					continue
+				fi
+				IFS= read -r -u 6 whoisoutputline
+				[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
+			done
+			inet6nums=$(echo -e "$whoisoutput" | grep -m2 inet6num | cut -d ':' -f 2- | sed 's/^[ \t]*//')
+			for inet6num in $inet6nums; do
+				prefix_size=$(echo "$inet6num" | cut -d '/' -f 2)
+				[[ "$prefix_size" -le 12 ]] && continue || ipv6_inetnums+="${inet6num}\n"
+			done
 		done
-		parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
-		if [ -n "$parent_inetnum" ]; then
-			parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum")
-			parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
-			# check if the inetnum containing this prefix is being announced by the same AS as the prefix itself, otherwise
-			# it means it's part of a larger supernet by some other AS (e.g. larger carrier allocating own prefix to smaller customer)
-			if ! grep -q "$parent_inetnum" <<<"$lookedup_parents_cache"; then
-				# this parent inetnum hasn't been looked up yet
-				lookedup_parents_cache+="$parent_inetnum\n"
-				LookupASNAndRouteFromIP "$parent_inetnum"
-				if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
-					# the target AS is also announcing the larger inetnum, or nobody is announcing it. Either way consider it part of the target's resources
-					ipv4_inetnums+="$parent_inetnum\n"
+
+		prefixcounter=0
+		lookedup_parents_cache=""
+		for prefix in $ipv4_ripe_prefixes; do
+			((prefixcounter++))
+			StatusbarMessage "Retrieving information for IPv4 prefix $prefixcounter/$ipv4_ripe_prefixes_count"
+			echo -e "-k -T inetnum -K -L --resource $prefix" >&6
+			whoisoutput=""
+			while IFS= read -r -u 6 whoisoutputline; do
+				if [ -n "$whoisoutputline" ]; then
+					whoisoutput+="$whoisoutputline\n"
+					continue
+				fi
+				IFS= read -r -u 6 whoisoutputline
+				[[ -z "$whoisoutputline" ]] && break || whoisoutput+="$whoisoutputline\n"
+			done
+			parent_inetnum=$(echo -e "$whoisoutput" | grep -E -m1 "^inetnum")
+			if [ -n "$parent_inetnum" ]; then
+				parent_inetnum=$(awk '{print $2"-"$4}' <<<"$parent_inetnum")
+				parent_inetnum=$(IpcalcDeaggregate "$parent_inetnum")
+				if ! grep -q "$parent_inetnum" <<<"$lookedup_parents_cache"; then
+					lookedup_parents_cache+="$parent_inetnum\n"
+					LookupASNAndRouteFromIP "$parent_inetnum"
+					if [ -z "$found_asname" ] || [ "$1" = "$found_asn" ]; then
+						ipv4_inetnums+="$parent_inetnum\n"
+					else
+						ipv4_inetnums+="$prefix\n"
+					fi
 				else
-					# the larger inetnum is being announced by another AS, only add the announced (smaller) prefix to the list
-					ipv4_inetnums+="$prefix\n"
+					if ! grep -q "$parent_inetnum" <<<"$ipv4_inetnums"; then ipv4_inetnums+="$prefix\n"; fi
 				fi
 			else
-				# this parent inetnum has already been looked up
-				# if it's not present in the list of ipv4_inetnums, it means it's part of a larger supernet by some other AS.
-				# therefore we only add the announced (smaller) prefix to the list
-				if ! grep -q "$parent_inetnum" <<<"$ipv4_inetnums"; then
-					ipv4_inetnums+="$prefix\n"
-				fi
+				ipv4_inetnums+="$prefix\n"
 			fi
-		else
-			ipv4_inetnums+="$prefix\n"
+		done
+		
+		if [ "$PERSISTENT_WHOIS" = true ]; then
+			if { true >&6; } 2<> /dev/null; then
+				echo -e "-k" >&6
+			fi
 		fi
-	done
-	# close persistent tcp connection to RIPE whois server
-	if { true >&6; } 2<> /dev/null; then
-		echo -e "-k" >&6
 	fi
 
 	if [ "$ADDITIONAL_INETNUM_LOOKUP" = true ]; then
@@ -299,7 +295,8 @@ QueryRipestat(){
 			done
 			teamcymru_bulk_query+="end"
 			prefixcounter=0
-			for single_prefix_data in $(echo -e "$teamcymru_bulk_query" | ncat --no-shutdown whois.cymru.com 43 | grep "|" | sed 's/\ *|\ */|/g'); do
+			if [ "$PORT43_ENABLED" = true ]; then teamcymru_output=$(echo -e "$teamcymru_bulk_query" | ncat --no-shutdown whois.cymru.com 43 | grep "|" | sed 's/\ *|\ */|/g'); else teamcymru_output=""; fi
+			for single_prefix_data in $teamcymru_output; do
 				prefix="${pwhois_unique_prefixes_array[$prefixcounter]}"
 				prefix_originator_asn=$(echo "$single_prefix_data" | cut -d '|' -f 1)
 				if [ "$prefix_originator_asn" = "$1" ]; then
@@ -365,7 +362,9 @@ QueryRipestat(){
 	fi
 
 	if [ -n "$ipv4_inetnums" ]; then
-		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | sort -iu)
+		# Clean and sort resources (Maintain accuracy, do not aggregate)
+		ipv4_inetnums=$(echo -e "$ipv4_inetnums" | grep -Eo "([0-9]{1,3}\.){3}[0-9]{1,3}/[0-9]{1,2}" | sort -V | uniq)
+
 		if [ "$IS_ASN_CHILD" = true ] && [ "$JSON_OUTPUT" = false ]; then
 			# HTML output
 			html=""
