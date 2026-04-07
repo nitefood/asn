@@ -12,7 +12,7 @@
 # │ (Launch the script without parameters or visit the project's homepage for usage info)│
 # ╰──────────────────────────────────────────────────────────────────────────────────────╯
 
-ASN_VERSION="0.80.5"
+ASN_VERSION="0.81.0"
 
 # ╭──────────────────╮
 # │ Helper functions │
@@ -4520,15 +4520,15 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 	[[ -z "$cc" ]] && PrintErrorAndExit "No country matching '$userinput' found"
 	countryname=$(jq -r '.[].name.common' <<<"$restcountries_output")
 	population=$(jq -r '.[].population' <<<"$restcountries_output")
-	country_ipv4_blocks=$(docurl -m10 -s "https://herrbischoff.com/code/me/country-ip-blocks/raw/branch/master/ipv4/$cc.cidr")
-	country_ipv6_blocks=$(docurl -m10 -s "https://herrbischoff.com/code/me/country-ip-blocks/raw/branch/master/ipv6/$cc.cidr")
+	country_ipv4_blocks=$(docurl -m10 -s "https://www.ipdeny.com/ipblocks/data/countries/$cc.zone")
+	country_ipv6_blocks=$(docurl -m10 -s "https://www.ipdeny.com/ipv6/ipaddresses/blocks/$cc.zone")
 	country_ipv4_blocks_count=$(wc -l <<<"$country_ipv4_blocks")
 	country_ipv6_blocks_count=$(wc -l <<<"$country_ipv6_blocks")
-	if [ "$country_ipv4_blocks" = "404: Not Found" ]; then
+	if grep -iq "not found" <<<"$country_ipv4_blocks"; then
 		country_ipv4_blocks=""
 		country_ipv4_blocks_count=0
 	fi
-	if [ "$country_ipv6_blocks" = "404: Not Found" ]; then
+	if grep -iq "not found" <<<"$country_ipv6_blocks"; then
 		country_ipv6_blocks=""
 		country_ipv6_blocks_count=0
 	fi
@@ -4577,7 +4577,15 @@ if [ "$COUNTRY_BLOCK_MODE" = true ]; then
 			cidrcount=$(awk '{print $1}' <<<"$cidr")
 			cidrsize=$(awk '{print $2}' <<<"$cidr")
 			[[ "$cidrcount" = "1" ]] && s="" || s="s"
-			printf "%10s x ${magenta}/%s${default} %s\n" "$cidrcount" "$cidrsize" "block$s"
+			printf "%10s × ${magenta}/%s${default} %s\n" "$cidrcount" "$cidrsize" "block$s"
+		done
+		BoxHeader "CIDR distribution (IPv6)"
+		cidrlist_v6=$(echo -e "$country_ipv6_blocks" | sed -e 's/^.*\///g' | sort | uniq -c | sort -nr)
+		for cidr in $cidrlist_v6; do
+			cidrcount=$(awk '{print $1}' <<<"$cidr")
+			cidrsize=$(awk '{print $2}' <<<"$cidr")
+			[[ "$cidrcount" = "1" ]] && s="" || s="s"
+			printf "%10s × ${magenta}/%s${default} %s\n" "$cidrcount" "$cidrsize" "block$s"
 		done
 		echo ""
 	fi
