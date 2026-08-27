@@ -2383,7 +2383,7 @@ GetCAIDARank(){
 	if [ -n "${CAIDARANK_CACHED_AS_DATA[$asn]}" ]; then
 		caida_data="${CAIDARANK_CACHED_AS_DATA[$asn]}"
 	else
-		caida_data=$(docurl -m10 -s "https://api.asrank.caida.org/dev/restful/asns/${asn}")
+		caida_data=$(docurl -m10 -s "https://api.asrank.caida.org/v2/restful/asns/${asn}")
 		# store the rank in the CAIDARANK_CACHED_AS_DATA array
 		CAIDARANK_CACHED_AS_DATA[$asn]="$caida_data"
 	fi
