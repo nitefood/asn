@@ -1,6 +1,6 @@
 # ASN Lookup Tool and Traceroute Server
 
-[![Packaging status](https://repology.amdmi3.ru/badge/vertical-allrepos/asn.svg)](https://repology.amdmi3.ru/project/asn/versions)
+[![Packaging status](https://repology.org/badge/vertical-allrepos/asn.svg)](https://repology.org/project/asn/versions)
 
 #### Container support:
 
@@ -368,7 +368,7 @@ Afterwards, to install the **asn** script from your shell to **/usr/bin**:
 
 ### Method 2: Installing a packaged version of the script
 
-> *Note: packages may not reflect the latest version, check [Repology](https://repology.amdmi3.ru/project/asn/versions) first.*
+> *Note: packages may not reflect the latest version, check [Repology](https://repology.org/project/asn/versions) first.*
 
 Packaged versions of the tool are available for the following distributions:
 
