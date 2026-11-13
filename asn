@@ -2630,6 +2630,21 @@ IPGeoRepLookup(){
 	else
 		ip_type_json_output+=",\"is_proxy\":false"
 	fi
+	# VPN, TOR and privacy relay (e.g. iCloud Private Relay) identification from VPNDetection (free, no API key)
+	vpndetection_data=$(docurl -m2 -s "https://api.vpndetection.io/$1")
+	if jq -e '.ip' <<<"$vpndetection_data" &>/dev/null; then
+		vpnd_vpn=$(jq -r '.is_vpn == true' <<<"$vpndetection_data")
+		vpnd_tor=$(jq -r '.is_tor == true' <<<"$vpndetection_data")
+		vpnd_relay=$(jq -r '.is_relay == true' <<<"$vpndetection_data")
+		[[ "$vpnd_vpn" = true ]] && ip_type_data+=" ${yellowbg} VPN ${default}"
+		[[ "$vpnd_tor" = true ]] && ip_type_data+=" ${yellowbg} TOR node ${default}"
+		if [ "$vpnd_relay" = true ]; then
+			ip_type_data+=" ${yellowbg} Privacy relay ${default}"
+			vpnd_relay_provider=$(jq -r '.relay.provider // empty' <<<"$vpndetection_data" | tr '_' ' ')
+			[[ -n "$vpnd_relay_provider" ]] && ip_type_data+="${yellow} ${vpnd_relay_provider}${default}"
+		fi
+		ip_type_json_output+=",\"is_vpn\":$vpnd_vpn,\"is_tor\":$vpnd_tor,\"is_relay\":$vpnd_relay"
+	fi
 	# fetch detailed DC information from ipapi.is (formerly incolumitas.com Datacenter IP Address API)
 	ipapiis_data=$(docurl -m2 -s "https://api.ipapi.is?q=$1")
 	dcname=$(jq -r 'select (.datacenter.datacenter != null) | .datacenter.datacenter' <<<"$ipapiis_data" 2>/dev/null)
