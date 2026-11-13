@@ -86,7 +86,7 @@ Furthermore, it can serve as a self-hosted lookup **API endpoint** and output JS
 
   * Directly querying Shodan for any type of targets (including CIDR blocks) is also possible. More information [here](#shodan-scanning-recon-mode) about how to use the script as a recon tool.
 
-* It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/ISP/Government/Education/Datacenter or hosting provider/IXP prefix, and more*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region and org type identification comes from [Ipapi.is](https://ipapi.is/)
+* It will perform **IP type identification** (*Anycast IP/Mobile network/Proxy host/ISP/Government/Education/Datacenter or hosting provider/IXP prefix, and more*) for target IPs and individual trace hops. Broad type classification comes from [ip-api](https://ip-api.com), while detailed DC+region and org type identification comes from [Ipapi.is](https://ipapi.is/), and VPN, TOR node and privacy relay identification from [VPNDetection](https://vpndetection.io/)
 
   * It will also identify **bogon** addresses being traversed and classify them according to the relevant RFC (Private address space/CGN space/Test address/link-local/reserved/etc.)
 
@@ -123,6 +123,7 @@ The script uses the following services for data retrieval:
 * [Shodan](https://www.shodan.io/)
 * [NIST National Vulnerability Database](https://nvd.nist.gov/)
 * [Ipapi.is](https://ipapi.is/)
+* [VPNDetection](https://vpndetection.io/)
 * [Countries.dev](https://countries.dev/)
 * [IPdeny](https://www.ipdeny.com/)
 
@@ -775,11 +776,12 @@ The script will perform IP and trace hop geolocation with this logic:
 
 ##### *IP Classification*
 
-The script will use the ip-api, ipapi.is, ipinfo.io and PeeringDB services to classify target IPs and trace hops into these categories:
+The script will use the ip-api, ipapi.is, VPNDetection, ipinfo.io and PeeringDB services to classify target IPs and trace hops into these categories:
 
 * [Anycast](https://en.wikipedia.org/wiki/Anycast) IP
 * Mobile network
 * Proxy host (TOR exit node/VPN/etc)
+* VPN, TOR node and privacy relay (e.g. iCloud Private Relay)
 * Hosting network (datacenter/hosting provider/etc) along with detailed DC and region identification where available
 * IXP network
 
